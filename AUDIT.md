@@ -1,54 +1,140 @@
 # Negative Space — Technical Audit
 
-Rewritten at v3.0.36, updated through v3.0.38. See CHANGELOG.md for the full
+Rewritten at v3.0.36, updated through v3.0.42; architecture section updated
+for v3.1.0's neighborhood switcher. See CHANGELOG.md for the full
 version-by-version history; this file is architecture + current state +
-open items + working methodology.
+open items + working methodology -- the technical doc for whoever's
+editing the code. For a plain-language feature walkthrough and the
+"how to add a neighborhood" workflow, see EXTENDED.md instead (added
+v3.1.3, alongside a short README.md and an in-app help modal).
 
 ## What this is
 
 A single-file (`index.html`) Three.js app that computes and displays the
-**negative space** of real Hudson Yards buildings: take a bounding "mold"
-volume the size of the whole site (footprint × tallest building height),
-subtract every real building solid from it via CSG, and what's left is a
-solid representation of the *void* — the shape of the air around and above
-every building, capped by the mold's own outer boundary. Real Overture Maps
-building/building_part footprint + height data for 497 Hudson Yards
-buildings, embedded directly in the page (no server, works from `file://`
-or a static host).
+**negative space** of real buildings for a chosen NYC neighborhood: take a
+bounding "mold" volume the size of the whole site (footprint × tallest
+building height), subtract every real building solid from it via CSG, and
+what's left is a solid representation of the *void* — the shape of the air
+around and above every building, capped by the mold's own outer boundary.
+Real Overture Maps building/building_part footprint + height data, one
+neighborhood active at a time, switchable via the sidebar's Neighborhood
+picker. As of v3.1.0: **Hudson Yards** (497 buildings, the original site)
+and **Chelsea** (1,226 buildings, added as a proof-of-concept that the
+whole pipeline scales past a single site).
 
 Live at `axisbim.io` (Joe's own domain); developed against
-`http://localhost:8888` (a local static server) because `file://` blocks
-`fetch()` of local assets — all real data is embedded as
-`<script type="application/json">` blocks specifically to route around
-that restriction, so it still works standalone if someone double-clicks
-the file.
+`http://localhost:8888` (a local static server). **As of v3.1.0, `file://`
+no longer works at all** — this is a real regression from earlier versions,
+a deliberate tradeoff for neighborhood switching. Data now lives in
+per-neighborhood files (`data/<id>/buildings.geojson`,
+`data/<id>/building_parts.geojson`, and — as of v3.1.1 —
+`data/<id>/streets.json`), fetched live by `loadData()` rather than
+embedded in the page — embedding was the whole reason `file://` used
+to work (v1.0.1 routed around Chrome's file:// fetch() block by inlining
+the GeoJSON as `<script type="application/json">` tags), but embedding
+doesn't scale to N neighborhoods without the HTML file ballooning every
+time one is added. Must be served over http(s) now, same requirement
+Manifold's wasm-from-unpkg already had. As of v3.1.1: **Hudson Yards**
+(497 buildings), **Chelsea** (1,226 buildings), and **Hell's Kitchen**
+(438 buildings, core bbox W44th–W50th St between 9th–10th Ave).
 
 ## Data pipeline
 
-1. **Buildings**: Overture Maps `building` + `building_part` footprints
-   (embedded GeoJSON, `#buildingsData` / `#buildingPartsData` script tags).
-   Each footprint is extruded to its real height. 497 buildings, 254 with
-   real per-part massing from Overture's own building_part data, 243
-   falling back to a flat single-height extrusion where part data isn't
-   available.
+1. **Buildings**: Overture Maps `building` + `building_part` footprints,
+   fetched live (not embedded, as of v3.1.0) from
+   `data/<neighborhoodId>/buildings.geojson` and
+   `data/<neighborhoodId>/building_parts.geojson`. Each footprint is
+   extruded to its real height. Adding a neighborhood means fetching its
+   data (Overture PMTiles + vector-tile decode, see the Chelsea
+   proof-of-concept in CHANGELOG v3.1.0 for the exact method and a real
+   gotcha — see "Winding order" below), winding-correcting it, measuring
+   its own real grid tilt, dropping the two files in a new `data/<id>/`
+   folder, and adding one entry to the `NEIGHBORHOODS` config array —
+   deliberately NOT a live search-any-area system (see "Neighborhood
+   switching" below for why).
 2. **Manhattan borough outline**: real NYC Open Data Borough Boundaries
    (via a public click_that_hood redistribution), simplified to ~350
-   points, embedded as `#boroughsData`. Manhattan only as of v3.0.22 —
+   points, embedded as `#boroughsData` (this one stays embedded — it's
+   shared, not per-neighborhood). Manhattan only as of v3.0.22 —
    Queens/Brooklyn data stays embedded but unused (cheap to revisit).
 3. **Major streets**: real NYC Street Centerline data (Socrata resource
-   `inkn-q76z`, `streetwidth>=60`), embedded as `#streetsData`. Trimmed to
-   a ~1.1km radius around Hudson Yards (151 segments) rather than
-   citywide, since this app is site-scoped.
+   `inkn-q76z`, `streetwidth>=60`). **As of v3.1.1**, fetched live per
+   neighborhood from `data/<id>/streets.json` (same pattern as
+   buildings/building_parts) instead of a single shared embedded
+   `#streetsData` tag — each neighborhood now shows its own real streets,
+   not Hudson Yards' set repositioned under it. `buildStreetsLayer()` is
+   now async; `loadData()` awaits it before syncing the toggle.
 4. **Projection**: `project(lon, lat)` converts real lon/lat to local
    meters via an equirectangular approximation centered on the site's own
    centroid (`setProjectionOrigin`), THEN rotates the result by
-   `GRID_ROTATION_DEG` (28.96°, measured directly from the real building
-   data — see v3.0.27) so local +Y aligns with Manhattan's actual street
-   grid instead of true geographic north. **Every** piece of geometry in
-   this app — buildings, boroughs, streets, the site's own bounding box —
-   goes through this one function, so everything stays mutually
-   consistent automatically. `updateCompass()` corrects for the fact that
+   `GRID_ROTATION_DEG` so local +Y aligns with the neighborhood's actual
+   street grid instead of true geographic north. **As of v3.1.0,
+   `GRID_ROTATION_DEG` is a mutable `let`, not a const** — each
+   neighborhood in `NEIGHBORHOODS` carries its own independently-measured
+   `gridRotationDeg` (same v3.0.27 weighted-circular-mean-of-wall-bearings
+   method, run fresh against that neighborhood's own real building data,
+   never assumed or copied from another neighborhood — Hudson Yards
+   28.96°, Chelsea 28.55°, genuinely different values). `setGridRotation()`
+   updates both `GRID_ROTATION_DEG` and the derived `GRID_ROTATION_RAD`
+   together, called by `loadData()` before `project()` is ever invoked for
+   that neighborhood's data. **Every** piece of geometry in this app —
+   buildings, boroughs, streets, the site's own bounding box — goes
+   through this one function, so everything stays mutually consistent
+   automatically. `updateCompass()` corrects for the fact that
    local +Y is no longer true north.
+
+## Winding order — a real gotcha for any future PMTiles-sourced neighborhood
+
+If a future neighborhood's data comes from decoding Overture's PMTiles
+vector tiles (via `@mapbox/vector-tile`'s `toGeoJSON()`, the method used
+for Chelsea) rather than the Python `overturemaps` CLI or DuckDB, **check
+ring winding before trusting the data**. Chelsea's extraction produced
+every single ring (1226/1226) wound clockwise; Manifold's `CrossSection`
+under its default Positive fill rule silently treats a CW ring as
+zero-area, so `Manifold.extrude()` returns `InvalidConstruction` status for
+every single building — not a thrown error, just a bad status that reads
+downstream as either "nothing renders" (if checked) or, worse, a very
+long, confusing near-hang in `Manifold.union()` being fed hundreds of
+invalid manifolds (if not checked; this is what actually happened live in
+Joe's browser before the root cause was found via an isolated Node
+harness). Fix: compute the ring's shoelace signed area; if negative
+(clockwise), reverse the point order before constructing the
+`CrossSection`. Not an issue for Hudson Yards' original data (sourced
+differently, already correct winding) — this is specific to the
+PMTiles/vector-tile extraction path.
+
+## Neighborhood switching (v3.1.0)
+
+`NEIGHBORHOODS` is a small config array (`{id, name, gridRotationDeg}` per
+entry), not a database or live search index. The sidebar's Neighborhood
+row is generated from it (one button per entry) rather than hardcoded
+HTML, so adding a neighborhood needs zero HTML changes. `switchNeighborhood(id)`
+calls `loadData(id)`, which now does real cleanup before loading the new
+data — this didn't exist before v3.1.0 since `loadData()` only ever ran
+once, at boot:
+- Removes and disposes the previous neighborhood's `solidGroup`,
+  `negativeMesh`, `capFillGroups`, and the three cut-line meshes.
+- Resets `siteMinX/Y`, `siteMaxX/Y`, `siteCapHeight` to `undefined` and
+  hides `#sectionRow` (the cutaway sliders) until the new neighborhood is
+  computed — a stale cutaway range from the PREVIOUS neighborhood's
+  dimensions must never be shown or usable against a different
+  neighborhood's geometry.
+- Rebuilds `boroughsGroup`/`streetsGroup` fresh rather than reusing the
+  first-load versions — both are re-projected through the CURRENT
+  `project()` origin, which changes per neighborhood, so a "build once"
+  version would be correctly positioned only for whichever neighborhood
+  loaded first and silently wrong for every neighborhood after that.
+- Re-syncs Manhattan-context/streets toggle visibility to whatever the
+  user already had set (a cheap visibility-only sync, not a full
+  camera-reframe — if Manhattan context was on with a specific pan/zoom
+  before switching, the camera position itself is left alone).
+
+Live-verified for precision (not just "doesn't crash"), in both switch
+directions, by reading real numbers off `window.__NS` and the actual
+slider DOM elements after a fresh compute on each neighborhood — see
+CHANGELOG v3.1.0 for the exact figures (395m/13,802 tri for Hudson Yards,
+123m/39,278 tri for Chelsea, both matching known-correct values with zero
+cross-contamination between switches).
 
 ## Geometry engine: Manifold (not three-bvh-csg)
 
@@ -303,12 +389,12 @@ Two things worth knowing if you touch this again:
   deliberately, on the reasoning that banding is rarer and more legible
   than the noise it replaced.
 
-## Camera system: perspective (default) + orthographic (N/S/E/W only)
+## Camera system: perspective (default) + orthographic (N/S/E/W + Plan)
 
 Two camera objects exist: `camera` (the original `THREE.PerspectiveCamera`,
 used for the default 3/4 view and Manhattan context) and `orthoCamera` (a
 `THREE.OrthographicCamera`, added in v3.0.42, used ONLY while an N/S/E/W
-flat elevation is active). A module-level `activeCamera` variable tracks
+flat elevation or the v3.1.2 true Plan (top-down) view is active). A module-level `activeCamera` variable tracks
 which one is actually live — `animate()`'s `renderer.render(scene,
 activeCamera)`, `onResize()`, `updateCompass()`, and the drag-handle
 raycasting (`dragRaycaster.setFromCamera(..., activeCamera)`) all read
@@ -377,6 +463,30 @@ and was NOT separately live-tested — lower risk than the camera-switching
 mechanism itself, but worth a real check if handle-dragging from an N/S/E/W
 view ever gets reported as behaving oddly.
 
+**Plan view (v3.1.2, live-tested before shipping).** `setOrthogonalView('plan')`
+positions `orthoCamera` directly above the target (offset purely along
++Z, this scene's own up axis) — the "pole" of `OrbitControls`' internal
+spherical position math. The first draft here added a horizontal
+up-vector swap (`(0,1,0)` instead of the normal `(0,0,1)`) on the theory
+that the final camera orientation would hit a degenerate `lookAt` case
+with `up` parallel to a straight-down view direction. That turned out to
+be an untested guess — live-tested it directly (before writing the
+shipped version, not after) by building an isolated throwaway
+`OrthographicCamera` + `OrbitControls` instance in a real running
+session, positioning it at the exact same pole with the scene's ORDINARY
+`up=(0,0,1)` left untouched: the result came back clean on its own —
+forward vector `(0,0,-1)` (straight down, correct), local screen-up
+mapping to world `(0,1,0)` (north-up, correct) — no special-casing
+needed at all. A follow-up test nudging the camera slightly off that
+pole (simulating a small orbit drag away from Plan) also came back
+stable, no NaN or gimbal-lock blowup. Shipped the simpler version:
+`orthoCamera.up` never changes, for Plan or any other direction. Worth
+remembering for future camera work in this app: don't assume a
+three.js/OrbitControls edge case behaves the way the docs or general
+graphics-programming intuition suggest — check the actual library
+behavior directly, the way this was (and the way v3.0.42's own
+orthographic-camera prototype was, per the paragraph above).
+
 ## Manhattan context view
 
 A separate camera mode (`zoomToBoroughContext()`/`exitBoroughContext()`),
@@ -396,6 +506,16 @@ style preference.
 
 ## Working methodology notes for future sessions
 
+- **`node audit_deploy.js` (added v3.1.5) before calling any change
+  done.** Not a linter — project-specific invariant checks, most keyed
+  to a real bug from this project's own history (a second, testable
+  copy of CHANGELOG.md). Growth pattern: every time a real bug is found
+  and fixed, add a `check()` for it in the same edit that fixes it,
+  under a `sectionHeader()` named after the version that fixed it. The
+  scanner it uses for the v3.0.14 top-level-call check is itself a case
+  study in verifying a check before trusting it — see the v3.1.5
+  CHANGELOG entry for the real regex-literal bug that shipped in that
+  scanner's first draft and how it was caught before release.
 - **This project has a long history of shipping fixes that turned out to
   be wrong or incomplete on first guess.** Nearly every real fix in
   CHANGELOG.md from v3.0.9 onward was found by live-connecting to Joe's
@@ -460,7 +580,11 @@ style preference.
 
 ## Open / not yet started
 
-- Manhattan-scale expansion beyond Hudson Yards (paused) — worth
-  reassessing given Manifold's real speed (497 buildings computes in
-  well under a second; a 10x-denser quadrant may still compute live
-  in-browser with no offline pipeline needed).
+- More neighborhoods beyond Hudson Yards + Chelsea + Hell's Kitchen — the
+  pipeline is proven (fetch, winding-correct, measure tilt, filter
+  streets, add one `NEIGHBORHOODS` entry), so this is now pure
+  per-neighborhood data work, not architecture work.
+- Poché fill boundary line — actually resolved, see v3.0.37 (same fix as
+  the cut-line scattered-dots symptom below).
+- Cut-line "scattered dots" — resolved in v3.0.37 (EdgesGeometry replaced
+  with an exact triangle/plane cross-section).
