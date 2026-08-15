@@ -103,6 +103,35 @@ harness). Fix: compute the ring's shoelace signed area; if negative
 differently, already correct winding) — this is specific to the
 PMTiles/vector-tile extraction path.
 
+## Tile-boundary fragment dedup — a second real PMTiles gotcha (v3.1.8)
+
+A more subtle bug than winding order, found after it: fetching multiple
+adjacent PMTiles tiles to cover a neighborhood's bbox, a real building
+that spans two tiles gets a DIFFERENT clipped fragment under the SAME
+`id` in each tile — standard vector-tile clipping behavior, not a bug in
+the tile source. If the fetch code dedupes by "first id seen wins," it
+can keep a small tile-edge sliver fragment instead of the fragment
+containing most of the real footprint, silently dropping the rest of
+that building from the fetched data entirely — not mis-rendered, never
+fetched. Renders as an obvious wedge/pie-slice shape sitting where a
+normal building should be.
+
+**Diagnostic signature, worth remembering**: several small triangular
+buildings clustered at (or within ~30-50m of) the exact same latitude or
+longitude, despite being spread across a much larger area (hundreds of
+meters, multiple avenues) — real independent buildings can't do that,
+but two tiles clipping the same features along one shared boundary edge
+produces exactly that pattern. Confirm by computing the real z14 tile-row
+latitude via the standard `tile2lat(y, z) = atan(sinh(π - 2πy/2^z))`
+formula and checking it against the suspicious buildings' latitude.
+
+**Fix**: when deduping fetched features by id across multiple tiles,
+always keep the LARGEST-area fragment seen for that id, never simply the
+first one encountered. Applies to both `building` and `building_part`
+layers. This is now baked into the standard fetch pattern for this
+project — any future neighborhood's fetch code should use it from the
+start, not rediscover the bug.
+
 ## Neighborhood switching (v3.1.0)
 
 `NEIGHBORHOODS` is a small config array (`{id, name, gridRotationDeg}` per

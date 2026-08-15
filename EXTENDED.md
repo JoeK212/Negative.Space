@@ -48,7 +48,7 @@ Zooms out to a real extruded Manhattan solid (from NYC Open Data borough boundar
 
 ### Major streets
 
-Real NYC Street Centerline data (avenue-width and up, ≥60ft) for the current neighborhood, extruded to a thin schematic curb height so it reads from any camera angle, not just top-down.
+Real NYC Street Centerline data (avenue-width and up, ≥60ft) for the current neighborhood, extruded to a thin schematic curb height so it reads from any camera angle, not just top-down. Each unique street name gets one label, placed along its longest real run in the current view — not one per block, to keep it legible.
 
 ### Navigation (bottom-right panel)
 

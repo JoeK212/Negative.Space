@@ -467,7 +467,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.1.7'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.1.9'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2180,7 +2180,66 @@ async function buildStreetsLayer(neighborhoodId){
     }
   }
 
+  // v3.1.9: permanent avenue/street name labels, one per unique real
+  // street name (not per block segment -- "9 AVE" alone repeats across
+  // many short block-length rows in the data, would be visual clutter to
+  // label every one). For each name, picks its single LONGEST real part
+  // across every row sharing that name, and places one label at that
+  // part's real midpoint -- puts the label on a genuinely long, legible
+  // stretch of that street rather than an arbitrary short block. Toggles
+  // with the same Major streets layer these belong to conceptually,
+  // rather than a separate always-on control.
+  const byName = new Map(); // name -> { part, lengthM }
+  for (const row of raw){
+    for (const part of row.p){
+      if (part.length < 2) continue;
+      let lengthM = 0;
+      for (let i=0;i<part.length-1;i++){
+        const [x1,y1] = project(part[i][0], part[i][1]);
+        const [x2,y2] = project(part[i+1][0], part[i+1][1]);
+        lengthM += Math.hypot(x2-x1, y2-y1);
+      }
+      const existing = byName.get(row.n);
+      if (!existing || lengthM > existing.lengthM) byName.set(row.n, { part, lengthM });
+    }
+  }
+  for (const [name, { part }] of byName){
+    const mid = part[Math.floor((part.length - 1) / 2)];
+    const [x, y] = project(mid[0], mid[1]);
+    streetsGroup.add(makeStreetLabel(name, x, y));
+  }
+
   scene.add(streetsGroup);
+}
+
+function makeStreetLabel(text, x, y){
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.font = `600 44px 'Inter', sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff'; // same theme-agnostic choice as makeBoroughLabel -- labels are only rebuilt on neighborhood switch, not on theme toggle, so a color read from a CSS var here would go stale the moment the user toggles theme without switching neighborhoods; white + a dark shadow (below) stays legible against both this app's light and dark ground/street colors without needing a refresh hook
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 8;
+  ctx.fillText(toTitleCaseStreet(text), canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const worldWidth = 90; // site/building scale, not borough scale -- legible next to real ~20-30m-wide streets without dwarfing them
+  sprite.scale.set(worldWidth, worldWidth * (canvas.height / canvas.width), 1);
+  sprite.position.set(x, y, STREET_HEIGHT + 2); // just above the street ribbon itself
+  sprite.renderOrder = 2;
+  return sprite;
+}
+
+// Street Centerline names come in as "W 42 ST" / "9 AVE" -- readable but
+// shouty in all-caps at this small scale (unlike the borough labels, which
+// are deliberately bold/large). Title-cases while preserving the real
+// abbreviations as written in the source data.
+function toTitleCaseStreet(name){
+  return name.split(' ').map(w => w.length <= 2 ? w : w[0] + w.slice(1).toLowerCase()).join(' ');
 }
 
 const STREET_HEIGHT = 4; // a thin, schematic raised curb -- not literal (real curbs are ~15cm), just enough real height to have a visible vertical face at any camera angle, including the grazing oblique angles this app's default views use

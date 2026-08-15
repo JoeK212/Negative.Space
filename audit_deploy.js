@@ -394,6 +394,24 @@ if (tomlExists){
 }
 
 /* ===================================================================
+   v3.1.9 -- permanent street/avenue name labels: one per unique name
+   (not per block segment), toggling with the existing Major streets
+   layer rather than a separate control.
+   =================================================================== */
+sectionHeader('v3.1.9 -- street name labels');
+
+check('makeStreetLabel() is defined', /function makeStreetLabel\(/.test(html));
+check('toTitleCaseStreet() is defined', /function toTitleCaseStreet\(/.test(html));
+check(
+  'Street labels are added to streetsGroup (so they toggle with Major streets, not a separate control)',
+  /streetsGroup\.add\(makeStreetLabel\(/.test(html)
+);
+check(
+  'Labels dedupe by name to one per unique street (not one per block segment)',
+  /byName\.set\(row\.n,/.test(html)
+);
+
+/* ===================================================================
    Summary
    =================================================================== */
 console.log('\n' + '='.repeat(50));
