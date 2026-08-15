@@ -467,7 +467,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.1.5'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.1.7'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1236,9 +1236,9 @@ function setGridRotation(deg){
 // here, not rebuilding the whole HTML file. gridRotationDeg values were
 // each independently measured, not copied from one another.
 const NEIGHBORHOODS = [
-  { id: 'hudson-yards', name: 'Hudson Yards', gridRotationDeg: 28.96 },
-  { id: 'chelsea', name: 'Chelsea', gridRotationDeg: 28.55 },
-  { id: 'hells-kitchen', name: "Hell's Kitchen", gridRotationDeg: 28.87 },
+  { id: 'hudson-yards', name: 'Hudson Yards', gridRotationDeg: 28.57 },
+  { id: 'chelsea', name: 'Chelsea', gridRotationDeg: 28.48 },
+  { id: 'hells-kitchen', name: "Hell's Kitchen", gridRotationDeg: 28.89 },
 ];
 let currentNeighborhoodId = null;
 const GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);

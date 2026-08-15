@@ -83,4 +83,6 @@ That's it — the sidebar dropdown, data loading, and camera framing are all gen
 
 **Hatching / mottling on cavity walls.** Expected at default resolution — real fine building geometry aliasing at distance, not a bug. Turn on "High detail" for a real (costlier) reduction.
 
+**A thin triangular "wedge" building that doesn't correspond to anything real.** Confirmed real bug (v3.1.6), not user error — some Overture footprints are tagged `subtype: 'outbuilding'`, `class: 'roof'` (canopies, shed roofs, similar non-primary structures), and their real-world shapes can be long and thin, which extrudes into an obvious wedge when treated like a normal building. Fixed by excluding those at the data-fetch stage for all three current neighborhoods; if a future neighborhood shows the same thing, it likely wasn't filtered at fetch time — check for that tag combination in its `buildings.geojson`.
+
 **Poché not showing on one axis.** If this recurs, it's worth checking AUDIT.md's poché section first — this exact symptom has had several different real root causes across this project's history (render-list ordering, stencil-buffer clear timing, epsilon bias direction), not a single recurring bug.

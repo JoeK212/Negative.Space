@@ -580,6 +580,14 @@ style preference.
 
 ## Open / not yet started
 
+- A handful of `building_part` sub-features (8 total across all three
+  neighborhoods, see v3.1.6) still measure as geometrically thin by the
+  same test used to catch the outbuilding/roof wedge bug, but are real
+  sub-components of buildings that have actual substance (not
+  freestanding wedges) and `building_part` doesn't carry the same
+  `subtype`/`class` tags used to filter the top-level case. Not chased
+  further yet — worth a look if a similarly odd shape gets reported
+  again.
 - More neighborhoods beyond Hudson Yards + Chelsea + Hell's Kitchen — the
   pipeline is proven (fetch, winding-correct, measure tilt, filter
   streets, add one `NEIGHBORHOODS` entry), so this is now pure
