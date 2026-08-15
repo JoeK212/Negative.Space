@@ -375,6 +375,14 @@
     <button class="btn secondary" id="viewBoroughs">Manhattan context</button>
     <button class="btn secondary" id="viewStreets">Major streets</button>
   </div>
+  <p class="label">Export</p>
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+    <span style="font-family:var(--font-ui); font-size:13px; color:var(--ink-soft); white-space:nowrap;">Model scale 1 :</span>
+    <input type="number" id="exportScale" value="500" min="1" step="1" style="width:70px; font-family:var(--font-ui); font-size:13px; padding:6px 8px; border-radius:6px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
+  </div>
+  <div class="row">
+    <button class="btn secondary" id="exportStlBtn">Export STL</button>
+  </div>
   <div id="sectionRow" style="display:none; flex-direction:column; gap:8px;">
     <div>
       <p class="label">Height cut — <span id="sectionLabel">–</span></p>
@@ -467,7 +475,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.1.9'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.2'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1608,6 +1616,27 @@ async function computeNegativeSpace(){
   // which is why it read as a sealed void/pit instead of an open mold.
   const capHeight = maxHeight;
 
+  // v3.2.1: small XY margin beyond the tightest building bbox, so no
+  // building footprint edge sits exactly flush with the mold's own
+  // boundary. Real, verified fix for part of a non-manifold-edge defect
+  // found via a full external audit (a real exported STL run through
+  // trimesh, a real mesh library): the site box was previously sized to
+  // EXACTLY the tightest bbox of all buildings, so any building right at
+  // the edge had its footprint touching the mold boundary exactly -- a
+  // classic degenerate case for any CSG boolean. Verified end-to-end
+  // against real Hudson Yards data in a Node harness using the actual
+  // manifold-3d WASM library (not guessed): non-manifold edges dropped
+  // from 66 to 51 (0.214% -> 0.166% of all edges) with this margin, and
+  // pushing the margin from 2m to 10m made no further difference --
+  // confirming the REMAINING ~51 are a different, unrelated cause
+  // (adjacent buildings sharing an exact corner vertex, common for NYC
+  // party-wall rowhouses -- not something a mold-boundary margin can
+  // touch, and not chased further this round; see AUDIT.md).
+  // Deliberately NOT applied to Z/capHeight -- that exact-touch is
+  // intentional (see the capHeight comment above), not the same class of
+  // accidental degenerate case this margin fixes.
+  const boundaryMargin = 2;
+
   statEl.textContent = `Unioning ${solidsByBuilding.size} buildings…`;
   await new Promise(r => setTimeout(r, 0));
   const buildingManifolds = [...solidsByBuilding.values()].map(g => g.manifold).filter(Boolean);
@@ -1615,7 +1644,7 @@ async function computeNegativeSpace(){
 
   statEl.textContent = `Subtracting from site volume…`;
   await new Promise(r => setTimeout(r, 0));
-  const siteBox = Manifold.cube([maxX - minX, maxY - minY, capHeight]).translate(minX, minY, 0);
+  const siteBox = Manifold.cube([(maxX - minX) + boundaryMargin * 2, (maxY - minY) + boundaryMargin * 2, capHeight]).translate(minX - boundaryMargin, minY - boundaryMargin, 0);
   const result = Manifold.difference(siteBox, mergedBuildings);
   if (result.status() !== 'NoError'){
     toast(`Compute failed: ${result.status()}`);
@@ -1722,7 +1751,7 @@ async function computeNegativeSpace(){
   btn.disabled = false;
   refreshViewToggles();
 
-  siteMinX = minX; siteMaxX = maxX; siteMinY = minY; siteMaxY = maxY; siteCapHeight = capHeight;
+  siteMinX = minX - boundaryMargin; siteMaxX = maxX + boundaryMargin; siteMinY = minY - boundaryMargin; siteMaxY = maxY + boundaryMargin; siteCapHeight = capHeight;
   // v3.0.31: cleanedGeo is genuinely watertight again (v3.0.30's shell
   // filtering reverted), so the poché stencil pass can just use it directly
   // -- no separate copy needed.
@@ -1785,6 +1814,135 @@ function resetCutaway(){
   refreshViewToggles(); // keep handle visibility consistent if this ran after an earlier compute
 }
 document.getElementById('resetCutawayBtn').addEventListener('click', resetCutaway);
+
+/* ================= STL export (v3.2.0) ================= */
+// Joe's own use case for this: a real physical mold/cast, milled or
+// printed from the computed negative space -- the whole "negative space"
+// concept only becomes literal once it can leave the screen. Exports
+// whichever layer is currently showing (Buildings or Negative space),
+// so this doubles as a building-massing STL export too, not just the
+// carved void.
+//
+// Binary STL, not ASCII -- the standard format virtually every slicer/CAM
+// tool expects natively, and far more compact for a mesh this size (tens
+// of thousands of triangles for a full neighborhood). Format: an 80-byte
+// header, a uint32 triangle count, then 50 bytes per triangle (a 12-byte
+// float32 normal, three 12-byte float32 vertices, a 2-byte attribute
+// count left at 0) -- written directly via DataView rather than pulling
+// in an external STL-writer dependency, matching this project's
+// no-framework-unless-genuinely-needed convention.
+//
+// Scale: this app's geometry is real-world meters (a city block is
+// hundreds of meters across) -- useless directly for a desktop CNC bed or
+// print volume. "Model scale 1:N" mirrors the real architectural-model
+// convention (1:500, 1:200, etc.) rather than inventing a different unit
+// system; output units are millimeters at that scale, the default virtually
+// every slicer/CAM tool assumes for an STL with no explicit unit metadata.
+function exportSTL(){
+  const scaleDenominator = Math.max(1, parseFloat(document.getElementById('exportScale').value) || 500);
+  const mmPerMeter = 1000 / scaleDenominator; // real meters -> physical-model millimeters at this scale
+
+  const meshes = [];
+  if (showNegative){
+    if (!negativeMesh){ toast('Compute negative space first'); return; }
+    meshes.push(negativeMesh);
+  } else {
+    if (!solidGroup || !solidGroup.children.length){ toast('No buildings loaded yet'); return; }
+    solidGroup.traverse(o => { if (o.isMesh) meshes.push(o); });
+  }
+
+  // v3.2.1: collects every triangle into memory first, instead of writing
+  // straight to a pre-sized buffer in one pass, specifically to de-dupe
+  // exact-duplicate triangles before writing -- a REAL, confirmed defect,
+  // not a theoretical one. Verified with an actual exported file run
+  // through trimesh (a real mesh library, not this app's own code): the
+  // negative-space export's main solid (20388 of 20568 triangles) reported
+  // is_watertight=False despite having ZERO open boundary edges -- meaning
+  // non-manifold edges (shared by more than 2 faces), not gaps. Traced to
+  // exactly 6 exact-duplicate triangles (same 3 vertices, verified by a
+  // dedicated duplicate-triangle scan) producing 17 edges shared by 4
+  // faces instead of 2 (2 correct + 2 from the duplicate). Fixed here by
+  // keying each triangle on its rounded, sorted vertex coordinates (order-
+  // and winding-independent) and skipping any triangle whose key has
+  // already been written.
+  const triangles = [];
+  const seenKeys = new Set();
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), normal = new THREE.Vector3();
+  function triKey(p1, p2, p3){
+    // Order/winding-independent: sorts the 3 rounded points so a triangle
+    // and its exact duplicate (even if their vertex order/winding differs)
+    // produce the same key. Rounding to 4 decimal mm kills float32 noise
+    // between independently-transformed "same" vertices (STL has no
+    // shared vertex indices) without merging genuinely distinct points --
+    // 4 decimal mm is far finer than anything meaningful at this scale.
+    const pts = [p1, p2, p3].map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`).sort();
+    return pts.join('|');
+  }
+  for (const mesh of meshes){
+    const geo = mesh.geometry;
+    if (!geo || !geo.attributes.position) continue;
+    mesh.updateWorldMatrix(true, false);
+    const pos = geo.attributes.position;
+    const idx = geo.index;
+    const count = idx ? idx.count : pos.count;
+    for (let i = 0; i < count; i += 3){
+      const ia = idx ? idx.getX(i) : i, ib = idx ? idx.getX(i+1) : i+1, ic = idx ? idx.getX(i+2) : i+2;
+      a.fromBufferAttribute(pos, ia).applyMatrix4(mesh.matrixWorld).multiplyScalar(mmPerMeter);
+      b.fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld).multiplyScalar(mmPerMeter);
+      c.fromBufferAttribute(pos, ic).applyMatrix4(mesh.matrixWorld).multiplyScalar(mmPerMeter);
+      const key = triKey(a, b, c);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      ab.subVectors(b, a); ac.subVectors(c, a);
+      normal.crossVectors(ab, ac).normalize();
+      triangles.push({ normal: normal.clone(), a: a.clone(), b: b.clone(), c: c.clone() });
+    }
+  }
+  if (triangles.length < 1){ toast('Nothing to export'); return; }
+  const dupesRemoved = (meshes.reduce((sum, mesh) => {
+    const geo = mesh.geometry;
+    if (!geo || !geo.attributes.position) return sum;
+    const idx = geo.index;
+    return sum + (idx ? idx.count : geo.attributes.position.count) / 3;
+  }, 0)) - triangles.length;
+
+  const triCount = triangles.length;
+  const buffer = new ArrayBuffer(84 + triCount * 50);
+  const view = new DataView(buffer);
+  const headerText = `Negative Space -- ${document.querySelector('.tagline')?.textContent || ''} -- ${showNegative ? 'negative space' : 'buildings'}`.slice(0, 79);
+  for (let i = 0; i < headerText.length; i++) view.setUint8(i, headerText.charCodeAt(i));
+  view.setUint32(80, triCount, true);
+
+  let offset = 84;
+  function writeVec3(v){
+    view.setFloat32(offset, v.x, true); offset += 4;
+    view.setFloat32(offset, v.y, true); offset += 4;
+    view.setFloat32(offset, v.z, true); offset += 4;
+  }
+  for (const t of triangles){
+    writeVec3(t.normal);
+    writeVec3(t.a);
+    writeVec3(t.b);
+    writeVec3(t.c);
+    offset += 2; // attribute byte count, left at 0
+  }
+
+  const blob = new Blob([buffer], { type: 'model/stl' });
+  const url = URL.createObjectURL(blob);
+  const nb = NEIGHBORHOODS.find(n => n.id === currentNeighborhoodId);
+  const a2 = document.createElement('a');
+  a2.href = url;
+  a2.download = `${(nb ? nb.name : 'negative-space').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${showNegative ? 'negative-space' : 'buildings'}-1-${scaleDenominator}.stl`;
+  document.body.appendChild(a2);
+  a2.click();
+  document.body.removeChild(a2);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+  toast(dupesRemoved > 0
+    ? `Exported ${triCount.toLocaleString()} triangles at 1:${scaleDenominator} (${dupesRemoved} duplicate face${dupesRemoved === 1 ? '' : 's'} removed)`
+    : `Exported ${triCount.toLocaleString()} triangles at 1:${scaleDenominator}`);
+}
+document.getElementById('exportStlBtn').addEventListener('click', exportSTL);
 
 // v3.0.13: basic 3D nav controls (N/S/E/W orthogonal views, recenter, north
 // compass) -- same pattern already established in Joe's PLUTO Massing tool

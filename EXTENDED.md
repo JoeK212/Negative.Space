@@ -57,6 +57,10 @@ Real NYC Street Centerline data (avenue-width and up, ≥60ft) for the current n
 - **⌂ (Home)** — returns to the default 3/4 perspective view.
 - **Compass** — needle always points at real true north, corrected for the local street grid's own tilt (Manhattan's avenues run about 29° off true north — each neighborhood's exact tilt is measured independently from its own building data, not assumed).
 
+### Export
+
+Exports whichever layer is currently showing — Buildings massing, or the computed Negative space solid — as a binary STL file. Set "Model scale 1:N" first (default 1:500, the standard architectural-model convention) to control the physical size of the output; the app's geometry is real-world meters, converted to millimeters at that scale. Negative space must be computed first before it can be exported.
+
 ### Theme
 
 Light / Blueprint (dark) toggle, top right. Defaults to Blueprint on a first visit; remembers an explicit choice either way via `localStorage`.

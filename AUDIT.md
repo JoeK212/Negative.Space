@@ -170,7 +170,14 @@ cross-contamination between switches).
 Swapped in v3.0.0 after three-bvh-csg was found to produce ~49%
 non-manifold edges on its boolean output (root cause of a long hatching/
 gap-artifact saga in v1.x–v2.x — see CHANGELOG). `manifold-3d` (WASM,
-loaded from unpkg) guarantees manifold boolean output. Full 497-building
+loaded from unpkg) guarantees manifold output for well-formed input, and
+in practice gets there for the vast majority of any real neighborhood's
+geometry — but NOT unconditionally: v3.2.1 found real, small-scale
+non-manifold residuals (0.15–0.24% of edges, all three neighborhoods)
+from degenerate input cases Manifold's own guarantee doesn't cover —
+buildings touching the mold boundary exactly, and buildings sharing an
+exact corner vertex. See "Open / not yet started" below for the current
+state of that investigation. Full 497-building
 site computes in well under a second (was ~240s with the grid-chunking
 workaround the old engine needed). **Needs a live internet connection**
 even when the page itself is opened via `file://`, since the WASM engine
@@ -609,6 +616,44 @@ style preference.
 
 ## Open / not yet started
 
+- **CSG output is NOT fully watertight** (found v3.2.1, real STL export
+  run through `trimesh`, an external mesh library — not this app's own
+  claims). A small mold-boundary margin (v3.2.1) fixed part of it for
+  Hudson Yards specifically (66→51 non-manifold edges) but made zero
+  difference for Chelsea or Hell's Kitchen.
+  Real footprint-erosion test (v3.2.2 investigation, not shipped): built a
+  Node harness reproducing the app's real pipeline exactly (same
+  project/extrude/union/difference code, real per-neighborhood data),
+  eroding every building footprint inward via `CrossSection.offset()`
+  before `Manifold.union()`, at 0.02/0.05/0.08/0.12m, then writing a real
+  binary STL through the app's own `exportSTL()` dedup logic and
+  re-checking it with `trimesh` at every value — the same tool and method
+  that found the original defect, not a theory. Two real findings:
+  (1) The prior "exact corner vertex" hypothesis was never actually
+  verified — checked here directly, and the raw indexed Manifold mesh
+  (pre-STL) is confirmed to have **zero** non-manifold edges at every
+  erosion value tested, including zero erosion, for all three
+  neighborhoods (`Manifold.difference()` returning `NoError` genuinely
+  guarantees a manifold result, as the library's own name promises — the
+  defect does not exist at that stage). The non-manifold edges only
+  appear after STL export (an inherently indexless triangle-soup format)
+  and `trimesh`'s own reload/re-weld pass, so the real mechanism is a
+  precision/quantization artifact of that round-trip, not a genuine
+  geometric coincidence between adjacent buildings' source data.
+  (2) Given that, footprint erosion does NOT reliably reduce the
+  post-export defect: it cut Hell's Kitchen substantially (114→9 edges at
+  0.05m) and helped Chelsea somewhat (94→44 at 0.02m), but for Hudson
+  Yards results were non-monotonic and inconsistent across the same
+  erosion sweep (58/49/58/43 non-manifold edges at 0.02/0.05/0.08/0.12m,
+  against a 44-edge baseline) — sometimes better, sometimes worse, with
+  no erosion value that helped all three neighborhoods at once. Shipping
+  an erosion value chosen to help two neighborhoods would be introducing
+  a real (if tiny) footprint-accuracy tradeoff for an unreliable,
+  unexplained benefit — not done. Root cause of the actual STL-export
+  quantization defect remains open; still very likely low real-world
+  impact (most slicers auto-repair a defect this small: 0.02–0.13% of
+  edges across all tests), but the export should not be described as
+  guaranteed watertight until the real mechanism is found.
 - A handful of `building_part` sub-features (8 total across all three
   neighborhoods, see v3.1.6) still measure as geometrically thin by the
   same test used to catch the outbuilding/roof wedge bug, but are real

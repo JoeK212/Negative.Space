@@ -412,6 +412,31 @@ check(
 );
 
 /* ===================================================================
+   v3.2.0 -- STL export. The real risk here is the binary format itself
+   (byte offsets/stride), which is checked below at the structural level;
+   full correctness was separately verified in an isolated Node harness
+   (see CHANGELOG.md v3.2.0) that isn't practical to re-run as part of
+   this static audit.
+   =================================================================== */
+sectionHeader('v3.2.0 -- STL export');
+
+check('exportSTL() is defined', /function exportSTL\(/.test(html));
+check('#exportStlBtn exists and is wired up', /getElementById\('exportStlBtn'\)\.addEventListener/.test(html));
+check('#exportScale (model scale input) exists', /id="exportScale"/.test(html));
+check(
+  'STL header is written before the triangle count (binary STL requires an 80-byte header)',
+  /view\.setUint8\(i, headerText\.charCodeAt\(i\)\)/.test(html) && /view\.setUint32\(80, triCount, true\)/.test(html)
+);
+check(
+  'Triangle buffer size follows the real binary STL formula (84 + 50 bytes/triangle)',
+  /new ArrayBuffer\(84 \+ triCount \* 50\)/.test(html)
+);
+check(
+  'Exports negativeMesh only (not poché/cut-line/handle meshes) when in Negative space mode',
+  /if \(showNegative\)\{[\s\S]{0,200}meshes\.push\(negativeMesh\)/.test(html)
+);
+
+/* ===================================================================
    Summary
    =================================================================== */
 console.log('\n' + '='.repeat(50));
