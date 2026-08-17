@@ -65,17 +65,19 @@ Exports whichever layer is currently showing — Buildings massing, or the compu
 
 Light / Blueprint (dark) toggle, top right. Defaults to Blueprint on a first visit; remembers an explicit choice either way via `localStorage`.
 
-## Adding a new neighborhood
+## Adding a new district
 
-Not a live search-any-area system by design — every neighborhood is fetched, checked, and added by hand, one at a time:
+Not a live search-any-area system by design — every district is fetched, checked, and added by hand, one at a time. As of District 1, this means real NYC administrative boundaries, not hand-picked bounding boxes (the original three neighborhoods — Hudson Yards, Chelsea, Hell's Kitchen — used hand-picked bboxes and were superseded by District 4 once its real boundary turned out to cover all three as one continuous area; see CHANGELOG v3.2.7):
 
-1. **Pick a bounding box.** A few blocks is plenty (Hudson Yards is ~300 buildings, Hell's Kitchen's core is ~440).
-2. **Fetch real Overture building + building_part data** for that bbox — either via the `overturemaps` CLI/DuckDB, or by decoding Overture's PMTiles vector tiles directly (see AUDIT.md's "Winding order" section for a real gotcha specific to the PMTiles path: rings can come out clockwise, which a naive CSG library will silently treat as zero-area).
+1. **Get the district's real boundary polygon** from NYC Open Data's Community Districts dataset (`data.cityofnewyork.us/resource/5crt-au7u.geojson?boro_cd=<code>`), not a hand-drawn box — take the largest ring by area if the result is a MultiPolygon (drops small offshore fragments like Governors/Ellis/Liberty Island where irrelevant).
+2. **Fetch real Overture building + building_part data** for the polygon's bbox — decoding Overture's PMTiles vector tiles directly in-browser (see AUDIT.md's "Winding order" section for a real gotcha specific to this path: rings can come out clockwise, which a naive CSG library will silently treat as zero-area).
 3. **Check ring winding** on every polygon; fix any clockwise ring before using the data.
-4. **Measure the real grid tilt** from the neighborhood's own building wall bearings (weighted circular mean, favoring longer walls) — never copy another neighborhood's value, even a nearby one; they're genuinely different by tenths of a degree.
-5. **Filter major streets** (≥60ft width) to the same bbox, from NYC's Street Centerline dataset.
-6. **Drop the three files** in `data/<new-id>/`: `buildings.geojson`, `building_parts.geojson`, `streets.json`.
-7. **Add one entry** to the `NEIGHBORHOODS` array in `index.html`: `{ id, name, gridRotationDeg }`.
+4. **Dedupe tile-boundary duplicates** (largest-fragment-wins per id) and **filter outbuilding/roof** clutter, same as always.
+5. **Clip to the real polygon** by building centroid, not just the fetch bbox — otherwise neighboring districts' buildings bleed across the boundary.
+6. **Measure the real grid tilt** from the district's own building wall bearings (weighted circular mean, favoring longer walls) — never copy another district's value. Also worth computing R (circular-statistics concentration, `|resultant vector| / total weight`) alongside the angle: R close to 1 means a genuinely coherent single grid (District 4: 0.967); R well below that (District 2: 0.429) means the district doesn't really have one dominant grid direction, and the measured angle is a compromise, not a clean fact — worth flagging before shipping, not just measuring and moving on.
+7. **Filter major streets** (≥60ft width) to the same real polygon, from NYC's Street Centerline dataset (`inkn-q76z`).
+8. **Drop the three files** in `data/<new-id>/`: `buildings.geojson`, `building_parts.geojson`, `streets.json`.
+9. **Add one entry** to the `NEIGHBORHOODS` array in `index.html`: `{ id, name, gridRotationDeg }`.
 
 That's it — the sidebar dropdown, data loading, and camera framing are all generated from that config array.
 

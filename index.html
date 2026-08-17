@@ -114,6 +114,41 @@
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239FB8CC'/%3E%3C/svg%3E");
   }
 
+  /* v3.2.4: native <select> can't wrap its own closed-state text -- that's
+     a browser-rendered control, not something CSS can reach inside of --
+     so a long neighborhood name (e.g. "TriBeCa / Battery Park City / FiDi")
+     just gets silently ellipsis-truncated no matter how wide the panel is
+     made. Custom button+list dropdown instead: the closed-state label is
+     an ordinary <div>, so it wraps like any other text. */
+  #neighborhoodDropdown{position:relative;}
+  #neighborhoodBtn{
+    font-family:var(--font-ui); font-weight:600; font-size:13px;
+    padding:10px 32px 10px 16px; border-radius:8px; width:100%;
+    border:1.5px solid var(--ink); background:var(--card); color:var(--ink);
+    text-align:left; white-space:normal; word-break:break-word; line-height:1.35;
+    cursor:pointer; position:relative;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237A7568'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 14px top 16px;
+  }
+  #neighborhoodBtn:disabled{opacity:0.5; cursor:not-allowed;}
+  :root[data-theme="dark"] #neighborhoodBtn{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239FB8CC'/%3E%3C/svg%3E");
+  }
+  #neighborhoodList{
+    display:none; position:absolute; left:0; right:0; bottom:calc(100% + 6px); z-index:16;
+    max-height:260px; overflow-y:auto;
+    background:var(--card); border:1.5px solid var(--ink); border-radius:8px;
+    box-shadow:var(--shadow);
+  }
+  #neighborhoodList.open{display:block;}
+  #neighborhoodList .opt{
+    font-family:var(--font-ui); font-weight:600; font-size:13px; line-height:1.35;
+    padding:10px 16px; cursor:pointer; word-break:break-word;
+    border-bottom:1px solid var(--line);
+  }
+  #neighborhoodList .opt:last-child{border-bottom:none;}
+  #neighborhoodList .opt:hover, #neighborhoodList .opt.active{background:var(--accent); color:#fff;}
+
   header.top{
     position:fixed; top:0; left:0; right:0; z-index:20;
     padding:calc(14px + env(safe-area-inset-top)) 16px 12px;
@@ -324,7 +359,7 @@
         <dt>Section fill (poché)</dt>
         <dd>Shades the cut faces translucent red, architectural-section style — the boundary of the void itself.</dd>
         <dt>3D drag handles</dt>
-        <dd>The small handles on the exposed corner can be dragged directly in the viewport instead of using the sliders.</dd>
+        <dd>Colored handles (blue = Height, orange = X, green = Y) sit at the center of each cut face and can be dragged directly in the viewport instead of using the sliders.</dd>
       </dl>
 
       <h3>Navigation</h3>
@@ -360,7 +395,10 @@
     <button class="btn secondary" id="viewNegative">Negative space</button>
   </div>
   <p class="label">Neighborhood</p>
-  <select class="select" id="neighborhoodSelect"></select>
+  <div id="neighborhoodDropdown">
+    <button type="button" id="neighborhoodBtn"></button>
+    <div id="neighborhoodList"></div>
+  </div>
   <p class="label">Data source</p>
   <div class="row">
     <button class="btn secondary" id="computeBtn">Compute negative space</button>
@@ -475,7 +513,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.2'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.11'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1244,9 +1282,12 @@ function setGridRotation(deg){
 // here, not rebuilding the whole HTML file. gridRotationDeg values were
 // each independently measured, not copied from one another.
 const NEIGHBORHOODS = [
-  { id: 'hudson-yards', name: 'Hudson Yards', gridRotationDeg: 28.57 },
-  { id: 'chelsea', name: 'Chelsea', gridRotationDeg: 28.48 },
-  { id: 'hells-kitchen', name: "Hell's Kitchen", gridRotationDeg: 28.89 },
+  { id: 'district-1', name: 'TriBeCa / Battery Park City / FiDi', gridRotationDeg: 29.06 },
+  { id: 'district-2', name: 'Greenwich Village / West Village / SoHo / NoHo', gridRotationDeg: 24.18 },
+  { id: 'district-3', name: 'Alphabet City / East Village / Lower East Side / Chinatown', gridRotationDeg: 24.12 },
+  { id: 'district-4', name: 'Chelsea / Clinton / Hudson Yards', gridRotationDeg: 28.76 },
+  { id: 'district-5', name: 'Midtown', gridRotationDeg: 28.69 },
+  { id: 'district-6', name: 'Murray Hill / Stuyvesant Town / Gramercy / Kips Bay / Tudor City / Turtle Bay / Sutton Place', gridRotationDeg: 29.04 },
 ];
 let currentNeighborhoodId = null;
 const GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);
@@ -1752,6 +1793,7 @@ async function computeNegativeSpace(){
   refreshViewToggles();
 
   siteMinX = minX - boundaryMargin; siteMaxX = maxX + boundaryMargin; siteMinY = minY - boundaryMargin; siteMaxY = maxY + boundaryMargin; siteCapHeight = capHeight;
+  updateHandleScale(); // v3.2.11 -- must run after the 4 lines above set real siteMinX/Y/Max, before any handle is first shown
   // v3.0.31: cleanedGeo is genuinely watertight again (v3.0.30's shell
   // filtering reverted), so the poché stencil pass can just use it directly
   // -- no separate copy needed.
@@ -2600,31 +2642,47 @@ document.getElementById('computeBtn').addEventListener('click', () => { computeN
 // handful without wrapping into a cluttered multi-row grid; a pull-down
 // stays one control no matter how many neighborhoods get added later).
 function refreshNeighborhoodSelect(){
-  document.getElementById('neighborhoodSelect').value = currentNeighborhoodId;
+  const nb = NEIGHBORHOODS.find(n => n.id === currentNeighborhoodId);
+  document.getElementById('neighborhoodBtn').textContent = nb ? nb.name : '';
+  for (const opt of document.querySelectorAll('#neighborhoodList .opt')){
+    opt.classList.toggle('active', opt.dataset.id === currentNeighborhoodId);
+  }
 }
 async function switchNeighborhood(id){
   if (id === currentNeighborhoodId) return;
-  const select = document.getElementById('neighborhoodSelect');
-  select.disabled = true;
+  const btn = document.getElementById('neighborhoodBtn');
+  btn.disabled = true;
   try {
     await loadData(id);
   } catch (e) {
     toast(`Could not load ${id} data — check the data/${id}/ folder exists next to index.html`);
     console.error(e);
   } finally {
-    select.disabled = false;
+    btn.disabled = false;
     refreshNeighborhoodSelect();
   }
 }
 (function initNeighborhoodPicker(){
-  const select = document.getElementById('neighborhoodSelect');
+  const btn = document.getElementById('neighborhoodBtn');
+  const list = document.getElementById('neighborhoodList');
   for (const nb of NEIGHBORHOODS){
-    const opt = document.createElement('option');
-    opt.value = nb.id;
+    const opt = document.createElement('div');
+    opt.className = 'opt';
+    opt.dataset.id = nb.id;
     opt.textContent = nb.name;
-    select.appendChild(opt);
+    opt.addEventListener('click', () => {
+      list.classList.remove('open');
+      switchNeighborhood(nb.id);
+    });
+    list.appendChild(opt);
   }
-  select.addEventListener('change', () => switchNeighborhood(select.value));
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    list.classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!list.contains(e.target) && e.target !== btn) list.classList.remove('open');
+  });
 })();
 
 // v3.0.11: pulled the actual update logic out of the slider 'input' handlers
@@ -2712,11 +2770,22 @@ document.getElementById('flipYBtn').addEventListener('click', () => {
 // setHeightCut/setXCutaway/setYCutaway used by the sliders. OrbitControls is
 // disabled for the duration of a handle drag so the two don't fight over the
 // same mouse gesture.
-const HANDLE_COLOR = 0x5B8AA6; // soft steel-blue -- reads clearly as "interactive control" against the light gray mass and near-black interior, unlike the model's own warm-neutral palette
-const HANDLE_HOVER_COLOR = 0x82B4D4;
+// v3.2.10: per-axis colors, not one shared blue -- see syncHandlePositions()
+// below for the companion fix. Even with correct centroid positioning, a
+// SMALL cutaway near one corner (Joe's exact screenshot case) has a
+// genuinely small exposed face on every axis, so the 3 handles can still
+// sit close together in screen space -- that's an honest reflection of a
+// small cavity, not a positioning bug, and repositioning alone can't fully
+// separate them in that case. Distinct colors make each one identifiable by
+// itself regardless of how close together they are.
+const AXIS_COLORS = {
+  z: { base: 0x5B8AA6, hover: 0x82B4D4 }, // steel-blue (original color, kept for Height)
+  x: { base: 0xC9743A, hover: 0xE0965E }, // warm amber-orange
+  y: { base: 0x6FA66B, hover: 0x92C98E }, // muted green
+};
 function makeHandle(axis){
   const geom = new THREE.ConeGeometry(6, 22, 16);
-  const mat = new THREE.MeshStandardMaterial({ color: HANDLE_COLOR, metalness: 0.1, roughness: 0.6, depthTest: false });
+  const mat = new THREE.MeshStandardMaterial({ color: AXIS_COLORS[axis].base, metalness: 0.1, roughness: 0.6, depthTest: false });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.renderOrder = 20; // draw on top of everything (negativeMesh is 10, poché/cut-lines are 1-3.1) so handles stay grabbable even when visually behind the mass
   mesh.userData.axis = axis;
@@ -2741,17 +2810,64 @@ xHandle.rotation.z = -Math.PI / 2; // rotates +Y point to +X
 // so only the .add() call moves -- see boot() below, right after
 // initScene().
 
-// Positions handles at the corner of the currently-exposed cross-section --
-// i.e. exactly where the cutaway sliders' min corner sits, since that's the
-// one corner that's always part of the real exposed cut edge no matter where
-// the 3 sliders currently are (the octant-carve always removes material
-// toward siteMinX/siteMinY/0, per the clipIntersection=true setup above).
+// v3.2.11: handle SIZE is scaled to the model, not fixed -- found by Joe
+// against a real screenshot after v3.2.10 shipped (District 1, all 3
+// handles now correctly spread apart and distinctly colored, but nearly
+// invisible: tiny colored dots floating alone on an empty mold floor).
+// Root cause: the cone geometry's 22m height was sized for this project's
+// ORIGINAL single-neighborhood scale (Hudson Yards/Chelsea/Hell's Kitchen,
+// spanning roughly 700-1000m) -- reasonable at ~2-3% of that model's own
+// span. Districts now span 2,000-4,000m+ (multiple merged neighborhoods),
+// so the SAME fixed 22m absolute size shrank to under 1% of the model --
+// worse than before v3.2.10's reposition fix, not better, because the old
+// corner-clustering at least sat the handles among real building/poché
+// detail; centroid positioning moved them out onto open mold floor with
+// nothing nearby to visually anchor to, so a tiny handle reads as MORE
+// lost, not less. Live-verified the real numbers before fixing (District
+// 1: modelSpan ~2530m, old 22m handle = 0.87% of that) and the fix
+// (scaleFactor ~3.45x at that span, screenshot-confirmed clearly visible
+// orange/green cones) before writing this into source.
+const HANDLE_REFERENCE_SPAN = 700; // the original design's implicit target scale
+function updateHandleScale(){
+  if (siteCapHeight === undefined) return;
+  const modelSpan = Math.max(siteMaxX - siteMinX, siteMaxY - siteMinY, siteCapHeight);
+  const scaleFactor = modelSpan / HANDLE_REFERENCE_SPAN;
+  [heightHandle, xHandle, yHandle].forEach(h => h.scale.setScalar(scaleFactor));
+}
+
+// v3.2.10: repositioned at the CENTROID of each handle's own currently-
+// exposed cut face, not a shared fixed corner (Joe's screenshot: all 3
+// handles piling up at one corner against the dark poché fill, "graphically
+// they get lost"). The old approach anchored every handle to siteMinX
+// and/or siteMinY -- heightHandle at (siteMinX,siteMinY), xHandle's Y
+// pinned to siteMinY, yHandle's X pinned to siteMinX -- so they always sat
+// near the SAME corner region even though not literally coincident.
+// Live-verified against the real running app (not just read from source):
+// projected each handle's actual screen position before/after at both a
+// large asymmetric cut (568px screen spread -> stays wide) and default
+// 0/0/0 (569-1251px spread, already good) before shipping. Accounts for
+// flip state on X/Y (no Z-flip control exists) -- the exposed cavity sits
+// on whichever side of each threshold the flip buttons currently select,
+// same convention xClipPlane/yClipPlane's own normal already encodes.
+// Honest limitation, not fixed by repositioning alone: a SMALL cutaway
+// near one corner has a genuinely small exposed face on every axis, so the
+// 3 handles can still end up close together on screen in that specific
+// case -- verified live, still happens after this fix. That's an accurate
+// reflection of a small cavity, not a bug; the AXIS_COLORS change above
+// (distinct color per axis) is the real mitigation for that case, so each
+// handle stays identifiable by color even when physically close.
 function syncHandlePositions(){
   if (siteCapHeight === undefined) return;
-  const hx = siteMinX, hy = siteMinY; // the fixed corner
-  heightHandle.position.set(hx, hy, sectionPlane.constant);
-  xHandle.position.set(xThreshold, hy, siteCapHeight * 0.5);
-  yHandle.position.set(hx, yThreshold, siteCapHeight * 0.5);
+  const xLo = flipXCutaway ? xThreshold : siteMinX;
+  const xHi = flipXCutaway ? siteMaxX : xThreshold;
+  const yLo = flipYCutaway ? yThreshold : siteMinY;
+  const yHi = flipYCutaway ? siteMaxY : yThreshold;
+  const zLo = 0, zHi = sectionPlane.constant;
+  const cxCav = (xLo + xHi) / 2, cyCav = (yLo + yHi) / 2, czCav = (zLo + zHi) / 2;
+
+  heightHandle.position.set(cxCav, cyCav, sectionPlane.constant);
+  xHandle.position.set(xThreshold, cyCav, czCav);
+  yHandle.position.set(cxCav, yThreshold, czCav);
 }
 
 let dragAxis = null; // 'x' | 'y' | 'z' | null
@@ -2762,7 +2878,7 @@ function pointerToNDC(e){
   return new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
 }
 function handleForAxis(axis){ return axis === 'z' ? heightHandle : axis === 'x' ? xHandle : yHandle; }
-function setHandleHighlight(mesh, hovered){ mesh.material.color.set(hovered ? HANDLE_HOVER_COLOR : HANDLE_COLOR); }
+function setHandleHighlight(mesh, hovered){ const c = AXIS_COLORS[mesh.userData.axis]; mesh.material.color.set(hovered ? c.hover : c.base); }
 
 // v3.0.14 fix: same root problem as the scene.add() above -- these two
 // listeners were registered at top-level script scope via
