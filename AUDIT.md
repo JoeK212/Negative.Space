@@ -132,6 +132,67 @@ layers. This is now baked into the standard fetch pattern for this
 project — any future neighborhood's fetch code should use it from the
 start, not rediscover the bug.
 
+## Grid-tilt circular mean must fold to mod-90, not mod-180 (found District 7, v3.2.15)
+
+The weighted-circular-mean-of-wall-bearings method (referenced above and
+in v3.0.27) has a real failure mode when implemented as a naive axial
+mean: folding each wall bearing to mod-180 and doubling it (the standard
+technique for undirected line data) treats a rectangular building's two
+PERPENDICULAR wall families as unrelated data. Since 90° doubled is 180°
+— i.e. exactly opposite on the doubled circle from 0° doubled — a
+building's long walls and short walls (correctly 90° apart in reality)
+cancel each other out in the vector sum instead of reinforcing a shared
+grid direction. Caught when this produced a nonsensical R=0.177 for
+District 7 (Upper West Side), a district with one of Manhattan's most
+famously regular grids — a result that should have been close to
+Hudson Yards' 0.947 or District 4's 0.967, not near-zero.
+
+**Fix**: fold each wall bearing to mod-90 (not mod-180) FIRST — this
+correctly merges a wall and its 90°-rotated partner into the same value,
+since `(θ) mod 90 === (θ+90) mod 90`. THEN quadruple the folded angle
+(not double) before the circular mean, to correctly handle the mod-90
+wraparound the same way doubling handles mod-180. Divide the resulting
+mean angle by 4 to get back the real tilt.
+
+**Open, not yet checked**: whether Districts 1-6's already-shipped
+tilt/R values were computed with the flawed mod-180 method or something
+else — AUDIT.md doesn't specify a fully unambiguous formula, and it
+wasn't re-verified before shipping District 7. The tilt ANGLE itself is
+probably still correct even under the flawed method (mod-180 doubling
+mainly destroys R's magnitude by cancellation, not the resulting mean
+angle, when a building's long-wall and short-wall total lengths are
+roughly comparable) — but this is a reasoned guess, not a checked fact.
+Worth re-running the corrected mod-90 method against each of the 6
+already-shipped districts' real data before trusting their R values for
+anything (e.g. deciding whether a district's "irregular grid" flag is
+real).
+
+## Streets must be clipped to the real polygon, not just a buffered bbox (found District 7, v3.2.15)
+
+The documented streets step ("filter major streets to the same real
+polygon," EXTENDED.md's "adding a district" instructions) means exactly
+what it says — clip to the polygon (buffered by the standard ~350-400m),
+not to a buffered rectangular bounding box. A rectangular buffer around
+a district's bbox can reach much farther than intended when the
+district's real boundary is a tilted line (as most Manhattan community
+district boundaries are, following the ~29°-tilted street grid) — a
+buffered bbox's corners extend past the buffer distance from the actual
+boundary line, sometimes by hundreds of extra meters. Concretely: CD7's
+east boundary runs along Central Park West, and a 380m-buffered
+rectangular bbox around CD7 reached across the ~800m width of Central
+Park and picked up real East Side avenues (3rd/2nd/1st/York) that have
+no business appearing in a west-side district's streets file — 28
+spurious-inclusive unique street names instead of the real 20.
+
+**Fix**: after the initial `within_box` fetch (a generous rectangular
+candidate pool is fine and expected — it just needs to be big enough to
+contain the real buffered polygon), filter each street segment by real
+point-to-polygon distance (point-in-polygon OR distance from the segment
+midpoint to the nearest polygon boundary edge, in meters via the same
+lon/lat-to-meters conversion used elsewhere) against the ~350-400m
+threshold — not against the bbox itself. This is now the standard
+pattern for any future district's streets fetch.
+
 ## Neighborhood switching (v3.1.0)
 
 `NEIGHBORHOODS` is a small config array (`{id, name, gridRotationDeg}` per
@@ -616,6 +677,22 @@ style preference.
 
 ## Open / not yet started
 
+- **District 7 not yet live-verified** in Joe's browser (only Node-harness-verified so far — see v3.2.15 in CHANGELOG). Also open: whether Districts 1-6's shipped grid-tilt R values need re-computing under the corrected mod-90 method (see "Grid-tilt circular mean must fold to mod-90" above) — not yet checked either way.
+- **A smaller, still-unresolved cut-line artifact** (found while investigating
+  v3.2.14's degenerate-segment fix, immediately below): a handful of small
+  red dots remain visible along cut-line boundaries even after filtering out
+  genuinely-degenerate (near-zero-length) segments, sitting at regular
+  intervals right on an otherwise-continuous boundary edge -- confirmed real
+  and NOT introduced by the v3.2.14 filter (reproduced against a fresh,
+  completely unfiltered recompute first). Best working theory, not yet
+  confirmed: many short segments from adjacent triangles converging at a
+  single shared vertex (e.g. where several buildings' corners touch),
+  rendering as a small but visible cluster due to overlapping line draws at
+  that exact point -- but this wasn't verified the way the main v3.2.14 fix
+  was, so treat it as a real hypothesis, not a diagnosis. Minor relative to
+  the degenerate-segment issue (visible only on close zoom, not at normal
+  viewing distance) -- worth a real investigation next time, not guessed at
+  further this round.
 - **CSG output is NOT fully watertight** (found v3.2.1, real STL export
   run through `trimesh`, an external mesh library — not this app's own
   claims). A small mold-boundary margin (v3.2.1) fixed part of it for

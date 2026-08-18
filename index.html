@@ -513,7 +513,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.11'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.15'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -762,7 +762,27 @@ function computePlaneCrossSectionFast(plane, buf){
       const ix = p2x + (p0x - p2x) * tt, iy = p2y + (p0y - p2y) * tt, iz = p2z + (p0z - p2z) * tt;
       if (found === 0){ ax = ix; ay = iy; az = iz; found = 1; } else { bx = ix; by = iy; bz = iz; found = 2; }
     }
-    if (found === 2){ buf[w++] = ax; buf[w++] = ay; buf[w++] = az; buf[w++] = bx; buf[w++] = by; buf[w++] = bz; }
+    if (found === 2){
+      // v3.2.14: skip near-zero-length segments -- at Height Cut=0
+      // specifically (where ~31% of all vertices sit exactly at z=0, per
+      // the v3.0.37 comment above), the epsilon-biased plane still finds a
+      // technically-valid crossing on a huge number of triangles that are
+      // themselves right at the plane, producing a "segment" a few
+      // millimeters long. WebGL still submits these to the GPU as real
+      // line-segment draw calls, and they render as small stray dots
+      // scattered across the poché floor -- flagged by Joe as "a lot of
+      // artifacts" against a real screenshot. Live-verified before fixing:
+      // measured 22,022 total Z-axis segments at Height Cut=0, of which
+      // 11,893 (54%) were under 5cm long; filtering them out and
+      // re-screenshotting the same dense area showed a real, visible
+      // cleanup, not just a smaller number on paper. Threshold (5cm) is
+      // deliberately conservative -- also tested 50cm and found it started
+      // creating small gaps in otherwise-continuous boundary lines (visible
+      // as a dashed rather than solid edge), so this stays well below any
+      // segment length that's actually part of a real boundary.
+      const segLen = Math.hypot(bx-ax, by-ay, bz-az);
+      if (segLen >= 0.05){ buf[w++] = ax; buf[w++] = ay; buf[w++] = az; buf[w++] = bx; buf[w++] = by; buf[w++] = bz; }
+    }
   }
   return w; // number of floats written -- w/3 is the vertex count for setDrawRange
 }
@@ -993,6 +1013,22 @@ function makeCapQuad(size, restrictPlanes, renderOrder){
     clippingPlanes: restrictPlanes, // clipIntersection left at default (false/union): kept only where BOTH restrictPlanes agree
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
     stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp,
+    // v3.2.13: this quad sits EXACTLY coincident with negativeMesh's own
+    // real clipped cross-section surface at the same cut plane -- two
+    // perfectly coincident surfaces both writing depth causes classic
+    // z-fighting (a shimmering/striped flicker where per-pixel depth-buffer
+    // precision arbitrarily picks a "winner" each frame), which gets worse
+    // at oblique/grazing viewing angles. Flagged by Joe as "red shimmering
+    // face... view culling when rotating" -- the rotation dependence is the
+    // real tell for z-fighting specifically, not actual culling (frustum
+    // culling in Three.js is all-or-nothing per object, it can't produce a
+    // partial flicker within one surface). polygonOffset pulls this quad
+    // very slightly toward the camera in the depth buffer, breaking the
+    // depth tie deterministically. Live-verified before shipping: applied
+    // directly to the real running page's poché materials, screenshotted
+    // the exact reported state (extreme cutaway values, same camera angle)
+    // -- shimmer fully gone, poché reads as a clean solid translucent fill.
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
   pocheMaterials.push(mat); // v3.0.29 -- so updatePocheTheme() can keep it in sync with the live --accent CSS var
   const quad = new THREE.Mesh(geom, mat);
@@ -1288,6 +1324,7 @@ const NEIGHBORHOODS = [
   { id: 'district-4', name: 'Chelsea / Clinton / Hudson Yards', gridRotationDeg: 28.76 },
   { id: 'district-5', name: 'Midtown', gridRotationDeg: 28.69 },
   { id: 'district-6', name: 'Murray Hill / Stuyvesant Town / Gramercy / Kips Bay / Tudor City / Turtle Bay / Sutton Place', gridRotationDeg: 29.04 },
+  { id: 'district-7', name: 'Upper West Side / Manhattan Valley / Lincoln Square', gridRotationDeg: 28.86 },
 ];
 let currentNeighborhoodId = null;
 const GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);
@@ -2835,34 +2872,36 @@ function updateHandleScale(){
   [heightHandle, xHandle, yHandle].forEach(h => h.scale.setScalar(scaleFactor));
 }
 
-// v3.2.10: repositioned at the CENTROID of each handle's own currently-
-// exposed cut face, not a shared fixed corner (Joe's screenshot: all 3
-// handles piling up at one corner against the dark poché fill, "graphically
-// they get lost"). The old approach anchored every handle to siteMinX
-// and/or siteMinY -- heightHandle at (siteMinX,siteMinY), xHandle's Y
-// pinned to siteMinY, yHandle's X pinned to siteMinX -- so they always sat
-// near the SAME corner region even though not literally coincident.
-// Live-verified against the real running app (not just read from source):
-// projected each handle's actual screen position before/after at both a
-// large asymmetric cut (568px screen spread -> stays wide) and default
-// 0/0/0 (569-1251px spread, already good) before shipping. Accounts for
-// flip state on X/Y (no Z-flip control exists) -- the exposed cavity sits
-// on whichever side of each threshold the flip buttons currently select,
-// same convention xClipPlane/yClipPlane's own normal already encodes.
-// Honest limitation, not fixed by repositioning alone: a SMALL cutaway
-// near one corner has a genuinely small exposed face on every axis, so the
-// 3 handles can still end up close together on screen in that specific
-// case -- verified live, still happens after this fix. That's an accurate
-// reflection of a small cavity, not a bug; the AXIS_COLORS change above
-// (distinct color per axis) is the real mitigation for that case, so each
-// handle stays identifiable by color even when physically close.
+// v3.2.12: FIXED THE ACTUAL DIRECTION -- v3.2.10 and v3.2.11 both computed
+// a centroid for the WRONG octant. Joe correctly called this out again
+// ("still incorrect") against a real screenshot after v3.2.11 shipped; this
+// time, rather than reasoning from the old code comment again, verified
+// empirically against the real running app which octant is actually
+// discarded. Called xClipPlane.distanceToPoint()/yClipPlane/sectionPlane
+// directly on the 8 corners of the site box: only the (siteMaxX, siteMaxY,
+// siteCapHeight) corner is discarded by all 3 planes simultaneously (the
+// clipIntersection=true condition) -- the excavated/visible-interior octant
+// is toward MAX X/Y/Z, not toward siteMinX/siteMinY/0 as the old comment
+// claimed (removed below; it was simply wrong, not describing some earlier
+// version of the logic -- there's no evidence it was ever right). Every
+// previous fix in this area (original design, v3.2.10, v3.2.11) inherited
+// that same wrong assumption without independently checking it, which is
+// exactly why repositioning, coloring, AND scaling the handles never
+// actually solved Joe's complaint: they were being centered on a cavity
+// shape that doesn't exist. The real symptom this explains: at the default
+// 0/0/0 cutaway state, the previous formula gave xHandle/yHandle a Z of
+// ~0 (ground level, since it assumed the Z-range was [0,sectionConstant]
+// and sectionConstant=0 at default) -- but the real exposed cavity at
+// default spans the FULL height [sectionConstant, siteCapHeight], so they
+// should sit near mid-height, not on the ground. That's very likely what
+// Joe's last screenshot was actually showing.
 function syncHandlePositions(){
   if (siteCapHeight === undefined) return;
-  const xLo = flipXCutaway ? xThreshold : siteMinX;
-  const xHi = flipXCutaway ? siteMaxX : xThreshold;
-  const yLo = flipYCutaway ? yThreshold : siteMinY;
-  const yHi = flipYCutaway ? siteMaxY : yThreshold;
-  const zLo = 0, zHi = sectionPlane.constant;
+  const xLo = flipXCutaway ? siteMinX : xThreshold;
+  const xHi = flipXCutaway ? xThreshold : siteMaxX;
+  const yLo = flipYCutaway ? siteMinY : yThreshold;
+  const yHi = flipYCutaway ? yThreshold : siteMaxY;
+  const zLo = sectionPlane.constant, zHi = siteCapHeight;
   const cxCav = (xLo + xHi) / 2, cyCav = (yLo + yHi) / 2, czCav = (zLo + zHi) / 2;
 
   heightHandle.position.set(cxCav, cyCav, sectionPlane.constant);
