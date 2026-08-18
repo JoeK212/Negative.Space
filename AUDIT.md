@@ -154,18 +154,27 @@ since `(θ) mod 90 === (θ+90) mod 90`. THEN quadruple the folded angle
 wraparound the same way doubling handles mod-180. Divide the resulting
 mean angle by 4 to get back the real tilt.
 
-**Open, not yet checked**: whether Districts 1-6's already-shipped
-tilt/R values were computed with the flawed mod-180 method or something
-else — AUDIT.md doesn't specify a fully unambiguous formula, and it
-wasn't re-verified before shipping District 7. The tilt ANGLE itself is
-probably still correct even under the flawed method (mod-180 doubling
-mainly destroys R's magnitude by cancellation, not the resulting mean
-angle, when a building's long-wall and short-wall total lengths are
-roughly comparable) — but this is a reasoned guess, not a checked fact.
-Worth re-running the corrected mod-90 method against each of the 6
-already-shipped districts' real data before trusting their R values for
-anything (e.g. deciding whether a district's "irregular grid" flag is
-real).
+**Resolved (checked directly, Aug 2026)**: re-ran the corrected mod-90
+method against each of Districts 1-6's real building data in a fresh
+Node harness, and ran the flawed mod-180 method against the same data
+for contrast. Districts 2-6's shipped R values were already computed
+correctly — the independent mod-90 re-measurement landed within
+~0.01-0.015 of each shipped value (e.g. District 4: shipped 0.967 vs
+re-measured 0.954; District 2: shipped 0.429 vs re-measured 0.422),
+well within method-precision noise (haversine approx, degenerate-segment
+cutoff, building_parts inclusion). The mod-180 method, run for real
+rather than assumed, produces obviously-degenerate output (R≈0.03-0.07
+and a *different* mean angle entirely, not just a smaller R) — so if
+Districts 2-6 had shipped under that bug it would have been just as
+visible as District 7's 0.177 was. Tilt angles agree closely under both
+methods, confirming the earlier guess that angle survives the flaw even
+though R doesn't. District 1 never had an R value recorded at ship
+time (predates R being tracked at all) — now measured at **R=0.528**,
+meaningfully weaker than District 4-6's 0.93-0.97 range, consistent
+with FiDi's colonial-era irregular streets diluting TriBeCa's regular
+grid (the concern flagged when District 1 shipped, now confirmed
+numerically rather than just suspected). No shipped tilt/R values or
+index.html data need to change as a result of this check.
 
 ## Streets must be clipped to the real polygon, not just a buffered bbox (found District 7, v3.2.15)
 
@@ -193,9 +202,37 @@ lon/lat-to-meters conversion used elsewhere) against the ~350-400m
 threshold — not against the bbox itself. This is now the standard
 pattern for any future district's streets fetch.
 
-## Neighborhood switching (v3.1.0)
+## Streets near a borough line: polygon-distance clip alone isn't enough (found District 10, v3.2.18)
 
-`NEIGHBORHOODS` is a small config array (`{id, name, gridRotationDeg}` per
+A distinct, later problem than the one above — this one only shows up
+for districts whose Manhattan shoreline runs close to another borough.
+The real point-to-polygon-distance clip (previous section) correctly
+solved the "buffer reaches past the district's own edge" problem, but
+it says nothing about WHICH borough is on the other side of that edge.
+Where the Harlem River narrows (roughly CD10/CD11's stretch), a
+correctly-computed ~380m buffer can genuinely reach across the water
+and pick up real BRONX streets — not a geometry bug, an accurate
+distance measurement of a real narrow crossing. Found in District 10:
+Jerome Ave, E 149th St, and the Major Deegan Expressway service road
+all measured genuinely within 380m of CD10's real polygon boundary,
+correctly passing the distance clip, while being on the wrong side of
+the water for a Manhattan-only project.
+
+**Fix**: NYC Street Centerline's own `boroughcode` field (`1` =
+Manhattan, `2` = Bronx, standard citywide borough codes) is the correct
+filter here, applied per-segment alongside (not instead of) the
+polygon-distance clip — checking the street NAME alone isn't reliable
+(e.g. Manhattan's own real E 135th St happens to share its name with a
+separate Bronx street across the river; filtering by name would either
+wrongly drop the real Manhattan segment or wrongly keep the Bronx one,
+depending on which direction the mistake ran). Applying the borough
+filter per-segment, before grouping fetched segments by street name,
+handles this correctly either way. Worth checking for any future
+district with a similar narrow-water or land-bridge crossing (District
+11's Wards Island/Randalls Island connections to Queens/the Bronx via
+the Triborough/RFK Bridge are a likely candidate) — not yet checked.
+
+## Neighborhood switching (v3.1.0)
 entry), not a database or live search index. The sidebar's Neighborhood
 row is generated from it (one button per entry) rather than hardcoded
 HTML, so adding a neighborhood needs zero HTML changes. `switchNeighborhood(id)`
@@ -601,6 +638,45 @@ precision loss and an unrealistically low/grazing viewing angle at
 ~30km city scale — this was a real, confirmed bug (v3.0.21), not just a
 style preference.
 
+**Orbit target must be the SITE's center, not the borough's (found +
+fixed v3.2.23)**: `zoomToBoroughContext()` originally anchored both the
+initial camera position AND the OrbitControls target on
+`boroughsGroup`'s own bounding-box center. That's fine for the very
+first framing (it centers the whole island), but wrong as an ongoing
+orbit target — every zoom-in dollies the camera toward
+`controls.target`, and Manhattan's own centroid has no relationship to
+whichever district is actually loaded. Confirmed live in Joe's session
+(District 1, ~9000m from Manhattan's centroid): after a real zoom-in,
+`camera.position` had landed within 0.004 units of the borough box
+center — i.e. dollied almost exactly ONTO the empty target point, deep
+inside/behind real geometry along the way, tripping `BOROUGH_CAMERA_NEAR`
+(30 units) and slicing most of the scene away mid-shape (real per-
+triangle near-plane clipping — see the frustum-culling-is-all-or-nothing
+note above for why this rules out culling as the cause). Fixed by
+keeping the framing DISTANCE derived from the borough's size (whole
+island still fits on initial toggle) but anchoring both camera position
+and `controls.target` on `solidGroup`'s own bounding-box center instead
+— `solidGroup` is always populated once a district loads, unlike
+`siteMinX` etc. which only exist post-compute. Verified against Joe's
+real live data before shipping: recomputed the corrected position from
+his session's actual `boroughsGroup`/`solidGroup` boxes, confirmed a
+simulated deep zoom-in now lands ~900 units from the real district
+(not ~0.004 units from empty space), and screenshotted the corrected
+initial full-island framing directly in his session.
+
+**The cutaway-editing extras are no longer force-hidden in this view
+(also v3.2.23)**: `heightHandle`/`xHandle`/`yHandle`/cut-line meshes/
+cap-fill groups used to be unconditionally hidden whenever Manhattan
+context was on (the v3.0.24 design intent below). Joe's actual usage —
+zoomed in close on the district with Manhattan context still enabled —
+needs the handles working in exactly that state. Removed the forced
+hides; `refreshViewToggles()` already gates their visibility correctly
+on the Negative-space toggle + section-row state, so they now behave
+identically with Manhattan context on or off. **This changes the
+"Always live-verify" note below** — the old assumption that Manhattan
+context deliberately hides them no longer holds; see the corrected
+note.
+
 ## Working methodology notes for future sessions
 
 - **`node audit_deploy.js` (added v3.1.5) before calling any change
@@ -666,18 +742,25 @@ style preference.
   streets" toggles both ON, in addition to the default state.** These are
   independent, non-mutually-exclusive overlays that stay active across
   compute/recompute — a fix that only gets tested in the default view can
-  still be wrong once real-world context geometry is in the scene. Note
-  that "Manhattan context" ON deliberately hides the poché quads/cut-lines/
-  drag handles (a documented v3.0.24 design choice — those are a close-up
-  cutaway workflow, not meaningful at city scale), so a poché-related fix
-  can only be meaningfully checked against "Major streets" while zoomed to
-  the site; checking "Manhattan context" for a poché fix means confirming
-  it hides everything as designed and restores correctly on exit, not
-  that poché itself still renders while zoomed out (it won't, on purpose).
+  still be wrong once real-world context geometry is in the scene. As of
+  v3.2.23, the poché quads/cut-lines/drag handles are NO LONGER force-
+  hidden when Manhattan context is on (that was a v3.0.24 design choice,
+  removed once Joe's real workflow — zoomed in close on the district with
+  Manhattan context still enabled — showed it was blocking the handles
+  from working exactly when he needed them). A poché/handle-related fix
+  now needs checking with Manhattan context ON too, not just Major
+  streets while zoomed to the site — don't assume it's hidden there.
+  Also worth re-testing after any camera/zoom change: v3.2.23's own bug
+  was in this exact view (orbit target anchored on the wrong point),
+  found only by checking real zoomed-in behavior, not just the initial
+  toggle-on framing.
 
 ## Open / not yet started
 
-- **District 7 not yet live-verified** in Joe's browser (only Node-harness-verified so far — see v3.2.15 in CHANGELOG). Also open: whether Districts 1-6's shipped grid-tilt R values need re-computing under the corrected mod-90 method (see "Grid-tilt circular mean must fold to mod-90" above) — not yet checked either way.
+- **All 12 Manhattan Community Districts are now shipped** (as of v3.2.20) **and all have been live-verified** in Joe's actual running browser as of a follow-up session with his local dev server up (Districts 1-6 were already live-verified during their original shipping sessions; Districts 7-12 were checked in this follow-up pass, split across two sessions). Every district's real `Compute negative space` run in-browser matched its Node-harness triangle count almost exactly (D7: 161,900 vs 161,894; D9: 94,730 vs 94,740; D10: 137,854 vs 137,854 exact; D11: 100,548 vs 100,546; D12: 139,702 vs 139,682), and District 8/11's multi-part boundaries (Roosevelt Island, Wards/Randalls Island) were confirmed rendering as real separate landmasses in Manhattan-context view. No artifacts, missing geometry, or misplacement found anywhere. This item is now closed.
+- **Districts 1-6's grid-tilt R re-check under the corrected mod-90 method — resolved, closed** (see "Grid-tilt circular mean must fold to mod-90" above): re-ran the real corrected method against Districts 1-6's actual data. Districts 2-6's shipped R values were already correct (within ~0.01-0.015 of independent re-measurement). District 1's R, never recorded at ship time, is now measured at R=0.528. No shipped data changed.
+- **Multi-part district boundaries**: confirmed for District 8 (UES mainland + Roosevelt Island) and District 11 (East Harlem mainland + joined Wards/Randalls Island). Districts 9, 10, and 12 confirmed single-part. All 12 districts now checked — closed.
+- **Cross-borough street leakage near water**: confirmed and fixed for District 10 (Bronx streets near the Harlem River), District 11 (Queens/Bronx streets near the RFK/145th St/3rd Ave bridges), and District 12 (Bronx streets near Spuyten Duyvil/the Harlem River, 115 segments excluded) via the `boroughcode` filter. All 12 districts now checked — closed.
 - **A smaller, still-unresolved cut-line artifact** (found while investigating
   v3.2.14's degenerate-segment fix, immediately below): a handful of small
   red dots remain visible along cut-line boundaries even after filtering out

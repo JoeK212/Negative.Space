@@ -513,7 +513,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.15'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.23'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1324,7 +1324,12 @@ const NEIGHBORHOODS = [
   { id: 'district-4', name: 'Chelsea / Clinton / Hudson Yards', gridRotationDeg: 28.76 },
   { id: 'district-5', name: 'Midtown', gridRotationDeg: 28.69 },
   { id: 'district-6', name: 'Murray Hill / Stuyvesant Town / Gramercy / Kips Bay / Tudor City / Turtle Bay / Sutton Place', gridRotationDeg: 29.04 },
-  { id: 'district-7', name: 'Upper West Side / Manhattan Valley / Lincoln Square', gridRotationDeg: 28.86 },
+  { id: 'district-7', name: 'Upper West Side / Manhattan Valley / Lincoln Square', gridRotationDeg: 28.861 },
+  { id: 'district-8', name: 'Upper East Side / Lenox Hill / Yorkville / Roosevelt Island', gridRotationDeg: 29.09 },
+  { id: 'district-9', name: 'Hamilton Heights / Manhattanville / Morningside Heights', gridRotationDeg: 29.15 },
+  { id: 'district-10', name: 'Harlem / Polo Grounds', gridRotationDeg: 28.85 },
+  { id: 'district-11', name: 'East Harlem / Spanish Harlem / Wards Island / Randalls Island', gridRotationDeg: 28.860 },
+  { id: 'district-12', name: 'Inwood / Washington Heights', gridRotationDeg: 30.52 },
 ];
 let currentNeighborhoodId = null;
 const GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);
@@ -2545,12 +2550,36 @@ function zoomToBoroughContext(){
   camera.far = BOROUGH_CAMERA_FAR;
   camera.updateProjectionMatrix();
   controls.maxDistance = BOROUGH_MAX_DISTANCE; // v3.0.23 -- must happen before controls.update() below, since OrbitControls clamps camera position to maxDistance on update() regardless of how position got there
-  const box = new THREE.Box3().setFromObject(boroughsGroup);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const span = Math.max(size.x, size.y, 1000);
-  camera.position.copy(center).addScaledVector(BOROUGH_VIEW_DIR, span * 0.9);
-  controls.target.copy(center);
+  // v3.2.23 fix: the camera position AND the orbit target used to both be
+  // anchored on the BOROUGH's own bounding-box center (boroughsGroup's box)
+  // -- reasonable for the very first framing (it puts the whole island in
+  // view), but wrong as an orbit target: OrbitControls dollies the camera
+  // toward controls.target on every zoom-in, and Manhattan's own centroid
+  // has no relationship to whichever district is actually loaded. For a
+  // district near either end of the island (District 1's TriBeCa/FiDi is
+  // ~9000m from Manhattan's centroid), a normal scroll-to-zoom pulls the
+  // camera toward that empty, off-district point instead of toward the
+  // buildings on screen -- confirmed live in Joe's session by reading
+  // camera.position after a zoom-in: it had landed within 0.004 units of
+  // boroughsGroup's box center, i.e. camera had dollied almost exactly ONTO
+  // the target point itself, deep inside/behind real geometry along the
+  // way. With BOROUGH_CAMERA_NEAR=30, sitting that close to (or past)
+  // nearby geometry means most of the scene falls inside the 30-unit near
+  // clip and gets sliced away mid-shape -- exactly Joe's screenshot (a
+  // hard-edged wedge with disconnected fragments, not the real Manhattan
+  // outline) and exactly what he called it ("frame culling / clipping").
+  // Fix: keep the FRAMING DISTANCE derived from the borough's size (so the
+  // whole island still fits in the initial view), but anchor both the
+  // camera position and the orbit target on the SITE's own center instead
+  // of the borough's -- zooming in now approaches the actual buildings on
+  // screen, never an arbitrary empty point elsewhere on the island.
+  const boroughBox = new THREE.Box3().setFromObject(boroughsGroup);
+  const boroughSize = boroughBox.getSize(new THREE.Vector3());
+  const span = Math.max(boroughSize.x, boroughSize.y, 1000);
+  const siteBox = new THREE.Box3().setFromObject(solidGroup);
+  const siteCenter = siteBox.getCenter(new THREE.Vector3());
+  camera.position.copy(siteCenter).addScaledVector(BOROUGH_VIEW_DIR, span * 0.9);
+  controls.target.copy(siteCenter);
   controls.update();
   // v3.0.24: buildings/negative-space mesh are NO LONGER hidden here --
   // Joe pointed out the whole point of this view is seeing the real forms
@@ -2559,16 +2588,16 @@ function zoomToBoroughContext(){
   // ground plate (see BOROUGH_DEPTH above), buildings sit visibly on top
   // of it in their real position -- nothing to hide. Still hide: the
   // now-redundant square tan ground plane (Manhattan's real shape replaces
-  // its role), and the cutaway-editing-specific extras (drag handles,
-  // section cut-lines, poché cap fills) -- those are about a close-up
-  // editing workflow that doesn't apply at city scale, not about the
-  // building forms themselves. exitBoroughContext() restores everything
-  // via the same refreshViewToggles() the Buildings/Negative space buttons
-  // already use, so it comes back exactly as the user left it.
+  // its role). v3.2.23: the cutaway-editing extras (drag handles, section
+  // cut-lines, poché cap fills) are NO LONGER force-hidden here either --
+  // Joe zooms in close on the district while Manhattan context stays on
+  // (same workflow as his screenshots) and wants the handles usable there
+  // too, not just at the full-island overview. refreshViewToggles() already
+  // gates their visibility correctly on showNegative + the section-row
+  // toggle state; forcing them off here was overriding that correct state
+  // rather than adding anything, so just leave them as the user already
+  // set them.
   if (groundMesh) groundMesh.visible = false;
-  if (typeof zCutLineMesh !== 'undefined' && zCutLineMesh){ zCutLineMesh.visible = xCutLineMesh.visible = yCutLineMesh.visible = false; }
-  if (typeof heightHandle !== 'undefined'){ heightHandle.visible = xHandle.visible = yHandle.visible = false; }
-  if (capFillGroups){ capFillGroups.z.visible = capFillGroups.x.visible = capFillGroups.y.visible = false; }
 }
 function exitBoroughContext(){
   camera.near = ORIGINAL_CAMERA_NEAR;
