@@ -513,7 +513,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.23'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.24'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2058,9 +2058,28 @@ function currentTargetAndSpan(){
   // true elevation view, which is normally about seeing the whole thing
   // flat, not a zoomed-in perspective crop.
   if (showBoroughs && boroughsGroup){
+    // v3.2.24 fix: SPAN still comes from the borough's own box (so N/S/E/W/
+    // Plan keep framing the whole island's real size), but TARGET used to
+    // also come from the borough's box center -- wrong, for the same
+    // reason v3.2.23 fixed in zoomToBoroughContext(). Unlike the perspective
+    // camera, an orthographic camera's on-screen position never moves when
+    // you scroll to zoom (OrbitControls only shrinks/grows the frustum
+    // around whatever point the camera is already centered on) -- so
+    // targeting the borough's centroid here doesn't cause a runaway dolly
+    // like the perspective bug did, but it means scrolling in on a Plan/N/S/
+    // E/W view zooms toward Manhattan's geometric middle, not toward
+    // whichever district is actually loaded. For District 1 (~9100m from
+    // that middle), a few ordinary scroll-in ticks lands you over a stretch
+    // of the borough's flat context plate with no buildings on it at all --
+    // reading as a solid gray fill with the real content just gone, which
+    // is exactly what Joe flagged from the Plan view. Anchoring on the
+    // site's own center instead means zooming in on any N/S/E/W/Plan view
+    // converges on the real buildings, matching the perspective fix.
     const box = new THREE.Box3().setFromObject(boroughsGroup);
     const size = box.getSize(new THREE.Vector3());
-    return { target: box.getCenter(new THREE.Vector3()), span: Math.max(size.x, size.y, 1000) };
+    const span = Math.max(size.x, size.y, 1000);
+    const target = solidGroup ? new THREE.Box3().setFromObject(solidGroup).getCenter(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+    return { target, span };
   }
   if (siteCapHeight !== undefined){
     const cx = (siteMinX + siteMaxX) / 2, cy = (siteMinY + siteMaxY) / 2, cz = siteCapHeight / 2;
@@ -2089,6 +2108,16 @@ function setOrthogonalView(direction){
   orthoCamera.right = halfH * aspect;
   orthoCamera.top = halfH;
   orthoCamera.bottom = -halfH;
+  // v3.2.24: orthoCamera.zoom was never reset between calls -- since an
+  // orthographic camera's scroll-to-zoom only changes .zoom (never moves
+  // the camera, unlike perspective), a leftover zoom value from a PREVIOUS
+  // N/S/E/W/Plan view (e.g. zoomed in tight on a ~2000m site) would still
+  // be dividing the frustum here, silently over- or under-zooming the very
+  // first frame of a newly (re)computed left/right/top/bottom -- before
+  // any new scrolling at all. Resetting to 1 makes every view switch start
+  // from the same clean, fully-recomputed framing this function already
+  // exists to produce.
+  orthoCamera.zoom = 1;
   orthoCamera.near = 1;
   // Distance along the view axis doesn't affect apparent size for an
   // orthographic camera (unlike perspective) -- it only needs to be far
@@ -3020,6 +3049,15 @@ window.addEventListener('pointerup', () => {
   // negativeMesh, capFillGroups, the cut-line meshes).
   window.__NS = {
     get scene(){ return scene; }, get renderer(){ return renderer; }, get camera(){ return camera; },
+    // v3.2.24: orthoCamera + boroughsGroup added -- their absence made the
+    // v3.2.24 N/S/E/W/Plan bug harder to live-verify than v3.2.23's
+    // perspective-camera bug (screenshot/UI-interaction only, no direct
+    // camera-state reads). Both are getters, same pattern as everything
+    // else here, so they reflect whichever one is current even though
+    // orthoCamera only gets (re)constructed once and boroughsGroup only
+    // exists after a district loads.
+    get orthoCamera(){ return orthoCamera; }, get activeCamera(){ return activeCamera; },
+    get boroughsGroup(){ return boroughsGroup; },
     get THREE(){ return THREE; },
     get negativeMesh(){ return negativeMesh; }, get solidGroup(){ return solidGroup; },
     get capFillGroups(){ return capFillGroups; },

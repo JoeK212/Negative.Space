@@ -677,6 +677,49 @@ identically with Manhattan context on or off. **This changes the
 context deliberately hides them no longer holds; see the corrected
 note.
 
+**The SAME borough-centroid-as-target bug existed in a second place —
+the orthographic N/S/E/W/Plan views (found v3.2.24)**: v3.2.23 only
+fixed `zoomToBoroughContext()` (the perspective camera). `currentTargetAndSpan()`
+— used by `setOrthogonalView()` for all N/S/E/W/Plan buttons — had the
+identical bug: anchored on `boroughsGroup`'s box center instead of the
+site's when Manhattan context is on. Joe reported v3.2.23 as still
+broken; live re-diagnosis found his original screenshots most plausibly
+came from the Plan view (flat, no perspective foreshortening), which
+this second bug — untouched by v3.2.23 — still fully explains. Confirmed
+live: District 1 site center is 9146.99 units from `boroughsGroup`'s
+center, essentially identical to the perspective-camera gap v3.2.23
+found. **The failure mode looks different here** because an orthographic
+camera's scroll-to-zoom only changes `camera.zoom` (frustum scale) —
+it never moves the camera's position, unlike perspective's dolly. So
+this isn't a near-plane clip: zooming in on a Plan/N/S/E/W view with
+Manhattan context on zooms toward Manhattan's geometric middle, and for
+a district far from that middle, a handful of ordinary scroll ticks
+lands the frustum over a stretch of the borough's flat context plate
+with no buildings on it — a solid, textureless gray fill, the real
+content just gone. Reproduced directly (District 1, Plan view): 15
+zoom-in ticks still showed the correct island silhouette; 30 ticks was
+already total flat gray fill that stayed broken zooming further in
+either direction (confirms the frustum CENTER was wrong throughout, not
+just "too far zoomed" — a correctly-centered frustum recovers the whole
+island on zooming back out, this didn't). Fixed the same way: SPAN
+still from `boroughsGroup` (whole-island framing on first toggle), but
+TARGET now from `solidGroup`'s own box center.
+
+**Separate bug found by inspection while auditing this code path,
+not yet reported by Joe (also v3.2.24)**: `orthoCamera.zoom` was never
+reset between `setOrthogonalView()` calls. Since ortho zoom never moves
+the camera, a leftover zoom value from a previous N/S/E/W/Plan view
+(e.g. zoomed in tight on a ~2000m site) would silently over/under-zoom
+the very first frame of a freshly recomputed borough-scale frustum —
+before any new scrolling. Now reset to 1 on every call.
+
+**`orthoCamera` is NOT exposed on `window.__NS`** (only `camera`, the
+perspective one, is) — this made v3.2.24 harder to live-verify than
+v3.2.23; verification here has to be screenshot/UI-interaction based
+rather than direct camera-state reads. Worth adding `orthoCamera` to
+the debug hook in a future pass so this class of bug is checkable the
+same way for both cameras.
+
 ## Working methodology notes for future sessions
 
 - **`node audit_deploy.js` (added v3.1.5) before calling any change
