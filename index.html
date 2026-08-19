@@ -513,7 +513,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.24'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.25'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -921,6 +921,27 @@ const sectionPlaneNeg = new THREE.Plane(sectionPlane.normal.clone().negate(), -s
 const xClipPlaneNeg = new THREE.Plane(xClipPlane.normal.clone().negate(), -xClipPlane.constant);
 const yClipPlaneNeg = new THREE.Plane(yClipPlane.normal.clone().negate(), -yClipPlane.constant);
 
+// v3.2.25: the cap-fill quads (below) are built 3x oversized relative to
+// the site so they always cover the exposed cross-section no matter where
+// the cutaway sliders sit -- but each quad's restrictPlanes only bounded
+// the CUT CORNER side (the 2 threshold planes above), never the far sides.
+// That relied on the quad's own oversized-but-finite edge happening to
+// fall outside whatever was actually visible -- true at normal district
+// zoom (the excess ran off-screen) and moot before v3.2.23 (capFillGroups
+// were force-hidden whenever Manhattan context was on, so this never had
+// a chance to show). Once v3.2.23 correctly stopped hiding them, this gap
+// became visible: with Manhattan context on, the quad's un-bounded sides
+// extend clear across the borough as a giant floating translucent plate --
+// Joe's "red box artifact" / ghosted-skyline report. These 4 planes keep
+// every cap quad bounded to the REAL site footprint on every side,
+// regardless of view/zoom -- .constant set once real site bounds exist,
+// in computeNegativeSpace() alongside siteMinX etc.
+const siteBoundMinX = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+const siteBoundMaxX = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
+const siteBoundMinY = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const siteBoundMaxY = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+const SITE_BOUND_PLANES = [siteBoundMinX, siteBoundMaxX, siteBoundMinY, siteBoundMaxY];
+
 // v3.0.10: separate, epsilon-nudged copies of the 3 axis planes used ONLY
 // for the stencil parity pass inside createPlaneStencilGroup below -- never
 // for the quad's own position or negMat's real visible clipping, which stay
@@ -1064,21 +1085,21 @@ function buildCapFillGroups(geometry){
   // the stencil buffer.
   const xGroup = new THREE.Group();
   xGroup.add(createPlaneStencilGroup(geometry, xClipPlaneStencil, 1));
-  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg], 1.1);
+  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 1.1);
   xQuad.rotation.y = Math.PI / 2; // rotates the default +Z normal to +X
   xGroup.add(xQuad);
   xGroup.userData.quad = xQuad;
 
   const yGroup = new THREE.Group();
   yGroup.add(createPlaneStencilGroup(geometry, yClipPlaneStencil, 2));
-  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg], 2.1);
+  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES], 2.1);
   yQuad.rotation.x = -Math.PI / 2; // rotates the default +Z normal to +Y
   yGroup.add(yQuad);
   yGroup.userData.quad = yQuad;
 
   const zGroup = new THREE.Group();
   zGroup.add(createPlaneStencilGroup(geometry, sectionPlaneStencil, 3));
-  const zQuad = makeCapQuad(quadSize, [xClipPlaneNeg, yClipPlaneNeg], 3.1);
+  const zQuad = makeCapQuad(quadSize, [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 3.1);
   // PlaneGeometry's default normal is already +Z (see ground-plane note
   // above) -- no rotation needed, just position it at the current cut height.
   zGroup.add(zQuad);
@@ -1835,6 +1856,13 @@ async function computeNegativeSpace(){
   refreshViewToggles();
 
   siteMinX = minX - boundaryMargin; siteMaxX = maxX + boundaryMargin; siteMinY = minY - boundaryMargin; siteMaxY = maxY + boundaryMargin; siteCapHeight = capHeight;
+  // v3.2.25: keep the cap-fill quads' site-boundary clip planes (declared
+  // above, near sectionPlaneNeg) in sync with the real site footprint --
+  // .constant per plane's normal direction: siteBoundMinX keeps x >=
+  // siteMinX (normal +X, constant = -siteMinX), siteBoundMaxX keeps x <=
+  // siteMaxX (normal -X, constant = +siteMaxX), same pattern for Y.
+  siteBoundMinX.constant = -siteMinX; siteBoundMaxX.constant = siteMaxX;
+  siteBoundMinY.constant = -siteMinY; siteBoundMaxY.constant = siteMaxY;
   updateHandleScale(); // v3.2.11 -- must run after the 4 lines above set real siteMinX/Y/Max, before any handle is first shown
   // v3.0.31: cleanedGeo is genuinely watertight again (v3.0.30's shell
   // filtering reverted), so the poché stencil pass can just use it directly

@@ -451,6 +451,40 @@ remember this rule: **stencil writes and their corresponding read/clear
 step must be in the SAME opaque-vs-transparent list, or renderOrder cannot
 enforce the order between them.**
 
+**Cap-fill quads must be bounded on ALL sides by real site geometry, not
+just the cut-corner side (found + fixed v3.2.25)**: `makeCapQuad()`
+builds each quad 3x oversized relative to the site so it always covers
+the exposed cross-section regardless of slider position (see the
+`quadSize` comment in `buildCapFillGroups()`) — but each quad's
+`restrictPlanes` originally only bounded the CUT CORNER side (the 2
+axis-threshold planes, e.g. `[sectionPlaneNeg, yClipPlaneNeg]` for the X
+quad), never the far sides. The far sides relied entirely on the quad's
+own oversized-but-finite edge happening to fall outside whatever was
+actually visible. That held at normal district zoom (the excess ran off
+the edge of the screen) and was moot before v3.2.23 (`capFillGroups`
+were force-hidden whenever Manhattan context was on) — so a small,
+correctly-cut quad extending into a much larger surrounding context,
+with nothing else hiding the excess, never had a chance to actually
+happen until v3.2.23 correctly stopped hiding them. Confirmed live in
+Joe's session (District 1, X=665m/Y=306m cutaway, Major streets +
+Manhattan context on): the Z cap-fill quad rendered as a large floating
+translucent plate hovering over the wider island — Joe's "red box
+artifact" / ghosted-skyline report. Diagnostic note: `javascript_exec`'s
+return-value channel (~1-1.5KB) was too small for the full scene-graph
+dump needed to find this — used the DOM-write + `get_page_text`
+workaround documented below instead. Verified the quads' clip planes
+were numerically correct (`localClippingEnabled: true`, constants
+exactly matching the slider values) before concluding the clip was
+incomplete rather than broken — don't skip that check; an "unbounded on
+the far side" bug and a "clipping silently not applying at all" bug
+would look identical from a screenshot alone. Fixed with 4 new
+persistent planes (`siteBoundMinX/MaxX/MinY/MaxY`, declared near
+`sectionPlaneNeg`, kept in sync with `siteMinX` etc. in
+`computeNegativeSpace()`) added to all three quads' `restrictPlanes` —
+bounds every cap quad to the real site footprint on every side,
+permanently and view-independently, rather than patching Manhattan
+context specifically.
+
 ## Section cut-line (exact plane/triangle cross-section) — also IS poché's boundary
 
 As of v3.0.37, the red line tracing where a cutaway plane crosses the solid
@@ -776,6 +810,28 @@ same way for both cameras.
   NOT reachable from Joe's real browser (different machine/network
   namespace) — don't confuse "I started a local server" with "Joe can
   see it."
+- **The GitHub repo (`JoeK212/Negative.Space`, deployed via Netlify to
+  `negativespace212.netlify.app`) is a SEPARATE deployment target from
+  `localhost:8888`, and can drift far out of sync with it** — discovered
+  2026-08-19 when Joe reported a fix as "not fixed" and the real
+  explanation turned out to be that the public Netlify site was still
+  running a single-neighborhood "Hudson Yards" build from before the
+  entire 12-district system existed (pre-v3.2.7), months of work behind
+  local. Every deliverable handed off via `present_files` (the full-repo
+  zip, `negative-space-vX_Y_Z-full.zip`) is for Joe to unzip and
+  overwrite his ENTIRE repo with, including `data/` — there is no
+  "just update index.html" shortcut for a GitHub/Netlify push the way
+  there sometimes might seem to be for localhost, because the repo may
+  not have current district data at all. **As of the v3.2.24 handoff
+  (2026-08-19), Joe confirmed the GitHub repo now has the current
+  `index.html` and all 12 districts' real `data/` folders, matching
+  localhost.** Going forward: don't assume the GitHub/Netlify copy is
+  current just because localhost is — ask, or check the live Netlify
+  URL's footer version / neighborhood list directly (`negativespace212.netlify.app`,
+  fetchable via `web_fetch`) before assuming it reflects recent work.
+  If Joe reports a bug "still" present after a fix was shipped, check
+  which deployment he's actually looking at before re-diagnosing the
+  same code path — this exact confusion cost real time on 2026-08-19.
 - **`javascript_tool` return-value channel truncates around ~1-1.5KB.**
   For any data transfer larger than that (e.g. pulling real data out of a
   connected browser session), write it into the target page's own DOM and
