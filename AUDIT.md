@@ -378,6 +378,75 @@ it only changed how MUCH got cut at a given position, never which corner,
 since it never touched the plane's actual direction. Don't repeat that
 approach; the real fix requires the plane's own normal to flip.
 
+**Handle geometry must be offset off the cut plane, base-flush, not
+centered on it (found + fixed v3.2.27)**: `ConeGeometry` is centered on
+its own local origin — half its height above, half below — so
+positioning a handle's coordinate directly AT the cut plane along its
+own drag axis (the original behavior since v3.0.11) always buried half
+the cone inside the surface. Joe marked this up directly on a
+screenshot: "base of cone should be on the face of the plane, not
+submerged." The fix is NOT just a position offset — `xHandle`/`yHandle`
+rotation (which way the tip points) was fixed at construction, always
+toward +X/+Y regardless of `flipXCutaway`/`flipYCutaway`, which never
+looked wrong before because the cone was symmetric about the plane
+either way. Doing a position-only fix without ALSO making rotation
+flip-aware would put the fix in the wrong direction on the flipped
+side — tip flush with the plane, base floating in open air, i.e. the
+identical bug relocated rather than fixed. Verify base/tip world-space
+mapping by hand for every flip combination (4 for X+Y, plus Height
+which has no flip control) before trusting cone-rotation math — this
+project's `HANDLE_CONE_HEIGHT`-based offset in `syncHandlePositions()`
+does that per-call, matching current flip state each time.
+
+**Handles need a bigger visual cue than depthTest:false alone provides
+(found + fixed v3.2.28)**: the cone handles already render with
+`depthTest: false` (always on top, never actually hidden by geometry),
+but Joe reported them getting "lost graphically... when submerged into
+a lot of building forms." That's a legibility problem, not an occlusion
+bug — a small cone against a visually busy, similarly-colored building
+mass is hard to pick out even when technically always-visible. Fixed
+with `heightGuideLine`/`xGuideLine`/`yGuideLine`: thin lines, same axis
+color as their handle, same depthTest:false/high-renderOrder pattern,
+spanning the FULL site extent (not just the cavity) on their own axis —
+reads as a real reference line through the whole model, easy to trace
+back to the handle regardless of clutter. Kept in sync with handle
+position/visibility in the same two functions (`syncHandlePositions()`,
+`refreshViewToggles()`) rather than a separate parallel update path.
+
+**"Show cutaway handles" checkbox added, v3.2.29**: the same guide lines
+that help in a dense district read as clutter in a flat N/S/E/W
+elevation view (a line spans the FULL site extent, so at that camera
+angle it can run the entire width of the screen) — Joe flagged this
+directly off a screenshot. `showHandles` (module-level, default true)
+folds into `handlesOn` in `refreshViewToggles()` alongside `showNegative`
+and the section-row check, so toggling it off hides both the cones and
+their guide lines together with one flag, no separate code path. Cutaway
+VALUES stay fully adjustable while hidden — slider, number input, and
+keyboard nudge (`activeCutawayAxis` tracking doesn't care whether the
+handle mesh is visible) all still work; only dragging naturally becomes
+unavailable, and only because the existing pointerdown hit-test already
+filters to `.visible` handles, not because of anything new.
+
+**Keyboard arrow-key nudging must not depend on DOM focus (found + fixed
+v3.2.28)**: a focused `<input type="range">` already responds to arrow
+keys natively — but Joe reported them working "then get stuck", which
+traces to focus being lost the moment the 3D viewport is interacted with
+(orbiting, dragging a handle) with nothing sending focus back to the
+slider afterward. The fix is `activeCutawayAxis` (module-level, set by
+clicking/focusing a cutaway row OR dragging its handle in the viewport)
+plus one global `keydown` listener that nudges whichever axis is
+currently active regardless of what element actually has DOM focus. A
+genuinely-focused slider or number input still gets native browser
+arrow-key handling first — the global listener explicitly early-returns
+when `document.activeElement` is one of the app's own cutaway controls,
+so there's no double-nudging, only a fallback for when focus has drifted
+away entirely (the exact "gets stuck" case). Don't be tempted to fix
+this by re-focusing the slider programmatically after every handle drag
+instead — that fights the browser's own focus model and breaks the
+moment any other interaction (clicking a different button, tabbing)
+intervenes; tracking "which axis is logically active" independent of DOM
+focus is the more robust fix.
+
 ## Poché (section-cut fill) — the stencil-capping technique
 
 Clipping planes only discard fragments; they don't generate a cap surface
@@ -485,7 +554,108 @@ bounds every cap quad to the real site footprint on every side,
 permanently and view-independently, rather than patching Manhattan
 context specifically.
 
-## Section cut-line (exact plane/triangle cross-section) — also IS poché's boundary
+## Section mode — a real architectural section for N/S/E/W elevation views (v3.2.30)
+
+Joe: "I need the elevation to look like an actual section cut, currently
+graphically it's a bit messy." Previously N/S/E/W were true flat
+orthographic ELEVATIONS (see the camera system section below) — showing
+the whole model from outside, which is architecturally a different
+drawing type from a SECTION (a cut slice, everything nearer than the cut
+removed). Clarified scope with Joe before building rather than guessing,
+given real design ambiguity: (1) ghosted context behind the cut plane,
+not hidden entirely — `negMat`'s existing 0.15-opacity translucent shell
+already reads as "ghost," so this needed no change; (2) reuse the
+existing Height/X/Y cutaway sliders rather than add a 4th dedicated
+"section depth" control.
+
+**The octant cutaway's stencil poché already computes the TRUE full
+cross-section — the corner-only look is a separate, purely cosmetic
+mask.** `createPlaneStencilGroup()` (see the Poché section above) tests
+each axis's cut against the real, unclipped solid geometry, completely
+independent of the other two axes. What restricts the visible result to
+just the excavated octant corner is `restrictPlanes` on each quad's
+material (and, separately, on each cut-line mesh's material) — a masking
+step layered on top, not part of the stencil test itself. So a real
+full-width section needed no new geometry, no new stencil pass: only the
+ACTIVE axis's material-level restriction needed loosening.
+
+**`sectionModeAxis`** (`'x' | 'y' | null`) tracks which axis is the
+current section plane — `'y'` for N/S views, `'x'` for E/W, `null` for
+Plan or the perspective camera. Set in `setOrthogonalView()`, cleared in
+`recenterCamera()` (Home always exits section mode). `applySectionMode(axis)`
+does the actual work:
+- `negMat.clippingPlanes` becomes JUST the one matching plane
+  (`xClipPlane` or `yClipPlane`) instead of the normal 3-plane octant
+  intersection — a genuine full section on that axis, `clipIntersection`
+  irrelevant with one plane.
+- The active axis's poché quad AND cut-line mesh both drop their
+  octant-corner restriction (`sectionPlaneNeg` + the perpendicular axis's
+  `*ClipPlaneNeg`), bounded instead only by `SITE_BOUND_PLANES` (v3.2.25)
+  — both were already computed against the full real geometry, so this
+  is the exact same fix shape applied to two different mesh types.
+- The INACTIVE axis (and Plan/perspective) get their original
+  octant-restricted `restrictPlanes` back untouched.
+
+**Height Cut is deliberately EXCLUDED from the section-mode clip — this
+was a real bug caught before shipping, not after.** An earlier version
+of this unioned Height Cut into the clip too (`clippingPlanes: [axisPlane,
+sectionPlane]`, `clipIntersection: false` — removed if past EITHER
+threshold), reasoning that "reuse existing sliders" might mean all three
+staying simultaneously active. But Height Cut's default/reset value is 0,
+and `sectionPlane` keeps only `z<=constant` — unioning it in at that
+default would clip away the ENTIRE building above ground on every fresh
+section view, defeating the feature by default rather than starting from
+a clean full section. Caught by re-deriving what `sectionPlane.constant`
+actually equals at the slider's own default before shipping, not just
+trusting the "reuse sliders" framing literally. Height Cut and the
+perpendicular (non-view-direction) axis simply have no effect on the
+shell while in section mode; if a future request wants Height Cut to
+also trim a section, that needs to be a deliberate, explicit toggle, not
+folded into the default union.
+
+**Must re-run after every recompute.** `buildCapFillGroups()` and
+`buildCutLineMeshes()` both rebuild their meshes' materials from scratch
+on every compute, with the normal octant `restrictPlanes` — if a
+recompute happens while a section view is already active, the freshly
+built meshes would silently revert to corner-only unless
+`applySectionMode(sectionModeAxis)` runs again afterward. It's called at
+the end of `computeNegativeSpace()`, after BOTH rebuild calls (it touches
+meshes from each, so it can't run between them).
+
+**Real regression, v3.2.31: `applySectionMode()` must use
+`negativeMesh.material`, never `negMat` directly.** `negMat` is a `const`
+declared LOCAL to `computeNegativeSpace()` — `applySectionMode()` is a
+separate top-level function, and referencing `negMat` there threw
+`ReferenceError: negMat is not defined` on every call. Since this
+function is called from INSIDE `computeNegativeSpace()` itself (the
+re-apply-after-recompute call above), that uncaught error aborted
+`computeNegativeSpace()` mid-execution — silently skipping everything
+after it, including the line that reveals `#sectionRow`. Symptom in the
+UI: "control handles are missing" (Joe's exact words) — but the real
+failure was much bigger than the handles specifically; the ENTIRE
+cutaway panel never appeared, because compute() itself never finished.
+This is the same failure shape as v3.0.37's near-identical case
+(documented in the Section cut-line section below) — an uncaught error
+partway through `computeNegativeSpace()` leaves whatever ran BEFORE the
+throw visibly working (buildings/stats/negativeMesh all render fine),
+which makes the bug look smaller and more specific than it is. **Found
+via `read_console_messages`, not guesswork or re-reading the code
+harder** — the stack trace pointed directly at the exact line. When a
+"some UI element is missing" report doesn't match a targeted code
+read, check the browser console for an uncaught error before assuming
+the described symptom is the actual scope of the bug. Fixed by using
+`negativeMesh.material` (the exact same object — `negativeMesh = new
+THREE.Mesh(cleanedGeo, negMat)` — but module-level and reachable from
+outside `computeNegativeSpace()`) instead of `negMat`. When adding a
+NEW top-level function that reads state set up inside
+`computeNegativeSpace()`, verify each referenced variable is actually
+declared at module scope, not just check that the name exists
+somewhere in the file — `negMat`, `cleanedGeo`, and other `const`s
+declared with `computeNegativeSpace(){ const x = ... }` look identical
+to a real module-level `const` at a glance, but aren't reachable the
+same way.
+
+
 
 As of v3.0.37, the red line tracing where a cutaway plane crosses the solid
 is computed as an **exact triangle/plane intersection** (`computePlaneCrossSectionFast`),
@@ -671,6 +841,46 @@ since the site-scale camera settings produce severe depth-buffer
 precision loss and an unrealistically low/grazing viewing angle at
 ~30km city scale — this was a real, confirmed bug (v3.0.21), not just a
 style preference.
+
+**The Manhattan ground plate must include Randalls/Wards Island and
+Roosevelt Island as their own separate rings, not just the mainland
+(found + fixed v3.2.26)**: `boroughsData`'s "Manhattan" entry (the
+`<script id="boroughsData">` JSON) used to be a single flat ring tracing
+only Manhattan Island's own mainland coastline. Randalls/Wards Island
+(District 11) and Roosevelt Island (District 8) are legally part of
+Manhattan borough but are physically separate landmasses a single ring
+can't represent, so their real buildings — correctly positioned in
+real-world space — had no land drawn under them at all in Manhattan
+context, reading as floating in open water (Joe's report, District 11).
+Confirmed the building data itself was never wrong before touching any
+code: pulled District 11's real building lat/lon bounds directly and
+cross-checked them against Randalls/Wards Island's known real-world
+center — matched exactly. Confirmed the OTHER thing Joe flagged in the
+same screenshot (a coastline notch near the Harlem River mouth) was
+real, correct geography, not a bug, by inspecting the ring's own points
+in that area before assuming it needed fixing.
+
+Fixed by fetching both islands' real coastlines from OSM's Overpass API
+via the connected browser session (the sandbox itself can't reach
+general internet — same reason NYC Street Centerline is fetched this
+way, see the pipeline gotchas). Each island is an OSM multipolygon
+relation assembled from several ways (6 each here); stitch them into a
+single closed ring by repeatedly matching the current ring's tail
+against the nearest remaining way's head OR tail (reversing if it
+matched the tail), and verify with a zero-distance closure check before
+trusting the result — do this for ANY new OSM-sourced ring, not just
+these two. Roosevelt Island's OSM relation name collides with two
+unrelated islands (Antarctica, Virginia); disambiguate by wikidata id,
+not name alone (`Q909777` here). `boroughsData`'s Manhattan entry is
+now an ARRAY of rings (mainland first, then each additional island) —
+`buildBoroughsLayer()` accepts either the old flat-ring format or the
+new array format (checks whether the first element is itself an array),
+and extrudes every ring as its own independently-positioned piece of
+the same Manhattan group, so island buildings now sit on real land the
+same way mainland buildings do. This same pattern (array-of-rings, one
+extruded piece per ring) is the template for adding any further
+non-contiguous NYC islands later (Mill Rock, Governors Island, etc.) if
+a future district needs one.
 
 **Orbit target must be the SITE's center, not the borough's (found +
 fixed v3.2.23)**: `zoomToBoroughContext()` originally anchored both the
