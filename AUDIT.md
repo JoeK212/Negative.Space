@@ -655,6 +655,64 @@ declared with `computeNegativeSpace(){ const x = ... }` look identical
 to a real module-level `const` at a glance, but aren't reachable the
 same way.
 
+**Real graphical bug, v3.2.32: the active axis's quad/cut-line must
+KEEP `sectionPlaneNeg`, only drop the PERPENDICULAR axis's plane.**
+v3.2.30 dropped `sectionPlaneNeg` from the active quad/cut-line
+entirely, reasoning (mistakenly, by pattern-matching to the negMat fix
+right above it in the same function) that it carried the same "Height
+Cut defaults to 0" destructive-default risk. It doesn't — that risk is
+specific to `negMat`'s `clipIntersection:false` UNION semantics
+(removed if past EITHER threshold); a quad's `restrictPlanes` is an
+ordinary AND-ed bound with no union interaction, identical to how every
+OTHER axis's poché quad has always used `sectionPlaneNeg`. Symptom,
+caught by Joe from a screenshot: a stray gray band floating above the
+skyline, and a red band along the ground that ignored Height Cut
+entirely — both are the quad's full 3x-oversized raw height (v3.2.25)
+rendering completely unbounded once its one remaining vertical
+constraint was removed. Lesson: two clip-scope fixes living in the same
+function, solving genuinely different problems, can look like the same
+pattern and don't automatically transfer — re-derive the actual risk
+for each site rather than applying an adjacent fix's reasoning by
+proximity. Also added `sectionPlaneNeg`/`xClipPlaneNeg`/`yClipPlaneNeg`/
+`SITE_BOUND_PLANES`/`sectionModeAxis` to the `window.__NS` debug hook —
+this specific bug lived at a level the hook didn't expose before (shell
+clipping was checkable, quad/cut-line restrictPlanes weren't), which is
+part of why it wasn't caught live before the first ship.
+
+**Real graphical bug, v3.2.33: the INACTIVE axis's quad/cut-line must be
+HIDDEN in section mode, not just left with its old restrictPlanes.**
+v3.2.30/32 correctly re-bounded the ACTIVE axis's quad into a true full
+section, but never addressed the OTHER (perpendicular) axis's quad at
+all — it kept rendering fully visible with its old octant
+`restrictPlanes`, and since its stencil test runs against the real
+geometry completely independent of section mode, it kept showing its
+own genuine poché wherever real solid happened to cross ITS OWN
+threshold. Confirmed directly via the debug hook before writing the fix
+(not guessed): `sectionModeAxis: "y"` (an N view) but
+`capFillGroups.x.visible: true` — with the X cutaway slider sitting at
+an extreme site-edge value, that's exactly enough real building edge
+crossing the plane to render a second, visually disconnected poché
+rectangle, with a real gap between it and the true section (Joe's
+screenshot: two red rectangles side by side). Fixed in
+`refreshCapFillVisibility()`/`refreshViewToggles()` — the existing,
+single owners of all cap-fill/cut-line visibility — by making both
+check `sectionModeAxis`, showing only the matching axis's quad while a
+section view is active. `applySectionMode()` now calls
+`refreshViewToggles()` itself at the end so this actually takes effect
+on every transition, rather than relying on some OTHER code path to
+happen to call it afterward.
+
+**Running tally for this feature: v3.2.30 (shipped) → v3.2.31 (my own
+scoping bug) → v3.2.32 (my own reasoning-by-proximity bug) → v3.2.33
+(a real gap in what v3.2.30 covered in the first place).** Section mode
+touches negMat's shell clip, two quads' restrictPlanes, two cut-line
+meshes' restrictPlanes, AND now visibility across four objects — a
+genuinely wide surface area for a single feature. Before touching this
+code again, re-read the whole `applySectionMode()` function in one pass
+and check each of clippingPlanes / restrictPlanes / visible is handled
+consistently for BOTH the active and inactive axis, rather than fixing
+one reported symptom and assuming the rest was already right.
+
 
 
 As of v3.0.37, the red line tracing where a cutaway plane crosses the solid

@@ -530,7 +530,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.2.31'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.2.35'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -924,6 +924,97 @@ function buildCutLineMeshes(geometry){
 // blends with what's behind it, so fine aliasing patterns read far less
 // prominently than on a fully opaque fill.
 const POCHE_COLOR = 0xB23A2E; // light theme --accent; kept in sync with the live CSS var by updatePocheTheme() below
+
+// v3.2.35: "true orthogonal section" fix. Joe correctly identified that the
+// gray/red slab filling the sky above the skyline in N/S/E/W section views
+// wasn't a camera or projection bug (the ortho camera IS genuinely
+// axis-locked, v3.2.34) -- it's real geometry: the void directly above every
+// SHORTER building, all the way up to the district's tallest building (the
+// mold's cap height), rendered as a solid, uniform fill across its whole
+// depth. That's an accurate rendering of the actual model -- but it isn't
+// what a real architectural section/elevation shows, where anything above a
+// building's own roofline just reads as open sky.
+//
+// Live-diagnosed step by step directly against Joe's running session before
+// writing this: hiding negativeMesh alone only lightened the tone slightly
+// (ghost + poché were BOTH contributing); a `depthWrite:true` experiment (to
+// test whether transparent-material depth stacking was the cause) made zero
+// visible difference, ruling that out -- confirming this is real, intended
+// geometry being rendered correctly, not a blending/sorting artifact.
+//
+// Fix: a per-axis 1D "local roofline height" profile, built once per compute
+// from the real buildingsGeo features (same projected coordinates already
+// used for the site bbox above), uploaded as a small DataTexture. In section
+// mode only, both the ghost (negativeMesh) and the active axis's poché quad
+// discard any fragment more than NEG_SECTION_SKY_MARGIN above whatever's
+// locally the tallest real building at that screen position -- so a shorter
+// building's own airspace still shows correctly (poché right down to ITS
+// roof), but the district-wide void above OTHER, taller buildings elsewhere
+// no longer paints a flat ceiling across the whole frame. Perspective,
+// octant cutaway, Plan, and STL export are completely untouched -- this only
+// engages when sectionModeAxis is 'x' or 'y' (see applySectionMode()).
+const NEG_SECTION_SKY_MARGIN = 4; // meters of headroom above local roofline before ghost/poché stop rendering, section views only
+let negHeightTexX = null, negHeightTexY = null; // rebuilt each compute; sampled by world X (for N/S views) or world Y (for E/W views) respectively
+function buildAxisHeightProfile(axis, lo, hi, capHeight, bins = 512){
+  const arr = new Float32Array(bins);
+  const binW = (hi - lo) / bins;
+  for (const f of buildingsGeo.features){
+    const h = Math.min(f.properties.height || 0, capHeight);
+    if (h <= 0) continue;
+    const pts = flattenRings(f.geometry).flat().map(([lon, lat]) => project(lon, lat));
+    let bMin = Infinity, bMax = -Infinity;
+    for (const [x, y] of pts){
+      const v = axis === 'x' ? x : y;
+      if (v < bMin) bMin = v;
+      if (v > bMax) bMax = v;
+    }
+    if (!isFinite(bMin)) continue;
+    const i0 = Math.max(0, Math.floor((bMin - lo) / binW));
+    const i1 = Math.min(bins - 1, Math.ceil((bMax - lo) / binW));
+    for (let i = i0; i <= i1; i++) if (h > arr[i]) arr[i] = h;
+  }
+  const tex = new THREE.DataTexture(arr, bins, 1, THREE.RedFormat, THREE.FloatType);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+// Shared by negMat and both x/y poché quads -- injects the world-position
+// varying and the local-roofline discard test into any MeshStandardMaterial.
+// `colorAssign` is the (optional) extra GLSL to run after the discard test
+// passes -- negMat uses it for its front/back-facing color split; the poché
+// quads don't need it (their color comes from the material's own uniform).
+function addSkyDiscard(mat, colorAssign){
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uSkyDiscardOn = { value: 0.0 };
+    shader.uniforms.uSkyHeightTex = { value: negHeightTexY };
+    shader.uniforms.uSkyLo = { value: 0 };
+    shader.uniforms.uSkyHi = { value: 1 };
+    shader.uniforms.uSkyAxisIsX = { value: 0.0 };
+    shader.uniforms.uSkyMargin = { value: NEG_SECTION_SKY_MARGIN };
+    mat.userData.skyUniforms = shader.uniforms; // applySectionMode() mutates these live -- no material swap needed for axis switches
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vNegWorldPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvNegWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `
+        #include <common>
+        varying vec3 vNegWorldPos;
+        uniform float uSkyDiscardOn;
+        uniform sampler2D uSkyHeightTex;
+        uniform float uSkyLo; uniform float uSkyHi; uniform float uSkyAxisIsX; uniform float uSkyMargin;
+      `)
+      .replace('#include <color_fragment>', `
+        #include <color_fragment>
+        if (uSkyDiscardOn > 0.5) {
+          float freeCoord = mix(vNegWorldPos.y, vNegWorldPos.x, uSkyAxisIsX);
+          float u = clamp((freeCoord - uSkyLo) / (uSkyHi - uSkyLo), 0.0, 1.0);
+          float localMaxH = texture2D(uSkyHeightTex, vec2(u, 0.5)).r;
+          if (vNegWorldPos.z > localMaxH + uSkyMargin) discard;
+        }
+        ${colorAssign || ''}
+      `);
+  };
+}
 let pocheMaterials = []; // populated by buildCapFillGroups(), refreshed on theme toggle
 function updatePocheTheme(){
   const c = cssVarColor('--accent');
@@ -1043,7 +1134,7 @@ function createPlaneStencilGroup(geometry, plane, renderOrder){
 }
 
 
-function makeCapQuad(size, restrictPlanes, renderOrder){
+function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis){
   const geom = new THREE.PlaneGeometry(size, size);
   const mat = new THREE.MeshStandardMaterial({
     color: POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, // DoubleSide so the fill stays visible from either side as the user orbits
@@ -1069,6 +1160,23 @@ function makeCapQuad(size, restrictPlanes, renderOrder){
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
   pocheMaterials.push(mat); // v3.0.29 -- so updatePocheTheme() can keep it in sync with the live --accent CSS var
+  if (skySampleAxis){
+    // v3.2.35: this quad's own mapping is fixed for its lifetime (the X-cut
+    // quad, shown in E/W views, always needs local roofline as a function of
+    // Y -- the horizontal screen axis in that view -- and vice versa for the
+    // Y-cut quad in N/S views), so lo/hi/texture/axis are set once here.
+    // Only the on/off toggle (uSkyDiscardOn) needs to change later, and
+    // that's handled live by applySectionMode().
+    addSkyDiscard(mat);
+    const su = () => mat.userData.skyUniforms;
+    mat.userData.applySkyConfig = () => {
+      const s = su(); if (!s) return;
+      s.uSkyHeightTex.value = skySampleAxis === 'x' ? negHeightTexX : negHeightTexY;
+      s.uSkyLo.value = skySampleAxis === 'x' ? siteMinX : siteMinY;
+      s.uSkyHi.value = skySampleAxis === 'x' ? siteMaxX : siteMaxY;
+      s.uSkyAxisIsX.value = skySampleAxis === 'x' ? 1.0 : 0.0;
+    };
+  }
   const quad = new THREE.Mesh(geom, mat);
   quad.renderOrder = renderOrder;
   quad.onAfterRender = (r) => r.clearStencil();
@@ -1102,14 +1210,14 @@ function buildCapFillGroups(geometry){
   // the stencil buffer.
   const xGroup = new THREE.Group();
   xGroup.add(createPlaneStencilGroup(geometry, xClipPlaneStencil, 1));
-  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 1.1);
+  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 1.1, 'y'); // E/W views: horizontal screen axis is Y, so local roofline is sampled by Y
   xQuad.rotation.y = Math.PI / 2; // rotates the default +Z normal to +X
   xGroup.add(xQuad);
   xGroup.userData.quad = xQuad;
 
   const yGroup = new THREE.Group();
   yGroup.add(createPlaneStencilGroup(geometry, yClipPlaneStencil, 2));
-  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES], 2.1);
+  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES], 2.1, 'x'); // N/S views: horizontal screen axis is X, so local roofline is sampled by X
   yQuad.rotation.x = -Math.PI / 2; // rotates the default +Z normal to +Y
   yGroup.add(yQuad);
   yGroup.userData.quad = yQuad;
@@ -1758,6 +1866,12 @@ async function computeNegativeSpace(){
   // accidental degenerate case this margin fixes.
   const boundaryMargin = 2;
 
+  // v3.2.35: build both axes' local-roofline height profiles now, while
+  // minX/maxX/minY/maxY/capHeight are all in scope -- see the sky-discard
+  // block near POCHE_COLOR above for the full rationale.
+  negHeightTexX = buildAxisHeightProfile('x', minX - boundaryMargin, maxX + boundaryMargin, capHeight);
+  negHeightTexY = buildAxisHeightProfile('y', minY - boundaryMargin, maxY + boundaryMargin, capHeight);
+
   statEl.textContent = `Unioning ${solidsByBuilding.size} buildings…`;
   await new Promise(r => setTimeout(r, 0));
   const buildingManifolds = [...solidsByBuilding.values()].map(g => g.manifold).filter(Boolean);
@@ -1851,15 +1965,7 @@ async function computeNegativeSpace(){
     transparent: true, opacity: 0.15,
     side: THREE.DoubleSide, clippingPlanes: [sectionPlane, xClipPlane, yClipPlane], clipIntersection: true, clipShadows: true,
   });
-  negMat.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <color_fragment>',
-      `
-      #include <color_fragment>
-      diffuseColor.rgb = gl_FrontFacing ? vec3(0.529, 0.596, 0.651) : vec3(0.102, 0.078, 0.063);
-      `
-    );
-  };
+  addSkyDiscard(negMat, 'diffuseColor.rgb = gl_FrontFacing ? vec3(0.529, 0.596, 0.651) : vec3(0.102, 0.078, 0.063);');
   negativeMesh = new THREE.Mesh(cleanedGeo, negMat);
   negativeMesh.renderOrder = 0; // v3.0.32: moved from 10 to BEFORE the poché stencil/quad passes (1-3.1) -- with the shell restored (v3.0.31) and now translucent, drawing it AFTER poché meant the shell's own translucent gray composited on top of the red poché fill, visually washing it out ("no poché for x/y" turned out to be poché rendering correctly but getting muted underneath the shell). Poché now draws last, staying vividly on top.
   scene.add(negativeMesh);
@@ -1894,6 +2000,18 @@ async function computeNegativeSpace(){
   // very first cut-line render after a compute would have used stale
   // (zero/undefined-derived) epsilon planes.
   buildCutLineMeshes(cleanedGeo);
+  // v3.2.35: force a synchronous shader compile here, BEFORE
+  // applySectionMode() runs below. onBeforeCompile (which populates each
+  // material's userData.skyUniforms, see addSkyDiscard()) only fires on a
+  // material's first real render -- without this, a recompute that happens
+  // while an N/S/E/W section view is ALREADY active would call
+  // applySectionMode() a few lines down against materials that haven't
+  // compiled yet, silently no-op the sky-discard toggle (guarded by an
+  // `if (skyUniforms)` check so it doesn't throw), and only pick it up once
+  // the user clicked a nav button again. renderer.compile() runs the same
+  // onBeforeCompile hooks immediately, so userData.skyUniforms exists by the
+  // time applySectionMode() reads it two lines below.
+  renderer.compile(scene, activeCamera);
   applySectionMode(sectionModeAxis); // v3.2.30: buildCapFillGroups()/buildCutLineMeshes() just rebuilt fresh quads/cut-lines with default (octant) restrictPlanes -- re-apply section mode if a recompute happened while an N/S/E/W section view was already active, or they'd silently lose it. Must run AFTER both, not between them -- it touches meshes from each.
   // v3.0.36: found and fixed the REAL root cause (see syncCapFillPlanes()
   // above) -- STENCIL_EPSILON was unconditionally added, which is correct
@@ -2154,17 +2272,22 @@ function currentTargetAndSpan(){
 // itself. So a true full-width section didn't need new geometry or a new
 // stencil pass -- it only needed the ACTIVE axis's clipping loosened.
 //
-// Height Cut is deliberately EXCLUDED from the section-mode clip, even
-// though "reuse existing sliders" could be read as wanting it unioned in
-// too -- caught before shipping: Height Cut's default/reset value is 0,
-// and `sectionPlane` keeps only z<=constant, so unioning it in at that
-// default would clip away the entire building above ground on every
-// fresh section view, defeating the feature by default rather than
-// starting from a clean full elevation. Height Cut (and the perpendicular
-// axis) simply have no effect on the shell while in section mode --
-// the section is defined by exactly the one axis matching the current
-// N/S/E/W direction, nothing else. If Joe wants Height Cut to also trim
-// the section later, that's a deliberate follow-up, not a silent default.
+// Height Cut is EXCLUDED from negMat's shell clip specifically (below),
+// even though "reuse existing sliders" could be read as wanting it
+// unioned in too -- caught before shipping: Height Cut's default/reset
+// value is 0, and `sectionPlane` keeps only z<=constant, so unioning it
+// into negMat's clip at that default would remove the entire building
+// above ground on every fresh section view, defeating the feature by
+// default rather than starting from a clean full elevation. That risk is
+// specific to negMat's clipIntersection:false UNION semantics (removed
+// if past EITHER threshold) -- it does NOT apply to the poché quads'
+// restrictPlanes below, which are an ordinary AND-ed bound with no union
+// interaction. v3.2.30 mistakenly dropped sectionPlaneNeg from the
+// quads/cut-lines too "to be consistent" -- fixed in v3.2.32 once Joe's
+// screenshot showed the real effect: poché rendering unbounded both
+// above the real roofline and below ground, ignoring Height Cut
+// entirely. The quads/cut-lines DO still respect Height Cut; only
+// negMat's shell (and the perpendicular axis, everywhere) don't.
 let sectionModeAxis = null; // null | 'x' | 'y' -- which axis (if any) is the current N/S/E/W view's section plane
 function applySectionMode(axis){
   sectionModeAxis = axis;
@@ -2192,26 +2315,68 @@ function applySectionMode(axis){
     negMat.clipIntersection = false; // irrelevant with one plane, kept false (the safe default) for clarity
   }
   negMat.needsUpdate = true;
+  // v3.2.35: toggle the sky-discard shader uniforms live -- no material swap
+  // needed for an axis switch, only uniform VALUES change (onBeforeCompile
+  // itself only needs to run once; see addSkyDiscard()). Off (0.0) restores
+  // the exact original full-depth ghost for perspective/octant/Plan, so
+  // nothing changes there.
+  if (negMat.userData.skyUniforms){
+    const su = negMat.userData.skyUniforms;
+    if (axis === 'x'){ // E/W view: horizontal screen axis is Y
+      su.uSkyDiscardOn.value = 1.0; su.uSkyHeightTex.value = negHeightTexY;
+      su.uSkyLo.value = siteMinY; su.uSkyHi.value = siteMaxY; su.uSkyAxisIsX.value = 0.0;
+    } else if (axis === 'y'){ // N/S view: horizontal screen axis is X
+      su.uSkyDiscardOn.value = 1.0; su.uSkyHeightTex.value = negHeightTexX;
+      su.uSkyLo.value = siteMinX; su.uSkyHi.value = siteMaxX; su.uSkyAxisIsX.value = 1.0;
+    } else {
+      su.uSkyDiscardOn.value = 0.0;
+    }
+  }
   if (capFillGroups){
     const xQuadMat = capFillGroups.x.userData.quad.material;
     const yQuadMat = capFillGroups.y.userData.quad.material;
-    // Active axis's quad: bounded only by the real site footprint (v3.2.25's
-    // SITE_BOUND_PLANES), NOT by sectionPlaneNeg -- for the same reason
-    // Height is excluded above; a full section face should show the true
-    // building height, not get silently clipped at Height Cut's default.
-    xQuadMat.clippingPlanes = axis === 'x' ? SITE_BOUND_PLANES : [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
-    yQuadMat.clippingPlanes = axis === 'y' ? SITE_BOUND_PLANES : [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES];
+    // v3.2.32 fix: the active axis's quad KEEPS sectionPlaneNeg (bounds
+    // its own vertical extent to Height Cut) -- only drops the
+    // PERPENDICULAR axis's threshold plane. Shipped v3.2.30 dropped
+    // sectionPlaneNeg here too, reasoning (mistakenly) that it carried
+    // the same "Height Cut defaults to 0" destructive-default risk as
+    // negMat's shell clip above -- it doesn't. That risk was specific to
+    // negMat's clipIntersection:false UNION semantics (removed if past
+    // EITHER threshold, so unioning Height in would clip the whole
+    // building at its Z=0 default). A quad's restrictPlanes has no such
+    // union interaction; sectionPlaneNeg here is just an ordinary AND-ed
+    // bound on the quad's OWN geometry, same as every other axis's poché
+    // quad has always used. Without it, the quad's full 3x-oversized raw
+    // height (v3.2.25) rendered unbounded both above the real roofline
+    // AND below ground -- Joe's screenshot: a stray gray band floating
+    // above the skyline, and a red band along the ground that didn't
+    // move with Height Cut at all. Restoring it makes the poché height
+    // track Height Cut again, exactly as every other axis's quad already
+    // did and as Joe expected ("base should move as the cut line moves").
+    xQuadMat.clippingPlanes = axis === 'x' ? [sectionPlaneNeg, ...SITE_BOUND_PLANES] : [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
+    yQuadMat.clippingPlanes = axis === 'y' ? [sectionPlaneNeg, ...SITE_BOUND_PLANES] : [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES];
     xQuadMat.needsUpdate = true;
     yQuadMat.needsUpdate = true;
+    // v3.2.35: each quad's own lo/hi/texture/axis mapping is fixed at
+    // creation (see makeCapQuad()) -- only the on/off toggle changes here,
+    // matching which axis is currently active.
+    xQuadMat.userData.applySkyConfig?.();
+    yQuadMat.userData.applySkyConfig?.();
+    if (xQuadMat.userData.skyUniforms) xQuadMat.userData.skyUniforms.uSkyDiscardOn.value = (axis === 'x') ? 1.0 : 0.0;
+    if (yQuadMat.userData.skyUniforms) yQuadMat.userData.skyUniforms.uSkyDiscardOn.value = (axis === 'y') ? 1.0 : 0.0;
   }
   if (xCutLineMesh){
-    // Same relaxation as the poché quads, same reasoning -- the cut-line
-    // is computed against the FULL real geometry already (see the v3.0.5
-    // comment above), so it only needed its octant-corner material
-    // restriction lifted, not new geometry or computation.
-    xCutLineMesh.material.clippingPlanes = axis === 'x' ? SITE_BOUND_PLANES : [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
-    yCutLineMesh.material.clippingPlanes = axis === 'y' ? SITE_BOUND_PLANES : [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES];
+    // Same fix, same reasoning, applied to the cut-line meshes -- see the
+    // v3.2.32 comment above.
+    xCutLineMesh.material.clippingPlanes = axis === 'x' ? [sectionPlaneNeg, ...SITE_BOUND_PLANES] : [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
+    yCutLineMesh.material.clippingPlanes = axis === 'y' ? [sectionPlaneNeg, ...SITE_BOUND_PLANES] : [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES];
   }
+  // v3.2.33: refreshViewToggles() (via refreshCapFillVisibility()) reads
+  // sectionModeAxis, just updated above, to hide the INACTIVE axis's quad
+  // + cut-line while a section view is active -- must be called here so
+  // the visibility change actually takes effect on every transition into
+  // or out of section mode, not just the clippingPlanes adjustments above.
+  refreshViewToggles();
 }
 function setOrthogonalView(direction){
   // v3.0.42: real fix for Joe's "N/S/E/W are isometric, not flat 2D
@@ -2287,11 +2452,21 @@ function setOrthogonalView(direction){
   activeCamera = orthoCamera;
   controls.object = orthoCamera; // reassigning .object on the SAME OrbitControls instance -- a supported, well-established three.js pattern (used in three.js's own multi-camera examples); avoids maintaining two independent controls instances with their own mouse/touch listeners
   controls.target.copy(target);
+  // v3.2.34: Joe reported a section view visibly NOT axis-aligned. Root
+  // cause: controls.enableRotate was never touched anywhere in this
+  // function (or anywhere else) -- it's true by default and stayed true
+  // in every N/S/E/W/Plan view, so a single drag (or residual momentum
+  // from enableDamping) tilts the camera away from the true elevation
+  // this function just computed, with zero indication anything changed.
+  // A "true ortho view" needs to actually stay locked to the axis, not
+  // just start there. Pan/zoom remain enabled -- only rotate is blocked.
+  controls.enableRotate = false;
   controls.update();
 }
 function recenterCamera(){
   activeCamera = camera; // v3.0.42: Home always returns to the perspective camera, undoing any N/S/E/W flat view
   controls.object = camera;
+  controls.enableRotate = true; // v3.2.34: undo the N/S/E/W/Plan rotation lock -- perspective/Home is free-orbit again
   applySectionMode(null); // v3.2.30: perspective/Home always exits section mode, restoring normal octant cutaway behavior
   if (siteCapHeight !== undefined){
     // Fit-to-model: same direction as the app's original default 3/4 view,
@@ -2809,8 +2984,11 @@ function refreshViewToggles(){
   if (negativeMesh) negativeMesh.visible = showNegative;
   if (zCutLineMesh){
     zCutLineMesh.visible = showNegative;
-    xCutLineMesh.visible = showNegative;
-    yCutLineMesh.visible = showNegative;
+    // v3.2.33: while a section view is active, only the ACTIVE axis's
+    // cut-line stays visible -- see the matching fix + full explanation
+    // in refreshCapFillVisibility() below, which this mirrors exactly.
+    xCutLineMesh.visible = showNegative && (sectionModeAxis === null || sectionModeAxis === 'x');
+    yCutLineMesh.visible = showNegative && (sectionModeAxis === null || sectionModeAxis === 'y');
   }
   const handlesOn = showNegative && document.getElementById('sectionRow').style.display !== 'none' && showHandles; // v3.2.29: showHandles lets Joe hide the cone/guide-line graphics entirely (e.g. cluttering a flat elevation view) without losing the ability to still adjust cuts via sliders/number inputs/keyboard
   heightHandle.visible = xHandle.visible = yHandle.visible = handlesOn;
@@ -2821,7 +2999,22 @@ const capFillToggleEl = document.getElementById('capFillToggle');
 function refreshCapFillVisibility(){
   if (!capFillGroups) return;
   const on = showNegative && capFillToggleEl.checked;
-  capFillGroups.z.visible = capFillGroups.x.visible = capFillGroups.y.visible = on;
+  capFillGroups.z.visible = on; // Height's own cap is unrelated to which vertical section axis is active, so it's untouched by sectionModeAxis
+  // v3.2.33 fix: applySectionMode() correctly RE-BOUNDS the active axis's
+  // quad to a true full section (v3.2.30) and correctly re-bounds its own
+  // HEIGHT extent (v3.2.32) -- but never addressed the INACTIVE axis's
+  // quad at all, which kept rendering fully visible with its OLD octant
+  // restrictPlanes. Since that quad's stencil test runs against the real
+  // geometry independent of section mode, it kept showing its own
+  // genuine (if octant-shaped) poché wherever real solid crossed ITS
+  // threshold -- Joe's screenshot: two disconnected red rectangles with
+  // a gap between them, not one continuous section. The X/Y quads were
+  // never the bug here; simply not hiding the irrelevant one was. Only
+  // the axis matching the current N/S/E/W direction should show while a
+  // section view is active; Plan and perspective (sectionModeAxis===null)
+  // keep both, unchanged.
+  capFillGroups.x.visible = on && (sectionModeAxis === null || sectionModeAxis === 'x');
+  capFillGroups.y.visible = on && (sectionModeAxis === null || sectionModeAxis === 'y');
 }
 capFillToggleEl.addEventListener('change', refreshCapFillVisibility);
 // v3.2.29: "Show cutaway handles" -- Joe's ask, hides the cone/guide-line
@@ -3375,6 +3568,9 @@ window.addEventListener('pointerup', () => {
     get capFillGroups(){ return capFillGroups; },
     get zCutLineMesh(){ return zCutLineMesh; }, get xCutLineMesh(){ return xCutLineMesh; }, get yCutLineMesh(){ return yCutLineMesh; },
     get sectionPlane(){ return sectionPlane; }, get xClipPlane(){ return xClipPlane; }, get yClipPlane(){ return yClipPlane; },
+    get sectionPlaneNeg(){ return sectionPlaneNeg; }, get xClipPlaneNeg(){ return xClipPlaneNeg; }, get yClipPlaneNeg(){ return yClipPlaneNeg; }, // v3.2.32 -- needed to verify applySectionMode()'s quad/cut-line restrictPlanes live
+    get SITE_BOUND_PLANES(){ return SITE_BOUND_PLANES; },
+    get sectionModeAxis(){ return sectionModeAxis; },
   };
   try {
     toast('Loading geometry engine…');
