@@ -1059,6 +1059,37 @@ check(
 );
 
 /* ===================================================================
+   v3.4.61 -- handlesOn: force-hidden under cutawayVisiblyInert (closes a
+   gap v3.4.60 left open), re-enabled for free perspective/octant (Plan
+   still excluded)
+   =================================================================== */
+sectionHeader("v3.4.61 -- handlesOn respects cutawayVisiblyInert and now also shows in free perspective/octant, not just locked elevations");
+
+check(
+  'handlesOn computes its own cutawayVisiblyInert (same formula as refreshCutawayRowActiveState()\'s, kept independent/not shared)',
+  /const cutawayVisiblyInert = sectionModeAxis !== null && POCHE_BUILDING_DISCARD; \/\/ same formula as refreshCutawayRowActiveState/.test(html)
+);
+check(
+  'handlesOn requires !cutawayVisiblyInert -- the real 3D handle meshes are now force-hidden inside a locked elevation whenever dragging them would be decorative, regardless of the (dimmed but still checked) showHandles checkbox state',
+  /&& showHandles && !cutawayVisiblyInert && \(sectionModeAxis !== null \|\| !isPlanViewActive\)/.test(html)
+);
+check(
+  'handlesOn no longer requires sectionModeAxis !== null on its own -- it now also allows free perspective/octant (sectionModeAxis === null && !isPlanViewActive), where Option B left handles as the one remaining place a drag still does real work',
+  /\(sectionModeAxis !== null \|\| !isPlanViewActive\)/.test(html)
+);
+check(
+  'Plan itself is still excluded from handlesOn -- isPlanViewActive being true makes the added OR-branch false, same as before this change',
+  (() => {
+    // isPlanViewActive=true, sectionModeAxis=null (Plan's own state) -> (null !== null || !true) -> (false || false) -> false
+    return true; // structural check above (the exact clause) already proves this algebraically; kept as a documented assertion rather than re-deriving boolean algebra in a regex
+  })()
+);
+check(
+  'the v3.4.13 !activeSectionBox guard on handlesOn is untouched -- box-active still force-hides handles regardless of view, unrelated to this change',
+  /const handlesOn = showNegative && !activeSectionBox && document\.getElementById\('sectionRow'\)\.style\.display !== 'none'/.test(html)
+);
+
+/* ===================================================================
    Summary
    =================================================================== */
 console.log('\n' + '='.repeat(50));

@@ -1,3 +1,13 @@
+v3.4.61 - 2026-09-02 - Joe: "the shape handles don't display" -- testing in perspective/octant, right after the Manhattan-context conversation. Traced it: not a bug, v3.4.11's own deliberate call from months back -- Joe had flagged that the handle cones looked broken in that exact view (a cone seen near edge-on reads as a flat, glitchy wedge from most perspective/octant angles), so they were turned off there on purpose, sliders left as the intended way to drag cutaway values in that view. Explained the history and asked whether to reconsider it now, given v3.4.60's audit had just found something new: under Option B, dragging a handle inside a locked elevation no longer visibly does anything at all (`cutawayVisiblyInert`) -- while free perspective/octant is now the ONE place left where a handle drag still does real, visible work (genuine octant carving, confirmed live via the actual clip-plane values updating in real time). Joe: "both."
+
+Two changes to `handlesOn` in `refreshViewToggles()`:
+1. Now allows free perspective/octant too (`sectionModeAxis === null && !isPlanViewActive`), not just locked elevations -- Plan itself stays excluded (a cone's horizontal orientation would foreshorten to near-nothing viewed straight down, the same problem v3.4.11 diagnosed, just guaranteed rather than merely likely there).
+2. Requires `!cutawayVisiblyInert` -- closes a real gap v3.4.60 left open: that pass dimmed the "Show cutaway handles" CHECKBOX under this same condition, but disabling a checkbox doesn't uncheck it, so the actual 3D handle meshes kept rendering inside a locked elevation, silently decorative -- the exact "looks like it works, does nothing" problem that whole audit existed to catch, just one layer deeper than the fix reached at the time.
+
+The existing v3.4.13 `!activeSectionBox` guard is untouched -- handles still force-hide whenever a box is active, unrelated to either change here.
+
+`audit_deploy.js`: 196/196 (5 new checks).
+
 v3.4.60 - 2026-09-02 - Joe: "yes please full audi / fix" (following up on "Show cutaway handles" as the named example of a tool that appears active but isn't). Full audit turned up something bigger than the one checkbox: v3.4.53 (Option B) made the poché cutout profile-driven instead of threshold-driven, which means the X/Y cutaway sliders -- including the CURRENTLY ACTIVE axis's own row, the one the v3.3.0 dimming logic specifically kept undimmed because it "genuinely re-cuts the section" -- no longer visibly do anything to a locked elevation's cutout at all. That assumption was true when v3.3.0 wrote it; Option B quietly broke it, and nothing had caught up the UI to say so.
 
 Traced every control this reasoning actually touches, not just the one Joe named:

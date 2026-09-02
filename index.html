@@ -863,7 +863,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.60'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.61'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4930,7 +4930,38 @@ function refreshViewToggles(){
     // here too, alongside the toggle that actually controls it.
     if (skylineProfileLine) skylineProfileLine.visible = showNegative;
   }
-  const handlesOn = showNegative && sectionModeAxis !== null && !activeSectionBox && document.getElementById('sectionRow').style.display !== 'none' && showHandles; // v3.4.13: added `!activeSectionBox` -- Joe screenshotted the handles (a brown cone+circle, a green wedge) rendering way outside a drawn box's own cropped viewing area, disconnected from anything, still positioned at the OLD threshold-based location the box-draw workflow doesn't use. Box-draw is a self-contained interaction (drag a rectangle, pick a direction) with no use for the old drag-the-3D-handle workflow it's meant to supersede for this case -- v3.4.11 only covered the plain default (axis===null) view; this covers the same class of clutter for the "box active" case within an actual section view.
+  // v3.4.61: Joe -- "the shape handles don't display" (testing in
+  // perspective/octant, right after the Manhattan-context conversation).
+  // Traced it: NOT a bug, v3.4.11's own deliberate call -- Joe flagged
+  // back then that the handle cones looked broken in that exact view (a
+  // cone seen near edge-on reads as a flat, glitchy wedge from most
+  // perspective/octant camera angles), so they were turned off there on
+  // purpose, sliders left as the intended way to drag cutaway values in
+  // that view. That reasoning stands on its own. But asked to reconsider
+  // it now, in light of what v3.4.60's audit just found: under Option B,
+  // dragging a handle inside a locked elevation no longer visibly does
+  // ANYTHING (cutawayVisiblyInert) -- while perspective/octant is now the
+  // ONE place left where a handle drag still does real, visible work
+  // (genuine octant carving, confirmed live via the actual clip-plane
+  // values updating). Net trade Joe accepted: occasionally-awkward cone
+  // rendering in perspective, in exchange for handles existing at all
+  // somewhere they still mean something. Scoped to free perspective/
+  // octant specifically (sectionModeAxis === null && !isPlanViewActive)
+  // -- Plan itself stays excluded, unchanged, since a cone's horizontal
+  // orientation would foreshorten to near-nothing viewed straight down,
+  // the same underlying problem v3.4.11 already diagnosed, just guaranteed
+  // rather than merely likely.
+  //
+  // The second half closes a real gap v3.4.60 left open: that pass dimmed
+  // the "Show cutaway handles" CHECKBOX under cutawayVisiblyInert, but
+  // disabling a checkbox doesn't uncheck it -- showHandles stayed true,
+  // so the actual 3D handle meshes kept rendering inside a locked
+  // elevation, now silently decorative, the exact "looks like it works,
+  // does nothing" problem that whole audit was for. `&& !cutawayVisiblyInert`
+  // below force-hides the real meshes there regardless of the checkbox's
+  // own (now-frozen, dimmed) state, closing what the checkbox-only fix missed.
+  const cutawayVisiblyInert = sectionModeAxis !== null && POCHE_BUILDING_DISCARD; // same formula as refreshCutawayRowActiveState()'s own -- kept independent (not shared/hoisted) since the two functions are called from different places and neither should depend on the other's execution order
+  const handlesOn = showNegative && !activeSectionBox && document.getElementById('sectionRow').style.display !== 'none' && showHandles && !cutawayVisiblyInert && (sectionModeAxis !== null || !isPlanViewActive); // v3.4.13: added `!activeSectionBox` -- Joe screenshotted the handles (a brown cone+circle, a green wedge) rendering way outside a drawn box's own cropped viewing area, disconnected from anything, still positioned at the OLD threshold-based location the box-draw workflow doesn't use. Box-draw is a self-contained interaction (drag a rectangle, pick a direction) with no use for the old drag-the-3D-handle workflow it's meant to supersede for this case -- v3.4.11 only covered the plain default (axis===null) view; this covers the same class of clutter for the "box active" case within an actual section view.
   heightHandle.visible = xHandle.visible = yHandle.visible = handlesOn;
   heightGuideLine.visible = xGuideLine.visible = yGuideLine.visible = handlesOn; // v3.2.28
   refreshCapFillVisibility();
