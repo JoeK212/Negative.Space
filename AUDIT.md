@@ -554,6 +554,78 @@ bounds every cap quad to the real site footprint on every side,
 permanently and view-independently, rather than patching Manhattan
 context specifically.
 
+**Quad recompile-discards-uniforms bug, v3.4.26 — same class as negMat's
+v3.4.11 fix, extended to the poché quads.** The active axis's quad
+(`xQuadMat`/`yQuadMat`) has its `clippingPlanes` array rebuilt every time
+`applySectionMode()` runs, and that array's PLANE COUNT changes whenever
+a quad becomes (or stops being) the active axis — 3 planes for the
+inactive branch, 2 for the active one. A plane-count change forces a
+fresh `onBeforeCompile` on whatever frame renders next, which builds a
+brand-new uniforms object and repoints `mat.userData.skyUniforms` at it
+— discarding whatever `refreshActiveSectionProfile()` (called moments
+later in the same function) had just written into the OLD object, since
+the recompile is asynchronous relative to this function and can land
+before the next paint. Symptom: entering any section view for the first
+time shows the quad with `uSkyDiscardOn` stuck at its recompile default
+(0 = no discard = fills solid, full local-ceiling height, ignoring the
+real per-column roofline profile) — until any later threshold change
+calls `refreshActiveSectionProfile()` again, by which point the
+recompile has already happened and the write finally lands on the real
+object. Fixed the same way `negMat` was in v3.4.11: a synchronous
+`renderer.compile(scene, activeCamera)` — but the FIRST attempt at this
+(v3.4.26) placed the call right after the quads' `clippingPlanes`
+reassignment, still inside the `if (capFillGroups){...}` block, which is
+ABOVE `refreshViewToggles()` in this same function. `refreshViewToggles()`
+(via `refreshCapFillVisibility()`) is what actually sets the active
+quad's `.visible = true` for the first time on a given axis — and
+`renderer.compile()` skips invisible objects during its own scene
+traversal, identical to a real `render()` call. So v3.4.26's compile
+call was a no-op every time; the real first compile still happened
+later regardless, and Joe's own screenshots (straight out of a fresh
+box-draw-then-N/S, on a v3.4.26 build) proved it. **v3.4.27** moved the
+call to run immediately after `refreshViewToggles()` instead — same
+mechanism, same fix, just actually in effect this time. **This bug
+class (plane-count change → deferred recompile → discarded uniform
+write) has now hit three different materials in this file
+(`negMat` v3.4.11, `capFillGroups` quads v3.4.26/27) — any FUTURE
+material added to this scene that both uses `onBeforeCompile`-based
+custom uniforms AND has its `clippingPlanes` array's LENGTH change at
+runtime needs this same synchronous-compile treatment, not just a
+`needsUpdate` flag — AND that compile call must run AFTER whatever sets
+the material's mesh visible, not before, or it's silently a no-op.**
+
+**v3.4.30 — a fourth instance, and the one Joe kept actually seeing.**
+Even with v3.4.27's fix correctly in place, the quads' *sky-discard*
+uniforms (`uSkyDiscardOn`, distinct from `clippingPlanes`) had their own
+separate write ordering bug. `syncSectionSkyUniforms(axis)` — which sets
+`uSkyDiscardOn = 1.0` for the active axis's quad — was called right
+after the FIRST `renderer.compile()` in `applySectionMode()`, which only
+settles `negMat`'s own clippingPlanes change. The quads' `clippingPlanes`
+reassignment and `refreshViewToggles()`'s visibility flip both happen
+AFTER that point, and the SECOND `renderer.compile()` (v3.4.27's fix)
+settles the recompile those trigger — but nothing re-wrote
+`uSkyDiscardOn` into whatever fresh uniforms object that second compile
+produced. `uSkyDiscardOn` is the master switch for the ENTIRE discard
+block in the fragment shader (`if (uSkyDiscardOn > 0.5) { ... if
+(uSkyRoofDiscardOn > 0.5) {...} }`), so with it stuck at its recompile
+default of 0, NEITHER the box-crop discard NOR the roofline discard ran
+at all — the active quad rendered its full geometric extent solid,
+regardless of `clippingPlanes` being perfectly correct. This is exactly
+why the bug survived two rounds of fixing the plane-count trigger: the
+plane-count fix was real and necessary, but this was a SEPARATE write
+landing on the same doomed uniforms object via a different path. Live-
+confirmed the mechanism on Joe's actual broken tab before touching code
+— manually setting the live `uSkyDiscardOn` to 1 immediately fixed the
+render with nothing else changed. Fix: moved the `syncSectionSkyUniforms(axis)`
+call to run after the SECOND compile instead of the first — the same
+principle `refreshActiveSectionProfile()` already used correctly for the
+height-texture half of this same sync (call it after the state it
+depends on has actually settled, not just after *some* compile call).
+**Any uniform written by a function that runs between two
+`renderer.compile()` calls in this file is written into a value that's
+about to be thrown away — always call these AFTER the LAST relevant
+compile, not the first one that happens to appear on the way there.**
+
 ## Section mode — a real architectural section for N/S/E/W elevation views (v3.2.30)
 
 Joe: "I need the elevation to look like an actual section cut, currently
@@ -785,6 +857,228 @@ Two things worth knowing if you touch this again:
   deliberately, on the reasoning that banding is rarer and more legible
   than the noise it replaced.
 
+**`zCutLineMesh` visibility gating, v3.4.25.** `xCutLineMesh`/
+`yCutLineMesh` (the true per-building CSG cross-section outline) were
+retired back in v3.4.11/14 — always `.visible=false` now, fully
+superseded by `skylineProfileLine`. `zCutLineMesh` is the same kind of
+mesh for the Height axis, and is genuinely still used (Plan/perspective
+view), but its visibility rule was never updated to match: it stayed
+`showNegative` with no `sectionModeAxis` check, so it kept rendering
+EVERY building's real ground-level (Height Cut) cross-section across
+the full site width even while locked into an N/S/E/W elevation, where
+Height is inert. At district scale that reads as a dense band of red
+noise at street level, unrelated to whichever axis is actually being
+adjusted. Now `showNegative && sectionModeAxis === null` — same
+suppression rule the other two already had, just applied to the third
+axis. `refreshViewToggles()` (which owns this line) already reruns via
+`applySectionMode()` on every view switch, so no other wiring changed.
+
+## Panel consolidation / IA redesign phase 1 (v3.4.34)
+
+Joe: the workflow was scattered across three places -- neighborhood/
+compute in the left `#controls` panel, view-switching in the right
+`#navPanel`, and the box-draw direction picker in a THIRD, temporary
+floating panel (`#planBoxPanel`) that only existed mid-workflow. Getting
+from "just computed" to "looking at a cropped elevation" meant bouncing
+left → right → drag in the viewport → right again → right again for
+Advanced controls.
+
+**Approach**: relocate, don't rebuild. Every moved element
+(`navHome`/`navPlan`/`navN`/`navS`/`navE`/`navW`, `drawBoxBtn`,
+`planBoxPanel` and its own `boxViewN/S/E/W`/`boxCancelBtn`) kept its
+exact `id` and every existing event listener untouched — only DOM
+position and CSS changed, into a new `#exploreExtras` wrapper inside
+`#controls`, gated at the same two toggle points `#sectionRow` already
+used (shown once a compute has run, hidden on district switch).
+`updateCurrentViewIndicator()` (v3.4.33) needed no changes since it
+already looks buttons up by id. `positionPlanBoxPanel()` — which used
+to anchor the floating panel to `#navPanel`'s own
+`getBoundingClientRect()` — is now a documented no-op; an inline block
+just flows in the document. `#navPanel` still exists, now holding only
+the compass rose + `#currentViewLabel` as a spatial-orientation
+reference, not the primary way to switch views.
+
+Manhattan-context/Major-streets and Export moved into native
+`<details class="accordion">` elements, collapsed by default — no new
+JS, the browser's own disclosure widget, styled to match `.label`'s
+existing uppercase/letter-spaced convention.
+
+**This was preceded by an approved mockup** — a standalone interactive
+HTML artifact using the real dark "Blueprint" palette/fonts, built and
+shown to Joe *before* any of the real 5000-line file was touched.
+Worth repeating for any future IA-level change to this file: a
+throwaway mockup is cheap; restructuring working DOM/JS wiring blind
+is not.
+
+**Verification for a structural change looks different from the
+live-browser-uniform-state method used for every rendering/uniform bug
+this session** — this can't be diagnosed by reading a shader uniform,
+and it can't be pushed to Joe's server directly. What was actually
+checked before shipping: a duplicate-`id` sweep across the whole file;
+a reverse check that every `getElementById()` call in the script still
+resolves to a real element; a jsdom-based structural test confirming
+the real parent/child relationships (not just trusting the source
+read); and the full pre-existing `audit_deploy.js` suite passing
+unchanged. **None of that is equivalent to clicking through the real
+thing in a browser** — say so plainly rather than implying it's been
+proven the way a live-verified rendering fix has been.
+
+## Plan-view box-draw section workflow (v3.4.0)
+
+**Plan itself never respected a drawn box until v3.4.28 — a real, separate
+gap, not the same bug as anything above.** Everything below this heading
+concerns what an N/S/E/W elevation shows once a box is active. Plan view
+is a completely different code path: `setOrthogonalView('plan')` and
+`resetToDefaultView()` both pass `axis=null` to `applySectionMode()`,
+and for `axis===null` that function has ALWAYS meant "ignore
+`activeSectionBox` entirely, restore the plain octant (dollhouse-corner)
+cutaway" — `negMat.clippingPlanes = [sectionPlane, xClipPlane,
+yClipPlane]; clipIntersection=true`, three independent half-spaces
+AND-ed together, geometrically nothing like a box. So a box drawn and
+committed to an elevation would center `xThreshold`/`yThreshold` on the
+box's own midpoint (correct, per `applyPlanBoxDirection()`), but going
+back to Plan reused those same recentered VALUES inside the totally
+different corner-cutaway INTERPRETATION — same numbers, unrelated
+shape, which is exactly what made Joe's screenshot look like "close but
+not even close": a large corner region sharing a coordinate or two with
+the box, nothing else. Confirmed live via `window.__NS` before touching
+any code (`activeSectionBox` held the real box the whole time;
+`negMat.clippingPlanes` were the 3-plane corner regardless) — see
+v3.4.28's CHANGELOG entry for the full mechanism and the live-verified
+fix. A second, independent bug compounded this: `capFillGroups.z` (the
+Height-cut cap quad, the actual visible poché fill in Plan) had its
+`clippingPlanes` set ONCE in `buildCapFillGroups()` and never rebuilt
+anywhere after — confirmed by grep, no other reference in the file — so
+even the corner-vs-box fix alone wouldn't have moved what was actually
+on screen.
+
+**Fix shape**: `applySectionMode()` gained an `isPlanView` boolean param
+(→ module flag `isPlanViewActive`) because `axis===null` alone can't
+tell Plan and the free perspective/Home view apart — both need it, and
+only Plan should ever box-scope. When `isPlanViewActive &&
+activeSectionBox`, `negativeMesh`, `buildingMat` (via
+`syncBuildingClipping()`, given the same param), and the Z cap quad all
+switch to `getPlanBoxClipPlanes()` — a real two-sided rectangle from the
+box's own `xMin/xMax/yMin/yMax`, AND-ed, plus the existing Height Cut
+plane. Free perspective/Home passes `isPlanView` as its default
+`false`, so it's byte-for-byte the same corner cutaway it's always
+been. The existing "Full width" button (previously wired only for a
+locked N/S/E/W view) now also covers Plan as the "extend" option —
+`clearActiveSectionBox()`'s old guard (`if (sectionModeAxis)`) silently
+no-op'd there since `sectionModeAxis` is always null in Plan; now also
+checks `isPlanViewActive`.
+
+**v3.4.29 correction**: the Z cap quad's own clippingPlanes rebuild
+(mentioned above) originally lived in the unconditional `if
+(capFillGroups){...}` block further down in `applySectionMode()` — which
+runs on EVERY call, not just when `axis===null`. Since the box-scoped
+branch is 10 planes and the fallback is 8, that meant leaving Plan for
+any locked N/S/E/W elevation (with the same box still active) silently
+changed this quad's clip-plane COUNT on every transition — the exact
+deferred-recompile-discards-uniforms trigger already fixed twice before
+for `negMat` (v3.4.11) and the x/y quads (v3.4.26/27), reintroduced
+fresh for a third material by v3.4.28 itself, in the same session it
+shipped. Moved into the `axis===null` branch alongside `negMat`'s own
+box-scoping, where it belongs — the Z quad has no relationship to
+N/S/E/W at all. **Any future addition to this function should live in
+the SAME branch as the state it depends on (`axis===null` for
+Plan-only concerns, the per-axis branches for elevation concerns) —
+touching a material's clippingPlanes unconditionally, "just to be
+safe," is exactly how this happened.**
+
+A second, more direct way to set the SAME inputs the section engine
+(above) already takes — which slab (cut-axis depth) and how wide a crop
+(plotted-axis width) — by drawing a rectangle in Plan view instead of
+dialing the Height/X/Y sliders. Doesn't replace v3.3.0's engine; feeds it.
+
+**`getSectionRanges(axis)`** is the single function both
+`refreshActiveSectionProfile()` and `applySectionMode()`'s sky-uniform
+setup read from — the one place that decides what range is in play, so
+the profile texture that gets built and the shader that samples it can
+never disagree. Returns `{ plotLo, plotHi, slabLo, slabHi }`:
+- No box drawn (`activeSectionBox === null`): reproduces the exact
+  v3.3.0 behavior — `plotLo/plotHi` span the full site on the plotted
+  axis, `slabLo/slabHi` are a fixed `±SECTION_SLAB_HALF_WIDTH` (2m)
+  around the live `xThreshold`/`yThreshold`.
+- Box active: `plotLo/plotHi` come directly from the box's own bounds on
+  the plotted axis (the crop). `slabLo/slabHi` are centered on the LIVE
+  threshold with the box's own extent as the width — this is
+  deliberate, not an oversight: it's what makes the sliders still useful
+  after drawing a box (see below), rather than freezing the cut at
+  wherever it was drawn.
+
+**`buildSectionProfile()`'s signature changed** from a single
+`cutThreshold` to explicit `slabLo`/`slabHi`, so it can express an
+arbitrary-width slab (the box's real extent), not just a fixed one
+centered on a point. The one call site (`refreshActiveSectionProfile()`)
+was updated to pass `getSectionRanges()`'s output through.
+
+**Genuinely cropping the visible width needed a real shader change, not
+just a smaller texture domain.** The sky-discard fragment shader
+(`addSkyDiscard()`) previously *clamped* world position to `[uSkyLo,
+uSkyHi]` before sampling the height-profile texture — meaning anything
+past that domain kept re-sampling the nearest edge column forever, so a
+poché/skyline built from a cropped-range texture would still render
+(using stale edge data) everywhere outside the box, silently ignoring
+the crop entirely. Added a `uSkyCropOn` uniform: when on, the shader
+hard-discards any fragment with `freeCoord < uSkyLo || freeCoord >
+uSkyHi` before the clamp/sample even runs. Off by default (the plain
+v3.3.0 case, where clamping to the site edge is exactly the desired
+behavior, not a crop) — only set to `1.0` in `applySectionMode()`/
+`makeCapQuad()`'s `applySkyConfig()` when `activeSectionBox` is set.
+
+**Screen-to-world unprojection** (`screenToWorldGround()`) reuses the
+same raycaster pattern the cutaway-handle drag listeners already use —
+`Raycaster.setFromCamera()` against `activeCamera`, intersected with a
+`z=0` plane. Valid regardless of camera roll/angle because Plan is a
+genuine top-down orthographic view (v3.1.2/v3.0.42) — no new camera math
+needed, this is exactly the same technique `attachHandleDragListeners()`
+already established for the 3D drag handles.
+
+**Camera framing** (`setOrthogonalView()`): when `activeSectionBox` is
+set and the requested direction is N/S/E/W (never Plan/Home), the
+target/span computed by `currentTargetAndSpan()` are overridden with the
+box's own center and extent — the point of drawing a box is to see just
+that block, not a full-width elevation with it buried in the middle of
+the frame.
+
+**Sliders stay live after drawing a box, deliberately.** Because
+`getSectionRanges()` reads the box's WIDTH but the LIVE threshold for
+the slab's CENTER, dragging X/Y (or E/W's flip buttons, etc.) after
+drawing a box translates the slab while keeping its drawn depth — matches
+the box "setting" the sliders rather than replacing them outright. The
+crop (plotted-axis width) does NOT move with the slider — it stays fixed
+to what was drawn until cleared via the "Full width" button
+(`clearActiveSectionBox()`, sets `activeSectionBox = null` and re-runs
+`applySectionMode(sectionModeAxis)` to restore the v3.3.0 default).
+
+**Reset on neighborhood switch.** `activeSectionBox` is cleared in the
+same block that resets `siteMinX`/`siteMaxX`/etc. in `loadData()` — box
+coordinates are specific to the previous district's real geometry and
+would silently misbehave (or reference empty areas) against a newly loaded
+site otherwise.
+
+**Live-verified (v3.4.1) against Joe's real running session, in the
+Compute → Negative space ON → draw box → pick direction order**: the
+unprojection lands a clean world-space rectangle, the crop visibly
+narrows the skyline silhouette to the drawn box's width (not just the
+slab depth), the direction popup positions correctly relative to
+`navPanel`, and the caption/grayed-row/Full-width-button state all match
+`activeSectionBox`. Two real bugs surfaced from testing OTHER orderings,
+both fixed in v3.4.1 (see CHANGELOG's v3.4.1 entry for the full story):
+(1) drawing a box and picking a direction BEFORE ever running Compute
+divided by an `undefined siteCapHeight`, producing a NaN camera position
+and a silently blank viewport with no console error -- fixed by gating
+both the camera-framing override and `setBoxDrawMode()`'s own entry
+point on a compute having actually run; (2) entering a section view
+BEFORE toggling "Negative space" on meant the ghost/poché shader's
+`onBeforeCompile` hadn't fired yet, so the sky-discard uniforms silently
+never received the section/crop state once the shader did finally
+compile (on the later visibility toggle) -- fixed by extracting the
+uniform-push into `syncSectionSkyUniforms()`, callable both on axis
+change and from `refreshViewToggles()` when visibility flips on mid-
+section-view. The v3.4.1 fixes themselves are not yet re-confirmed live.
+
 ## Camera system: perspective (default) + orthographic (N/S/E/W + Plan)
 
 Two camera objects exist: `camera` (the original `THREE.PerspectiveCamera`,
@@ -882,6 +1176,31 @@ three.js/OrbitControls edge case behaves the way the docs or general
 graphics-programming intuition suggest — check the actual library
 behavior directly, the way this was (and the way v3.0.42's own
 orthographic-camera prototype was, per the paragraph above).
+
+**Lighting: `sun` (perspective) vs `orthoLight` (N/S/E/W/Plan), v3.4.24.**
+The scene has always had exactly one `DirectionalLight` (`sun`), fixed at
+world position `(400,300,700)`. That's invisible in the free-orbiting
+perspective view — you naturally orbit toward whichever side happens to
+be lit — but every locked N/S/E/W elevation shows exactly ONE fixed
+facade, and `sun`'s fixed direction lights north/east-facing walls while
+leaving south/west-facing walls at ambient-only. Confirmed by hand: with
+`L = normalize(400,300,700) = (0.457,0.343,0.820)`, the wall shown in N
+view (normal `(0,-1,0)`) gets `N·L=-0.343`; E view's wall (normal
+`(-1,0,0)`) gets `N·L=-0.465` — both negative, both read as flat black.
+S/W read positive and looked fine, which is why only N had been
+reported before E also would have been.
+
+Fix: a second `DirectionalLight`, `orthoLight`, created hidden alongside
+`sun`. `updateOrthoLight(direction, target, camDist)` (called at the end
+of `setOrthogonalView()`) repositions it on the SAME side as whichever
+elevation camera is active, so the visible facade is always front-lit —
+same technique as a camera-mounted headlight, just swapped in only for
+N/S/E/W/Plan rather than tracking free orbit continuously.
+`setOrthogonalView()` sets `sun.visible=false; orthoLight.visible=true`
+on entry; `resetToDefaultView()` sets it back on the way to perspective.
+`sun` itself is never modified — the established default-view look is
+unchanged. **If a future light is added to the scene, remember there are
+now two lights that need to swap together, not one to just retune.**
 
 ## Manhattan context view
 
@@ -1121,6 +1440,33 @@ same way for both cameras.
   was in this exact view (orbit target anchored on the wrong point),
   found only by checking real zoomed-in behavior, not just the initial
   toggle-on framing.
+
+- **A "reset UI state" line placed at the TOP of an async function runs
+  synchronously on every call, including before that function's own first
+  `await`.** Found live (v3.2.42): `loadData()` force-reset
+  `computeBtn.disabled = false` as its first UI-touching line, predating
+  `switchNeighborhood()`'s v3.2.41 race guard, which disables `computeBtn`
+  immediately before calling `await loadData(id)`. The reset ran on entry,
+  before `loadData()`'s own `await fetch(...)`, and silently undid the
+  guard for that one button only — reopening the exact race v3.2.41 closed,
+  worse than before since a Compute click in that window ran against the
+  previous district's still-live data with no error and no visible tell.
+  When adding a guard that wraps an `await`-ing call, check the callee's
+  own body for anything that touches the same guarded state before its
+  first `await` — a guard set right before the call is not proof the
+  callee can't undo it partway through.
+
+- **A "looks plausible at default settings" profile can hide a total lack of
+  position-dependence for an entire session.** v3.2.39's skyline silhouette
+  looked like a real architectural section for two full sessions (v3.2.39
+  through v3.2.43) because it was only ever tested right after Compute, when
+  the cutaway sliders sit at their default (near-center) position and the
+  static citywide envelope happens to resemble a plausible section there.
+  The gap (zero depth-dependence) only became visible once Joe actually
+  dragged the slider far from that default and compared before/after. When
+  a feature claims to respond to a live control, verify by moving the
+  control to an EXTREME value and diffing the result, not just confirming
+  it renders something reasonable-looking at the default.
 
 ## Open / not yet started
 

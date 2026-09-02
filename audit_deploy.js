@@ -437,6 +437,628 @@ check(
 );
 
 /* ===================================================================
+   v3.4.24-25 -- elevation lighting/artifact consistency across N/S/E/W
+   =================================================================== */
+sectionHeader('v3.4.24-25 -- elevation lighting/artifact consistency');
+
+check(
+  'orthoLight exists and starts hidden (perspective keeps using sun alone)',
+  /orthoLight = new THREE\.DirectionalLight/.test(html) && /orthoLight\.visible = false/.test(html)
+);
+check(
+  'updateOrthoLight() positions the light on the active camera\'s side for n/s/e/w/plan',
+  /function updateOrthoLight\(direction, target, camDist\)/.test(html)
+);
+check(
+  'setOrthogonalView() swaps sun off / orthoLight on when entering an elevation',
+  /sun\.visible = false;\s*\n\s*orthoLight\.visible = true;/.test(html)
+);
+check(
+  'resetToDefaultView() swaps back to sun for perspective',
+  /sun\.visible = true;.*\n\s*orthoLight\.visible = false;/.test(html)
+);
+check(
+  'zCutLineMesh visibility requires isPlanViewActive, not just sectionModeAxis===null -- v3.4.39: Joe found it reading as noise in free-orbit perspective too (axis===null covers both Plan and perspective), narrowed to Plan only, where the Height Cut cross-section is at least a real top-down slice',
+  /zCutLineMesh\.visible = showNegative && isPlanViewActive;/.test(html)
+);
+check(
+  'the quad recompile fix (v3.4.26/27) runs AFTER refreshViewToggles() -- v3.4.26 originally placed it before quad visibility was ever set true, making it a no-op; must follow refreshViewToggles() so the compile happens while the quad is genuinely visible',
+  /refreshViewToggles\(\);\s*\n(?:\s*\/\/[^\n]*\n)*\s*if \(capFillGroups\) renderer\.compile\(scene, activeCamera\);/.test(html)
+);
+check(
+  'getPlanBoxClipPlanes() exists -- v3.4.28: box-scoped clipping for Plan, distinct from the classic octant corner',
+  /function getPlanBoxClipPlanes\(\)/.test(html)
+);
+check(
+  'v3.4.37 reversal: syncBuildingClipping() is always called with false for isPlanView now -- Plan no longer box-scopes buildingMat (v3.4.28\'s own box-scoping stays correct for real N/S/E/W elevations, just never for Plan anymore)',
+  /syncBuildingClipping\(axis, false\); \/\/ v3\.4\.37/.test(html)
+);
+check(
+  'v3.4.37 reversal: the Z (Height Cut) cap-fill quad always uses the plain fallback clippingPlanes now, no isPlanViewActive branch -- Plan\'s poché fill is never box-scoped either',
+  /const zQuadMat = capFillGroups\.z\.userData\.quad\.material;\s*\n\s*zQuadMat\.clippingPlanes = \[xClipPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\];/.test(html)
+);
+check(
+  'syncSectionSkyUniforms(axis) is called AFTER the second renderer.compile() (post quad clippingPlanes/visibility change), not the first -- v3.4.30: calling it too early meant its uSkyDiscardOn write landed on a uniforms object the second compile then discarded, leaving the master discard switch stuck off (the actual "solid block" bug)',
+  /if \(capFillGroups\) renderer\.compile\(scene, activeCamera\);\s*\n(?:\s*\/\/[^\n]*\n)*\s*syncSectionSkyUniforms\(axis\);/.test(html)
+);
+check(
+  'setOrthogonalView() turns Negative space on by default for a real N/S/E/W elevation -- v3.4.31: Joe\'s ask, since a fresh compute always leaves it off and every section view needed a manual extra click before showing anything',
+  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*\n\s*showNegative = true;/.test(html)
+);
+check(
+  'v3.4.37 reversal: groundMesh and streetMaterials only box-clip for a real locked elevation (axis !== null), never for Plan anymore -- Plan always shows the full site now, box drawn as an outline instead (updatePlanBoxOutline())',
+  /groundMesh\.material\.clippingPlanes = \(activeSectionBox && axis !== null\) \? getPlanBoxClipPlanes\(\)\.slice\(1\) : \[\];/.test(html)
+  && !/isPlanViewActive\)\) \? getPlanBoxClipPlanes/.test(html)
+);
+check(
+  'updatePlanBoxOutline() exists and is called from both applySectionMode() and clearActiveSectionBox() -- the persistent world-space box outline that replaces Plan\'s old box-clipping',
+  /function updatePlanBoxOutline\(\)\{/.test(html)
+  && (html.match(/updatePlanBoxOutline\(\);/g) || []).length >= 2
+);
+check(
+  'updateCurrentViewIndicator() exists and highlights the active nav button -- v3.4.33: Joe\'s ask, none of the six nav-compass buttons ever showed which view was current before this',
+  /function updateCurrentViewIndicator\(viewKey\)\{/.test(html)
+  && /activeBtn\.classList\.add\('active'\); activeBtn\.classList\.remove\('secondary'\);/.test(html)
+);
+check(
+  'updateCurrentViewIndicator() is actually called from both setOrthogonalView() and resetToDefaultView() -- covers N/S/E/W/Plan and Home/perspective, the two places the view can change',
+  /updateCurrentViewIndicator\(direction\); \/\/ v3\.4\.33/.test(html)
+  && /updateCurrentViewIndicator\('home'\); \/\/ v3\.4\.33/.test(html)
+);
+
+/* ===================================================================
+   v3.4.34 -- panel consolidation (Joe's IA redesign, phase 1)
+   =================================================================== */
+sectionHeader('v3.4.34 -- panel consolidation (IA redesign phase 1)');
+
+check(
+  '#exploreExtras exists, starts hidden, and is gated via showPostComputeUI() (v3.4.38) rather than a literal \'flex\' string at the compute-finish site -- still paired with the district-switch reset',
+  /id="exploreExtras" style="display:none/.test(html)
+  && /exploreExtras'\)\.style\.display = 'none'/.test(html)
+  && /function showPostComputeUI\(\)\{/.test(html)
+);
+check(
+  'the six nav-compass buttons (navHome/navPlan/navN/navS/navE/navW) now live inside #exploreExtras, not a separate #navGrid',
+  !/id="navGrid"/.test(html)
+  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units/); return m && /id="navHome"/.test(m[0]) && /id="navPlan"/.test(m[0]) && /id="navN"/.test(m[0]); })()
+);
+check(
+  '#planBoxPanel is a plain inline block inside #exploreExtras now, not a separate floating .panel',
+  !/class="panel" id="planBoxPanel"/.test(html)
+  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units/); return m && /id="planBoxPanel"/.test(m[0]); })()
+);
+check(
+  'positionPlanBoxPanel() is a documented no-op -- #planBoxPanel no longer needs anchoring to #navPanel\'s position since it flows inline',
+  /function positionPlanBoxPanel\(\)\{\s*\n\s*\/\/ v3\.4\.34: no-op\./.test(html)
+);
+check(
+  '#navPanel no longer contains the direction buttons -- just the compass rose + current-view label',
+  /id="navPanel">\s*\n\s*<div id="currentViewLabel">/.test(html)
+  && (() => { const m = html.match(/<div class="panel" id="navPanel">([\s\S]*?)<\/div>\s*\n\s*<div id="planBoxOverlay"/); return m && !/id="navHome"/.test(m[1]) && !/id="drawBoxBtn"/.test(m[1]); })()
+);
+check(
+  'Display and Export sections are collapsed <details> accordions; Units stayed outside any accordion',
+  (html.match(/<details class="accordion">/g) || []).length === 2
+);
+
+/* ===================================================================
+   v3.4.35 -- "no idea what to do next" (post-compute UX)
+   =================================================================== */
+sectionHeader('v3.4.35 -- post-compute UX (explore hint, suggested buttons, Units gating)');
+
+check(
+  'showNegative is preserved (not silently reset) when a compute happens while already inside a locked N/S/E/W section',
+  /showNegative = sectionModeAxis !== null;/.test(html)
+);
+check(
+  '#decisionStage exists, replacing #exploreHint entirely -- exactly one real decision shown at a time (v3.4.38), not a hint sitting alongside a full panel',
+  /id="decisionStage" style="display:none/.test(html)
+  && !/id="exploreHint"/.test(html)
+  && /function dismissExploreHint\(\)\{/.test(html)
+  && /localStorage\.getItem\('ns_exploredOnce'\)/.test(html)
+);
+check(
+  'dismissExploreHint() is actually wired to all three real "figured it out" triggers -- Negative space on, a real N/S/E/W view, not just defined and never called',
+  /if \(showNegative\) dismissExploreHint\(\); \/\/ v3\.4\.35/.test(html)
+  && /dismissExploreHint\(\); \/\/ v3\.4\.35: picking a real elevation/.test(html)
+);
+check(
+  '.suggested is genuinely gone, replaced by #decisionStage\'s two choice cards -- "See the void" and "Draw a section" each trigger the real button\'s own click(), not a reimplementation',
+  !/class="btn secondary suggested"/.test(html)
+  && /id="choiceVoid"[\s\S]{0,300}id="choiceSection"/.test(html)
+  && /document\.getElementById\('viewNegative'\)\.click\(\);/.test(html)
+  && /document\.getElementById\('drawBoxBtn'\)\.click\(\);/.test(html)
+);
+check(
+  'Units moved inside #exploreExtras (gated behind a compute) instead of always visible above Neighborhood with nothing yet to apply it to',
+  (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units[\s\S]*?<\/div>\s*\n  <\/div>/); return !!m; })()
+);
+
+/* ===================================================================
+   v3.4.38 -- one decision at a time (Joe's IA redesign, phase 2)
+   =================================================================== */
+sectionHeader('v3.4.38 -- one decision at a time (staged reveal + compass cross view picker)');
+
+check(
+  'showPostComputeUI() exists and decides between #decisionStage and the full panel based on ns_exploredOnce, not a hardcoded state',
+  /function showPostComputeUI\(\)\{/.test(html)
+  && /const explored = localStorage\.getItem\('ns_exploredOnce'\) === '1';/.test(html)
+);
+check(
+  'showPostComputeUI() is actually called when a compute finishes, not just defined',
+  /showPostComputeUI\(\);\s*\n\s*resetCutaway\(\);/.test(html)
+);
+check(
+  'Buildings/Negative-space toggle, Display, and Export all moved inside #exploreExtras alongside Units -- nothing in the full panel is reachable before the one decision resolves',
+  (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<\/details>\s*\n  <\/div>/); return m && /id="viewSolid"/.test(m[0]) && /id="viewBoroughs"/.test(m[0]) && /id="exportStlBtn"/.test(m[0]); })()
+);
+check(
+  'Step 1 (Neighborhood, Compute) stays OUTSIDE both #decisionStage and #exploreExtras -- always visible, no gating',
+  (() => { const controlsMatch = html.match(/<div class="panel" id="controls">([\s\S]*?)<div id="decisionStage"/); return controlsMatch && /id="neighborhoodBtn"/.test(controlsMatch[1]) && /id="computeBtn"/.test(controlsMatch[1]); })()
+);
+check(
+  'the compass cross (Option C) is real -- each of navN/navW/navHome/navE/navS carries its own grid-position class, not a flat row',
+  /class="btn secondary navBtn compassN" id="navN"/.test(html)
+  && /class="btn secondary navBtn compassW" id="navW"/.test(html)
+  && /class="btn secondary navBtn compassHome" id="navHome"/.test(html)
+  && /class="btn secondary navBtn compassE" id="navE"/.test(html)
+  && /class="btn secondary navBtn compassS" id="navS"/.test(html)
+  && /#viewCompassGrid \.compassN\{ grid-column:2; grid-row:1; \}/.test(html)
+);
+check(
+  'navPlan is pulled out as its own full-width button, not sharing the compass grid -- "straight down" isn\'t a compass direction the way N/S/E/W are',
+  /id="navPlan" style="width:100%;"/.test(html)
+);
+
+/* ===================================================================
+   v3.4.36 -- negativeMesh (ghost shell) hidden in elevation views
+   =================================================================== */
+sectionHeader('v3.4.36 -- ghost shell hidden in N/S/E/W (Joe: "should not be showing when going into any elevation view")');
+
+check(
+  'negativeMesh.visible requires sectionModeAxis === null at BOTH its assignment sites (compute-time reset and refreshViewToggles()) -- the ghost shell only shows in Plan/perspective now (v3.4.55 narrowed this further to exclude Plan specifically -- see that section below; both sites still gate on sectionModeAxis === null as their first condition, just with an added clause now)',
+  (html.match(/negativeMesh\.visible = showNegative && sectionModeAxis === null && !isPlanViewActive;/g) || []).length === 2
+);
+
+/* ===================================================================
+   v3.4.39 -- messy Home view + three panel-control cleanups
+   =================================================================== */
+sectionHeader('v3.4.39 -- zCutLineMesh in perspective, poché row dimming, High detail relocated, tooltip repositioning');
+
+check(
+  '#capFillRow exists (Section fill row given an id so it can be dimmed) and refreshCutawayRowActiveState() dims it whenever axis===null, the exact mirror of when the Height/X/Y rows are NOT dimmed',
+  /id="capFillRow"/.test(html)
+  && /const capRow = document\.getElementById\('capFillRow'\);/.test(html)
+  && /const capInert = axis === null;/.test(html)
+);
+check(
+  'High detail moved out of the Simple tab into the Export accordion, next to Export STL -- it was never a viewing setting, only ever relevant when producing an image or file to keep',
+  (() => { const m = html.match(/<summary>Export<\/summary>[\s\S]*?<\/details>/); return m && /id="highDetailToggle"/.test(m[0]); })()
+  && !/<div id="capFillRow"[\s\S]{0,300}id="highDetailToggle"/.test(html)
+);
+check(
+  'info-badge tooltips anchor to the empty viewport space right of #controls, not over the panel itself -- structural fix so a tall panel can never bury a tooltip under other real controls again',
+  /let left = panelRect\.right \+ margin;/.test(html)
+  && /const panelRect = document\.getElementById\('controls'\)\.getBoundingClientRect\(\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.40 -- compass buttons ignored a pending box
+   =================================================================== */
+sectionHeader('v3.4.40 -- navN/S/E/W route through the pending-box commit path, not around it');
+
+check(
+  'goToDirection() exists and checks pendingPlanBox before falling back to a bare setOrthogonalView() call',
+  /function goToDirection\(direction\)\{\s*\n\s*if \(pendingPlanBox\) \{ applyPlanBoxDirection\(direction\); return; \}/.test(html)
+);
+check(
+  'all four compass buttons (navN/S/E/W) call goToDirection(), not setOrthogonalView() directly -- the one remaining way to reach a direction change while a box is pending without going through the commit path',
+  /getElementById\('navN'\)\.addEventListener\('click', \(\) => goToDirection\('n'\)\);/.test(html)
+  && /getElementById\('navS'\)\.addEventListener\('click', \(\) => goToDirection\('s'\)\);/.test(html)
+  && /getElementById\('navE'\)\.addEventListener\('click', \(\) => goToDirection\('e'\)\);/.test(html)
+  && /getElementById\('navW'\)\.addEventListener\('click', \(\) => goToDirection\('w'\)\);/.test(html)
+  && !/getElementById\('navN'\)\.addEventListener\('click', \(\) => setOrthogonalView/.test(html)
+);
+
+/* ===================================================================
+   v3.4.41 -- defensive re-sync against an intermittent shader-compile race
+   =================================================================== */
+sectionHeader('v3.4.41 -- requestAnimationFrame defensive re-sync for the uSkyDiscardOn race');
+
+check(
+  'applySectionMode() re-asserts sky uniforms on the next animation frame after every call, not just relying on the synchronous compile-then-sync ordering v3.4.30 established',
+  /requestAnimationFrame\(\(\) => \{\s*\n\s*if \(axis !== null\) syncSectionSkyUniforms\(axis\);\s*\n\s*if \(sectionModeAxis === axis\) refreshActiveSectionProfile\(\);/.test(html)
+);
+check(
+  'a setTimeout fallback runs alongside the rAF re-sync -- rAF alone is paused entirely while a tab is backgrounded, setTimeout still fires (throttled, not suspended) regardless of tab visibility',
+  /setTimeout\(\(\) => \{\s*\n\s*if \(axis !== null\) syncSectionSkyUniforms\(axis\);\s*\n\s*if \(sectionModeAxis === axis\) refreshActiveSectionProfile\(\);\s*\n\s*\}, 250\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.43 -- poché quads briefly made to conform to the real roofline
+   (REVERTED in v3.4.46 -- see that section below)
+   =================================================================== */
+sectionHeader('v3.4.43 -- superseded by v3.4.46');
+
+check(
+  'v3.4.43\'s change is not the current state -- see v3.4.46 below for the check that actually matters now',
+  true
+);
+
+/* ===================================================================
+   v3.4.44 -- Height-Cut cap quad hidden during a locked elevation
+   =================================================================== */
+sectionHeader('v3.4.44 -- capFillGroups.z visibility gated on sectionModeAxis (same fix class as v3.4.36/39)');
+
+check(
+  'capFillGroups.z.visible requires sectionModeAxis === null -- a horizontal Height-Cut cap plane, viewed edge-on from a locked elevation, is a thin unclipped band across the whole site otherwise (v3.4.56 added a further !activeSectionBox clause -- this check only confirms the sectionModeAxis part is still intact)',
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.45 -- per-frame self-healing section render state
+   =================================================================== */
+sectionHeader('v3.4.45 -- enforceSectionRenderState() runs every frame, not once per view change');
+
+check(
+  'enforceSectionRenderState() exists, force-corrects negativeMesh/zCutLineMesh/capFillGroups.z visibility and re-calls syncSectionSkyUniforms() every time it runs',
+  /function enforceSectionRenderState\(\)\{/.test(html)
+  && /negativeMesh\.visible = false; \/\/ v3\.4\.36/.test(html)
+  && /if \(zCutLineMesh\) zCutLineMesh\.visible = false; \/\/ v3\.4\.39/.test(html)
+  && /if \(capFillGroups\) capFillGroups\.z\.visible = false; \/\/ v3\.4\.44/.test(html)
+  && /syncSectionSkyUniforms\(sectionModeAxis\);/.test(html)
+);
+check(
+  'enforceSectionRenderState() is actually called from inside animate(), every frame, not just defined',
+  /updatePendingPlanBoxOverlay\(\); \/\/ v3\.4\.18[\s\S]{0,300}enforceSectionRenderState\(\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.46 -- reverts v3.4.43: restores the original confirmed poché design
+   =================================================================== */
+sectionHeader('v3.4.46 -- uSkyRoofDiscardOn back to 0.0 for the poché quads, matching Joe\'s original v3.4.12 sketch');
+
+check(
+  'v3.4.46 restored the flat filled-mass design -- now expressed via POCHE_ROOF_DISCARD (see v3.4.47 below) rather than a literal at the call site',
+  /const POCHE_ROOF_DISCARD = false;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.47 -- hardened guard against re-reversing v3.4.46
+   =================================================================== */
+sectionHeader('v3.4.47 -- POCHE_ROOF_DISCARD named constant, so this decision has one authoritative place');
+
+check(
+  'POCHE_ROOF_DISCARD exists as a named constant set to false, with its own prominent block comment -- not a bare 0.0 literal duplicated at the call site',
+  /const POCHE_ROOF_DISCARD = false;/.test(html)
+  && /FOUNDING DESIGN DECISION -- DO NOT FLIP WITHOUT RE-READING THIS FIRST/.test(html)
+);
+check(
+  'the poché quads\' applySkyConfig() actually reads from POCHE_ROOF_DISCARD, not a duplicated literal -- one source of truth, not two that can drift apart',
+  /s\.uSkyRoofDiscardOn\.value = POCHE_ROOF_DISCARD \? 1\.0 : 0\.0;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.48 -- entering a locked N/S/E/W elevation forces Buildings off
+   =================================================================== */
+sectionHeader("v3.4.48 -- showBuildings auto-off on entering n/s/e/w, mirroring v3.4.31's showNegative auto-on");
+
+check(
+  'setOrthogonalView() forces showBuildings false when direction is n/s/e/w (only if it was on), same shape as the existing showNegative auto-on',
+  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+);
+check(
+  'the showBuildings auto-off runs BEFORE applySectionMode() (so refreshViewToggles(), called at the end of applySectionMode(), picks up the corrected value on the same view switch, not one frame late)',
+  /showBuildings = false;\s*\}[\s\S]{0,9000}applySectionMode\(direction === 'n' \|\| direction === 's' \? 'y'/.test(html)
+);
+check(
+  'Plan view is untouched -- the auto-off is scoped to n/s/e/w only, same scoping the v3.4.31 auto-on already uses (Plan keeps Buildings-only as its default look)',
+  !/if \(\(direction === 'plan'[\s\S]{0,50}showBuildings = false/.test(html)
+);
+
+/* ===================================================================
+   v3.4.49 -- skyline profile built per building-PART, not whole building
+   =================================================================== */
+sectionHeader("v3.4.49 -- buildBuildingBBoxCache() uses partsGeo (per-part bbox+height) when parts exist, matching the real per-part solid");
+
+check(
+  'buildBuildingBBoxCache() groups partsGeo.features by building_id, same join key (building_id -> properties.id) loadData() already uses to build the real per-part solid',
+  /const partsByBuilding = new Map\(\);\s*if \(partsGeo\)\{\s*for \(const pf of partsGeo\.features\)\{\s*const bid = pf\.properties\.building_id;/.test(html)
+);
+check(
+  'a building WITH parts pushes one bbox per PART (own footprint, own height) instead of one bbox for the whole building',
+  /for \(const pf of parts\) pushBBox\(pf\.geometry, pf\.properties\.height \|\| 0\);/.test(html)
+);
+check(
+  'a building with NO parts (the flat-fallback case) still falls back to the old whole-building bbox+height -- unaffected, not a behavior change for those buildings',
+  /\} else \{\s*pushBBox\(f\.geometry, f\.properties\.height \|\| 0\);\s*\}/.test(html)
+);
+check(
+  'buildBuildingBBoxCache() is still called from computeNegativeSpace() after partsGeo is populated by loadData(), not before',
+  /buildBuildingBBoxCache\(\); \/\/ v3\.3\.0: feeds buildSectionProfile/.test(html)
+);
+
+/* ===================================================================
+   v3.4.50 -- Option A: getSectionRanges() always uses the fixed
+   SECTION_SLAB_HALF_WIDTH slab, box or no box -- true section, not elevation
+   =================================================================== */
+sectionHeader("v3.4.50 -- getSectionRanges() no longer widens the slab to the box's own depth (Option A: True Section)");
+
+check(
+  'the box-active branch for axis x no longer computes a halfSlab from activeSectionBox.xMax/xMin',
+  !/const halfSlab = \(activeSectionBox\.xMax - activeSectionBox\.xMin\) \/ 2;/.test(html)
+);
+check(
+  'the box-active branch for axis y no longer computes a halfSlab from activeSectionBox.yMax/yMin',
+  !/const halfSlab = \(activeSectionBox\.yMax - activeSectionBox\.yMin\) \/ 2;/.test(html)
+);
+check(
+  'axis x box-active branch now uses the fixed SECTION_SLAB_HALF_WIDTH around xThreshold, same as the no-box case',
+  /plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+);
+check(
+  'axis y box-active branch now uses the fixed SECTION_SLAB_HALF_WIDTH around yThreshold, same as the no-box case',
+  /plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+);
+check(
+  'plotLo/plotHi still crop to the drawn box in both branches -- only the slab width changed, the box still crops the screen-horizontal range',
+  /plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax/.test(html) && /plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax/.test(html)
+);
+
+/* ===================================================================
+   v3.4.51 -- setOrthogonalView() centers the threshold on the box when
+   switching to a different axis than the one currently active (goToDirection's
+   direct-compass path never did this; the box-direction picker always has)
+   =================================================================== */
+sectionHeader("v3.4.51 -- N/S/E/W direction switch re-centers xThreshold/yThreshold on the box when it's outside the box's own range");
+
+check(
+  'setOrthogonalView() checks yThreshold against activeSectionBox.yMin/yMax for n/s and re-centers via setYCutaway() when out of range',
+  /if \(\(direction === 'n' \|\| direction === 's'\) && activeSectionBox && \(yThreshold < activeSectionBox\.yMin \|\| yThreshold > activeSectionBox\.yMax\)\)\{\s*setYCutaway\(\(activeSectionBox\.yMin \+ activeSectionBox\.yMax\) \/ 2\);/.test(html)
+);
+check(
+  'setOrthogonalView() checks xThreshold against activeSectionBox.xMin/xMax for e/w and re-centers via setXCutaway() when out of range',
+  /\} else if \(\(direction === 'e' \|\| direction === 'w'\) && activeSectionBox && \(xThreshold < activeSectionBox\.xMin \|\| xThreshold > activeSectionBox\.xMax\)\)\{\s*setXCutaway\(\(activeSectionBox\.xMin \+ activeSectionBox\.xMax\) \/ 2\);/.test(html)
+);
+check(
+  'the re-centering runs BEFORE applySectionMode() so the newly-centered threshold is what the profile refresh actually reads, not one switch late',
+  (() => {
+    const centerIdx = html.indexOf("if ((direction === 'n' || direction === 's') && activeSectionBox && (yThreshold");
+    const applyIdx = html.indexOf("applySectionMode(direction === 'n' || direction === 's' ? 'y'");
+    return centerIdx > 0 && applyIdx > centerIdx;
+  })()
+);
+check(
+  'the fix is scoped to OUT-OF-RANGE thresholds only -- a manually-adjusted, still-valid threshold is left alone, so flipping E/W (same axis) never resets a slider position mid-inspection',
+  /yThreshold < activeSectionBox\.yMin \|\| yThreshold > activeSectionBox\.yMax/.test(html) && /xThreshold < activeSectionBox\.xMin \|\| xThreshold > activeSectionBox\.xMax/.test(html)
+);
+
+/* ===================================================================
+   v3.4.52 -- profile bin resolution 512 -> 2048 (both buildSectionProfile()
+   and buildAxisHeightProfile()), closing the remaining sub-2m edge gaps
+   =================================================================== */
+sectionHeader("v3.4.52 -- profile bin count 512 -> 2048, both the slab-based real-section pass and the citywide envelope pass");
+
+check(
+  'buildSectionProfile() defaults to 2048 bins, not 512',
+  /function buildSectionProfile\(axis, lo, hi, capHeight, slabLo, slabHi, bins = 2048\)\{/.test(html)
+);
+check(
+  'buildAxisHeightProfile() (the citywide envelope, used before any section view is entered) also defaults to 2048 bins, not 512',
+  /function buildAxisHeightProfile\(axis, lo, hi, capHeight, bins = 2048\)\{/.test(html)
+);
+check(
+  'no stray reference to the old 512 default remains on either function signature',
+  !/bins = 512/.test(html)
+);
+
+/* ===================================================================
+   v3.4.53 -- Option B: POCHE_BUILDING_DISCARD widens the cutout to match
+   the elevation-profile outline, independent of and in addition to the
+   existing single-plane stencil hole
+   =================================================================== */
+sectionHeader("v3.4.53 -- Option B: uSkyBuildingDiscardOn widens the poché cutout to the elevation-profile silhouette");
+
+check(
+  'POCHE_BUILDING_DISCARD is a separate, named constant from POCHE_ROOF_DISCARD -- not reusing or repurposing the hardened, must-stay-false one',
+  /const POCHE_ROOF_DISCARD = false;/.test(html) && /const POCHE_BUILDING_DISCARD = true;/.test(html)
+);
+check(
+  'the new uSkyBuildingDiscardOn uniform defaults to 0.0 in addSkyDiscard(), same off-by-default pattern as uSkyRoofDiscardOn',
+  /shader\.uniforms\.uSkyBuildingDiscardOn = \{ value: 0\.0 \};/.test(html)
+);
+check(
+  'the new discard test is a separate GLSL block from the roofDiscard one, not merged into or replacing it -- so either can be reverted independently',
+  /if \(uSkyBuildingDiscardOn > 0\.5\) \{\s*float u = clamp\(\(freeCoord - uSkyLo\) \/ \(uSkyHi - uSkyLo\), 0\.0, 1\.0\);\s*float localMaxH = texture2D\(uSkyHeightTex, vec2\(u, 0\.5\)\)\.r;\s*if \(localMaxH > 0\.0 && vNegWorldPos\.z < localMaxH\) discard;\s*\}/.test(html)
+);
+check(
+  'the new discard direction is the OPPOSITE of uSkyRoofDiscardOn (z < localMaxH, not z > localMaxH + margin) -- confirms it carves a hole below the profile height, not a ceiling above it',
+  /if \(localMaxH > 0\.0 && vNegWorldPos\.z < localMaxH\) discard;/.test(html) && /if \(vNegWorldPos\.z > localMaxH \+ uSkyMargin\) discard;/.test(html)
+);
+check(
+  'applySkyConfig() sets uSkyBuildingDiscardOn from POCHE_BUILDING_DISCARD, same per-quad pattern as the existing uSkyRoofDiscardOn line',
+  /s\.uSkyRoofDiscardOn\.value = POCHE_ROOF_DISCARD \? 1\.0 : 0\.0;\s*[\s\S]{0,300}s\.uSkyBuildingDiscardOn\.value = POCHE_BUILDING_DISCARD \? 1\.0 : 0\.0;/.test(html)
+);
+check(
+  'POCHE_ROOF_DISCARD itself is untouched -- still false -- confirming Option B did not reopen the already-settled roof-discard/flat-mass decision',
+  /const POCHE_ROOF_DISCARD = false; \/\/ NEVER true for the poché quads/.test(html)
+);
+
+/* ===================================================================
+   v3.4.54 -- old planBoxOutlineMesh no longer sits visible through a new
+   box draw; hidden at pointerdown, restored on cancel/too-small-drag
+   =================================================================== */
+sectionHeader("v3.4.54 -- planBoxOutlineMesh hidden the moment a new box draw starts, restored if that draw is cancelled or too small");
+
+check(
+  'the pointerdown handler hides planBoxOutlineMesh at the start of a new drag, before planBoxDragStart is even used elsewhere',
+  /planBoxDragStart = \{ x: hit\.x, y: hit\.y, sx: e\.clientX, sy: e\.clientY \};\s*[\s\S]{0,1200}if \(planBoxOutlineMesh\) planBoxOutlineMesh\.visible = false;/.test(html)
+);
+check(
+  'cancelPlanBox() restores the outline via updatePlanBoxOutline() rather than leaving it hidden with no new box to replace it',
+  /function cancelPlanBox\(\)\{[\s\S]{0,600}updatePlanBoxOutline\(\);\s*\}/.test(html)
+);
+check(
+  'the too-small-drag abort path in the pointerup handler also restores the outline, same reasoning as cancelPlanBox()',
+  /if \(box\.xMax - box\.xMin < MIN_BOX_SIZE \|\| box\.yMax - box\.yMin < MIN_BOX_SIZE\)\{[\s\S]{0,600}updatePlanBoxOutline\(\);\s*return;\s*\}/.test(html)
+);
+check(
+  'the successful-draw path (pendingPlanBox = box) does NOT call updatePlanBoxOutline() -- the outline should stay hidden until a direction is picked, not reappear mid-draw',
+  !/pendingPlanBox = box;\s*[\s\S]{0,50}updatePlanBoxOutline\(\)/.test(html)
+);
+
+/* ===================================================================
+   v3.4.55 -- negativeMesh no longer shows in Plan view specifically,
+   even with Negative space on; perspective/octant unaffected
+   =================================================================== */
+sectionHeader("v3.4.55 -- negativeMesh.visible excludes isPlanViewActive, both call sites");
+
+check(
+  'refreshViewToggles() (the main, per-switch assignment) now excludes isPlanViewActive',
+  /negativeMesh\.visible = showNegative && sectionModeAxis === null && !isPlanViewActive;\s*\/\/ v3\.4\.0 live-verify fix/.test(html)
+);
+check(
+  'the compute-time assignment also excludes isPlanViewActive, matching refreshViewToggles() -- not just one of the two call sites',
+  /negativeMesh\.visible = showNegative && sectionModeAxis === null && !isPlanViewActive;\s*\n\s*const triCount/.test(html)
+);
+check(
+  'free perspective/octant view is untouched -- isPlanViewActive is false there (only true for literal top-down Plan), so showNegative alone still controls visibility outside Plan',
+  /let isPlanViewActive = false; \/\/ v3\.4\.28: true only for the literal top-down Plan view/.test(html)
+);
+
+/* ===================================================================
+   v3.4.56 -- Height Cut lid quad (capFillGroups.z) hidden in Plan whenever
+   a section box is active, matching v3.4.13's precedent for the handles
+   =================================================================== */
+sectionHeader("v3.4.56 -- capFillGroups.z.visible adds !activeSectionBox, same guard shape as the v3.4.13 cutaway-handle fix");
+
+check(
+  'capFillGroups.z.visible now requires !activeSectionBox in addition to on && sectionModeAxis === null',
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox;/.test(html)
+);
+check(
+  'the unconditional compute-time reset (capFillGroups.z.visible = false, v3.4.44) is untouched -- only the live refreshCapFillVisibility() assignment changed',
+  /if \(capFillGroups\) capFillGroups\.z\.visible = false; \/\/ v3\.4\.44/.test(html)
+);
+check(
+  'the fix references the same precedent (v3.4.13\'s handlesOn !activeSectionBox guard) it is modeled on, so the two don\'t silently drift apart later',
+  /same fix shape as v3\.4\.13's `!activeSectionBox` guard on the/.test(html)
+);
+
+/* ===================================================================
+   v3.4.57 -- entering Plan forces Buildings back on, symmetric to
+   v3.4.48's elevation-entry force-off
+   =================================================================== */
+sectionHeader("v3.4.57 -- setOrthogonalView() forces showBuildings true on entering Plan, mirroring the existing v3.4.48 force-off on entering n/s/e/w");
+
+check(
+  'setOrthogonalView() forces showBuildings true when direction is plan (only if it was off), same shape as the existing v3.4.48 force-off',
+  /if \(direction === 'plan' && !showBuildings\)\{\s*showBuildings = true;\s*\}/.test(html)
+);
+check(
+  'the plan force-on sits after the n/s/e/w force-off in source order, both part of the same setOrthogonalView() flow',
+  (() => {
+    const offIdx = html.indexOf("if ((direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && showBuildings){");
+    const onIdx = html.indexOf("if (direction === 'plan' && !showBuildings){");
+    return offIdx > 0 && onIdx > offIdx;
+  })()
+);
+check(
+  'n/s/e/w force-off is untouched -- still forces Buildings off entering an elevation, this is additive not a replacement',
+  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+);
+
+/* ===================================================================
+   v3.4.58 -- entering Plan also forces Negative space back off, other
+   half of v3.4.57's Buildings-on fix
+   =================================================================== */
+sectionHeader("v3.4.58 -- setOrthogonalView() forces showNegative false on entering Plan, alongside v3.4.57's showBuildings true");
+
+check(
+  'setOrthogonalView() forces showNegative false when direction is plan (only if it was on)',
+  /if \(direction === 'plan' && showNegative\)\{\s*showNegative = false;\s*\}/.test(html)
+);
+check(
+  'the negative-space force-off sits after v3.4.57\'s showBuildings force-on, both in the same plan-entry block',
+  (() => {
+    const onIdx = html.indexOf("if (direction === 'plan' && !showBuildings){");
+    const offIdx = html.indexOf("if (direction === 'plan' && showNegative){");
+    return onIdx > 0 && offIdx > onIdx;
+  })()
+);
+check(
+  'v3.4.57\'s showBuildings force-on is untouched -- this is additive, both toggles now get set correctly on entering Plan',
+  /if \(direction === 'plan' && !showBuildings\)\{\s*showBuildings = true;\s*\}/.test(html)
+);
+check(
+  'the n/s/e/w entry logic (v3.4.31 showNegative-on, v3.4.48 showBuildings-off) is untouched -- this only adds the Plan-entry counterpart, not a replacement',
+  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*showNegative = true;\s*\}/.test(html) &&
+  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+);
+
+/* ===================================================================
+   v3.4.59 -- drag the 4 edges of an existing (committed) section box
+   in Plan view to resize it live, no need to redraw from scratch
+   =================================================================== */
+sectionHeader("v3.4.59 -- box-edge drag-to-resize (hitTestBoxEdge/boxEdgeDragSide)");
+
+check(
+  'hitTestBoxEdge() refuses to hit-test when there is no activeSectionBox, when not in Plan, or while a NEW box is being drawn',
+  /function hitTestBoxEdge\(wx, wy\)\{\s*if \(!activeSectionBox \|\| !isPlanViewActive \|\| boxDrawMode\) return null;/.test(html)
+);
+check(
+  'the pointerdown handler checks for an edge grab before falling through to the boxDrawMode-gated new-box-draw start, and only when NOT already drawing a new box',
+  /if \(!boxDrawMode\)\{\s*const side = hitTestBoxEdge\(hit\.x, hit\.y\);\s*if \(side\)\{\s*boxEdgeDragSide = side;/.test(html)
+);
+check(
+  'pointermove updates the correct single bound for each of the 4 sides, each clamped against BOX_EDGE_MIN_SIZE so a resize can never collapse or invert the box',
+  /if \(boxEdgeDragSide === 'xMin'\) b\.xMin = Math\.min\(hit\.x, b\.xMax - BOX_EDGE_MIN_SIZE\);/.test(html) &&
+  /else if \(boxEdgeDragSide === 'xMax'\) b\.xMax = Math\.max\(hit\.x, b\.xMin \+ BOX_EDGE_MIN_SIZE\);/.test(html) &&
+  /else if \(boxEdgeDragSide === 'yMin'\) b\.yMin = Math\.min\(hit\.y, b\.yMax - BOX_EDGE_MIN_SIZE\);/.test(html) &&
+  /else if \(boxEdgeDragSide === 'yMax'\) b\.yMax = Math\.max\(hit\.y, b\.yMin \+ BOX_EDGE_MIN_SIZE\);/.test(html)
+);
+check(
+  'pointermove calls updatePlanBoxOutline() during an edge drag, so the outline redraws live rather than only jumping once on release',
+  /if \(boxEdgeDragSide === 'yMax'\) b\.yMax = Math\.max\(hit\.y, b\.yMin \+ BOX_EDGE_MIN_SIZE\);\s*updatePlanBoxOutline\(\);/.test(html)
+);
+check(
+  'the window pointerup handler clears boxEdgeDragSide and returns before reaching the unrelated boxDrawMode/planBoxDragStart new-box-completion logic',
+  /window\.addEventListener\('pointerup', \(e\) => \{\s*if \(boxEdgeDragSide\)\{\s*boxEdgeDragSide = null;\s*return;\s*\}/.test(html)
+);
+check(
+  'hover-cursor feedback (ew-resize/ns-resize) is gated on activeSectionBox && isPlanViewActive before doing any raycast, so it costs nothing in every other view',
+  /if \(!boxDrawMode && !dragAxis && activeSectionBox && isPlanViewActive\)\{\s*const hit = screenToWorldGround\(e\.clientX, e\.clientY\);\s*const side = hit \? hitTestBoxEdge/.test(html)
+);
+
+/* ===================================================================
+   v3.4.60 -- full UI audit for inert-but-interactive controls: cutaway
+   rows now also dim under Option B's decoupled cutout, plus the handles
+   toggle and Reset cutaway button, previously left out of any dimming
+   =================================================================== */
+sectionHeader("v3.4.60 -- inert-control audit: cutawayVisiblyInert extends dimming to the active axis row, showHandlesRow, and resetCutawayBtn");
+
+check(
+  'cutawayVisiblyInert ties the new dimming to the actual POCHE_BUILDING_DISCARD constant, not a hardcoded assumption -- self-corrects if Option A ever ships again',
+  /const cutawayVisiblyInert = axis !== null && POCHE_BUILDING_DISCARD;/.test(html)
+);
+check(
+  'the active axis row (key === axis) is now ALSO inert when cutawayVisiblyInert, not just the other two -- the v3.3.0 "active row stays fully interactive" assumption no longer holds under Option B',
+  /const inert = axis !== null && \(key !== axis \|\| cutawayVisiblyInert\);/.test(html)
+);
+check(
+  'showHandlesRow (added id, previously untargetable) dims/disables for either of its two real reasons -- activeSectionBox (v3.4.13, handles force-hidden) or cutawayVisiblyInert (new)',
+  /const handlesInert = !!activeSectionBox \|\| cutawayVisiblyInert;/.test(html) && /id="showHandlesRow"/.test(html)
+);
+check(
+  'resetCutawayBtn now dims/disables under cutawayVisiblyInert -- resetting thresholds that do not visibly affect anything in this state was previously left fully clickable',
+  /const resetBtn = document\.getElementById\('resetCutawayBtn'\);\s*if \(resetBtn\)\{\s*resetBtn\.style\.opacity = cutawayVisiblyInert \? '0\.4' : '';\s*resetBtn\.disabled = cutawayVisiblyInert;/.test(html)
+);
+check(
+  'the z (Height) row keeps its original, unrelated inert reason (true elevations show full height by design) -- cutawayVisiblyInert only changes behavior for x/y, key !== axis already covered z unconditionally before and still does',
+  /const inert = axis !== null && \(key !== axis \|\| cutawayVisiblyInert\);[\s\S]{0,400}row\.style\.opacity = inert \? '0\.4' : '';/.test(html)
+);
+
+/* ===================================================================
    Summary
    =================================================================== */
 console.log('\n' + '='.repeat(50));
