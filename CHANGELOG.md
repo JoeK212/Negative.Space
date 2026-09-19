@@ -1,3 +1,108 @@
+v3.4.74 - 2026-09-19 - Joe asked what else looked like a roadblock after v3.4.73's Home fix. Went looking for every other place the same pattern could recur -- any control that switches out of the box-draw workflow without going through `cancelPlanBox()` -- rather than waiting for another report. Found two:
+
+1. **Manhattan context** (`zoomToBoroughContext()`): identical bug to v3.4.73's Home case, different trigger -- switches to the wide-framed perspective camera regardless of what was active before (deliberate since v3.0.42), but never checked `boxDrawMode`. Toggling it on mid-box-draw left the "Box drawn -- view it from:" panel (or the "Drag a box... Cancel" banner, if no box was drawn yet) floating over an unrelated borough-scale view.
+2. **Top compass N/S/E/W clicked mid-draw, before a box exists** (`goToDirection()`): the compass stays visible during the "Drag a box... Cancel" banner stage (v3.4.66 only hides it once a box is actually drawn and the picker panel shows) -- clicking N/S/E/W there falls through to `setOrthogonalView(direction)` directly, switching into a locked elevation while leaving `boxDrawMode` stuck true: banner still showing, cursor still crosshair, "Draw section box" button still reading "Drag a box…".
+
+Both fixed the same way as v3.4.73: `if (boxDrawMode) cancelPlanBox();` before the function proceeds. Checked `navPlan` (re-clicking Plan mid-draw) too -- lower priority/likely harmless since you're already staying in Plan, left alone.
+
+Not yet live-verified, same standing caveat as v3.4.69/70/73.
+
+`audit_deploy.js`: 2 new checks.
+
+v3.4.73 - 2026-09-19 - Joe's screenshot: draw a box in Plan, press Home (3D view), "completely lost." Root cause: `resetToDefaultView()` (what Home calls) switches to the free-orbit perspective camera and fits to the whole site, but never touched anything box-draw-related -- `planBoxPanel` ("Box drawn -- view it from:") kept floating on screen, the top compass's N/S/E/W stayed hidden (v3.4.66 hides them the moment that panel shows), and the actual 3D view had jumped to a full-site perspective with no relationship to the box just drawn and no visible way to pick a direction.
+
+Fixed with one line: `if (boxDrawMode) cancelPlanBox();` at the top of `resetToDefaultView()` -- `cancelPlanBox()` is the exact existing cleanup for "box-draw workflow ending without a direction picked" (already used by its own Cancel button), safe to call unconditionally since it's a no-op beyond restoring state when `boxDrawMode` is already false. Because `resetToDefaultView()` is shared (v3.4.6: also called when `loadData()` or `computeNegativeSpace()` finish), this also covers switching neighborhoods or recomputing mid-box-draw, not just the Home button specifically.
+
+Not yet live-verified -- code-reviewed against the confirmed cause (same standing caveat as v3.4.69/70; still haven't added `controls` to the `__NS` debug hook for live-patching).
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.72 - 2026-09-19 - Docs half of Joe's ask (tooltips were v3.4.71). Both the in-app help modal and EXTENDED.md's feature walkthrough predated the box-draw workflow (v3.4.0+, the actual default/Simple-tab path since v3.4.34) entirely — still documented the old slider-only cutaway flow as primary, with no mention of Draw section box, the box-direction picker, or Full width.
+
+**Help modal**: added a "Drawing a section" section covering the box-draw-then-pick-a-direction flow; renamed "Exploring the cut" to "Fine-tuning a cut (Advanced tab)" and folded Units in there (matching its v3.4.67 relocation); updated Buildings/Negative space to say "independent toggles"; added Reset cutaway (v3.4.63's box-aware behavior) and a short Export section. Navigation/Context sections updated in place rather than rewritten (still accurate, just added the Manhattan-context/box-cutaway coexistence note from v3.2.23/v3.4.69-70).
+
+**EXTENDED.md**: same gap, same fix -- new "Drawing a section (box-draw workflow, v3.4.0+)" entry, a new "Simple / Advanced tabs" entry, and updated Cutaway sliders/Units/Manhattan context/Navigation/High detail entries to reflect where things actually live and behave now (Units inside Advanced only, High detail inside Export, Manhattan context's camera/indicator reset vs. its deliberate cutaway-state preservation).
+
+**README.md**: left alone -- already accurate (district list, run instructions), doesn't describe workflow details that could go stale.
+
+`audit_deploy.js` now also reads EXTENDED.md (not just index.html/CHANGELOG.md) so doc content itself can be checked, not just index.html markup -- the growth pattern this file has always used, extended to cover the exact class of staleness this version fixes. 6 new checks.
+
+v3.4.71 - 2026-09-19 - Joe asked whether the help docs were current and whether the left panel needed more tooltips. Audited both: found the in-app help modal and EXTENDED.md's feature walkthrough both predate the box-draw workflow entirely (v3.4.0+, the actual default/Simple-tab path since the v3.4.34 IA redesign) and still describe the old slider-only cutaway flow as primary. Docs themselves addressed in v3.4.72; this version is the tooltip half.
+
+Added tooltips for every left-panel control that had none, following the established convention (a real `.info-badge` sibling for anything that benefits from more than a one-line explanation, matching v3.4.22's Buildings/Negative-space and Simple/Advanced pattern; a plain `title` attribute for smaller, self-contained controls, matching the existing Home/Plan/Full-width convention):
+
+- **Draw section box** — upgraded from title-only to a real info-badge explaining the whole box-draw-then-pick-a-direction flow, since it's the least-documented, most-used interaction in the tool.
+- **Box-direction picker** ("Box drawn — view it from:") — new badge clarifying the top compass and this picker do the same thing, and what Cancel actually does.
+- **Flip X / Flip Y** — title attributes: mirrors which side gets carved, doesn't move the cut.
+- **Reset cutaway** — title attribute, updated to reflect v3.4.63's box-aware behavior (centers on the active box, not always 0).
+- **Manhattan context / Major streets** — one shared badge in their row, same pattern as Buildings/Negative space.
+- **Export** (model scale + Export STL) — new badge covering both, since neither explained what the scale number does to the real geometry.
+- **High detail** — title attribute on its label (not the checkbox, so it can't accidentally toggle on click) explaining the frame-time tradeoff.
+
+Deliberately left alone: Metric/Imperial (v3.4.67 already moved it to the one place it applies, self-explanatory in context) and the N/S/E/W/Plan/Home nav (already covered by titles plus the in-app help modal's own Navigation section).
+
+`audit_deploy.js`: 1 new check (badge/title presence).
+
+v3.4.70 - 2026-09-19 - Same screenshot as v3.4.69, second half of the same underlying pattern: Joe's screenshot also showed the View compass's W button and the "West Elevation" corner label stuck active after switching into Manhattan context, even though the camera had already switched back to perspective. Root cause: `updateCurrentViewIndicator()` (v3.4.33) is the one function that syncs both -- `resetToDefaultView()` already calls it for the same reason v3.4.69's fix cited ("undo it here same as recenterCamera() always has"), `zoomToBoroughContext()` never did.
+
+Added `updateCurrentViewIndicator('home')` right alongside v3.4.69's `enableRotate` fix. Deliberately scoped to ONLY the indicator -- does not touch `sectionModeAxis` or call `applySectionMode(null)`, which would revert the actual cutaway clipping planes back to the full-site octant view. v3.2.23's own comment in this function explains why a box-scoped elevation's cutaway state is meant to persist into Manhattan context rather than reset on entry -- fixing the label isn't a reason to undo that.
+
+Live-verified the underlying diagnosis for both v3.4.69 and v3.4.70 together via a direct Claude-in-Chrome connection to Joe's localhost:8888 (still running v3.4.68, pre-fix): computed District 1, entered West Elevation, toggled Manhattan context -- confirmed the W button/label stayed stuck exactly as reported, and confirmed a full drag across the viewport produced zero camera rotation (identical position before/after). Could not live-patch either fix's actual EFFECT this round -- `controls` isn't exposed on `window.__NS` the way camera/scene/etc. are, so flipping `enableRotate` or calling `updateCurrentViewIndicator()` from outside the module isn't possible without editing the running page. Both fixes are code-reviewed against the confirmed-live root cause, not yet confirmed fixed -- needs either a reload with this version, or `controls` added to the debug hook so a future session can live-patch before shipping.
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.69 - 2026-09-19 - Joe: "when you are in elevation view and select Manhattan context you cannot do anything but pan around." Root cause found via code reading, not guessed: `setOrthogonalView()` sets `controls.enableRotate = false` (v3.2.34, keeps a true N/S/E/W/Plan elevation locked to its axis). `zoomToBoroughContext()` already switches back to the perspective camera (`activeCamera = camera`, unconditional since v3.0.42) but never touched `enableRotate` -- so a locked-off elevation's rotate lock silently carried straight into Manhattan context, leaving pan (and zoom) the only working interaction. `exitBoroughContext()` never surfaced this, since it routes through `recenterCamera()` -> `resetToDefaultView()`, which already resets `enableRotate` -- the bug only shows up while staying inside context, never on the way out, which is exactly the case Joe hit.
+
+Fixed with one line: `controls.enableRotate = true;` right alongside the existing camera switch, same place `resetToDefaultView()` does it for the same reason. Manhattan context is meant to be a free-orbit view regardless of what was active before it.
+
+Not yet live-verified on Joe's machine -- held per standing rule, code-reviewed root cause only (see AUDIT.md's own note on why that's not sufficient to call resolved on its own).
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.68 - 2026-09-19 - Joe's screenshot: the house-icon nav button's tooltip says "Recenter," but it actually does more than that -- `recenterCamera()` sets `activeCamera = camera` (switches back to the perspective camera, undoing whichever locked N/S/E/W/Plan orthographic view is active) and re-enables free orbit, THEN fits to the site. Already correctly labeled `'Perspective'` internally (`VIEW_LABELS`, v3.4.33) -- just the visible tooltip never matched. Picked "Home (3D view)" over "3D view" (keeps the icon's usual Home meaning) or "Recenter to 3D view" (keeps the fit-to-bounds half too) -- Joe's choice.
+
+Text-only change, no logic touched.
+
+v3.4.67 - 2026-09-19 - Joe's screenshot + question: Units only changes something when Advanced is open -- should it move in there? Checked v3.4.35's own reasoning first: it was already established that Metric/Imperial affects nothing outside the Advanced-cutaway slider labels/values, Units was just gated behind a compute (#exploreExtras), not behind the specific tab that actually reads it.
+
+Moved the Metric (m)/Imperial (ft) toggle from above the Simple/Advanced tabs into the top of `#advancedCutawayControls` itself -- visible only when Advanced is open, gone in Simple where it was previously visible but did nothing. Same ids (`unitsMetric`/`unitsImperial`), same listeners, no JS logic touched -- purely a DOM relocation, same pattern v3.4.66 used for the compass N/S/E/W a moment earlier and v3.4.38 already used for Display/Export.
+
+`audit_deploy.js`: 3 new checks.
+
+v3.4.66 - 2026-09-19 - Joe's screenshot: once a box is drawn, the top View compass's own N/S/E/W sits directly above the box panel's "Box drawn -- view it from:" N/S/E/W -- two sets of direction buttons visible at once. Checked before designing anything: they've actually been functionally identical since `goToDirection()` (the top compass's handler) started forwarding to `applyPlanBoxDirection()` whenever `pendingPlanBox` is set -- not just visually similar, the exact same action twice.
+
+Offered two ways to collapse it to one; Joe picked keeping the box panel's picker (the one with the explanatory label right next to it) and hiding the top compass's directions instead. New `setCompassDirectionsVisible(visible)` toggles just `navN`/`navS`/`navE`/`navW` -- `navHome` stays untouched throughout, since recentering back to perspective is a genuinely different action, not a duplicate of anything in the box panel. Hidden the moment `planBoxPanel` is shown (right after a box is drawn); restored in `cancelPlanBox()`, which covers both the Cancel button and a direction actually being picked (`applyPlanBoxDirection()` calls `cancelPlanBox()` once it's done) -- one restore point for every way the box panel can close.
+
+`audit_deploy.js`: 4 new checks.
+
+v3.4.65 - 2026-09-19 - Joe: "also after a section box is drawn i cannot select the box edges to drag." Reproduced live before touching anything: drew a box, left it at the "Box drawn -- view it from:" stage (no direction picked yet), tried to drag an edge -- it silently started a brand new box draw instead, discarding the one just drawn.
+
+Root cause: v3.4.59's edge-drag only ever looked at `activeSectionBox`, the COMMITTED box a direction has already been picked for. The box you've just drawn but haven't picked a direction for yet is `pendingPlanBox`, a different variable entirely, which `hitTestBoxEdge()` never checked. Made worse by `boxDrawMode` staying true through that whole awaiting-direction stage (it only goes false on Cancel or a direction pick) combined with the pointerdown handler's `if (!boxDrawMode)` wrapper around the edge-check -- so an edge-grab attempt there fell straight through to the new-drag-start branch instead of ever being tested.
+
+`hitTestBoxEdge()` now selects `boxDrawMode ? pendingPlanBox : activeSectionBox` -- one function covering both stages, correctly returning null while boxDrawMode is true but nothing's been drawn yet. The pointerdown handler's `if (!boxDrawMode)` wrapper around the edge-check is gone -- the check always runs now, since hitTestBoxEdge() itself decides which box is relevant. `pendingPlanBox` doesn't have a 3D outline mesh the way `activeSectionBox` does (`planBoxOutlineMesh`) -- its only visual is the screen-space CSS overlay, normally driven by raw pointer coordinates during a fresh drag. Editing its world bounds via an edge-drag needed the reverse: a new `worldToScreenXY()` helper (the deliberate algebraic inverse of the existing `screenToWorldGround()`, same rect and camera) feeding a new `updatePlanBoxOverlayFromWorldBounds()`, so the overlay stays in sync with the world-space bounds being dragged. Hover-cursor feedback (ew-resize/ns-resize) now also fires during the awaiting-direction stage, and preserves the crosshair cursor `setBoxDrawMode()` already sets as its non-edge fallback while boxDrawMode is on, rather than stomping it back to a plain pointer between edges.
+
+`audit_deploy.js`: 217/217 (7 new checks; updated 4 v3.4.59 checks whose exact-string matches were against the now-superseded code shape -- each says so explicitly, pointing at the v3.4.65 check that replaced the behavior it used to verify).
+
+v3.4.64 - 2026-09-19 - Joe: "if i zoom into an area and select draw section box the frame zooms out." Traced against the code, not just the report: `setOrthogonalView('plan')` has always framed on the whole site (`currentTargetAndSpan()`'s own deliberate v3.0.42 default), regardless of whatever the perspective camera happened to be zoomed into beforehand -- and `setBoxDrawMode(true)` always calls it with no way to say otherwise. A past live-verify fix (already in the file, its own comment right above this one) had addressed the "no control" half of this same report -- re-enabled pan/zoom after the switch -- but the reset-to-full-site itself was treated as expected/unavoidable at the time. It's reasonable for a true N/S/E/W elevation (that comment's own reasoning: an elevation is normally about seeing the whole thing flat) but wrong specifically for entering Plan to draw a box, where the entire point of having zoomed in was to draw a box around that exact area.
+
+`setOrthogonalView()` now takes an optional second parameter, `overrideTargetSpan`, which replaces `currentTargetAndSpan()`'s always-full-site result when supplied -- every other existing caller passes nothing and is completely unaffected, including the deliberate default this doesn't touch. `setBoxDrawMode(true)` supplies it, but only when actually coming from the perspective camera (`activeCamera === camera` -- if boxDrawMode somehow gets toggled on while already in an orthographic view, there's no perspective FOV/distance to convert from, so it falls through to the original full-site framing unchanged): converts the perspective camera's current distance-to-target and FOV into an equivalent orthographic half-height (`2 * dist * tan(vFOV/2)`, floored at 100m so an extreme close-up can't produce a degenerate frustum), and captures `controls.target` directly as the new center. Not a pixel-for-pixel match between two different projection types -- not really possible, and not the goal -- close enough that "roughly where and how zoomed in I just was" reads correctly, which is what the report was actually about.
+
+`audit_deploy.js`: 210/210 (6 new checks).
+
+v3.4.63 - 2026-09-19 - Follow-up on the v3.4.60 audit's own flagged-but-not-fixed gap: `resetCutaway()` set `xThreshold`/`yThreshold` directly, duplicating everything `setXCutaway()`/`setYCutaway()`/`setHeightCut()` already do (slider value, `updateValueInput`, `syncCapFillPlanes`/`updateCutLinePlanes`/`syncHandlePositions`) while missing the one thing those three canonical setters have that this hand-rolled version didn't: `refreshActiveSectionProfile()` when the reset axis matches the active section. Two code paths doing the same thing is exactly the shape of bug that caused v3.4.51's original gap in the first place -- routing through the real setters means any future fix to them applies here automatically, no second edit to remember.
+
+Also a real behavior improvement, not just a bypass fix: resetting to a flat 0 made sense in the old octant-cutaway-only world, but means nothing relative to a drawn box -- 0 could easily sit outside the box's own bounds. When a box is active, Reset now re-centers X/Y on that box's own center (the same value `applyPlanBoxDirection()` already sets on a fresh direction pick) instead of an arbitrary site-wide default with no relationship to what's on screen. No box active: still resets to 0, unchanged.
+
+`audit_deploy.js`: 204/204 (4 new checks).
+
+v3.4.62 - 2026-09-19 - Joe: "Ok go ahead fix camera" -- picking the camera-framing fix over dimming the cutaway controls, for the Manhattan-context zoom issue found a couple sessions back (site becomes imperceptible against the full-island view, making working cutaway tools look broken).
+
+`zoomToBoroughContext()`'s `span` (the distance the camera backs off to fit everything in the initial view) was derived from `boroughSize` -- Manhattan's own ~9km extent -- which is exactly what put the camera far enough back that a district-scale site, and any cutaway edit on it, became sub-pixel. Switched it to `siteSize` (the actual site's own bounding-box size, from `solidGroup`) times a fixed 5x multiplier, floored at 300m for very small districts. Camera position and orbit target are still anchored on `siteCenter` -- v3.2.23's own fix for a separate problem (zooming in used to dolly toward Manhattan's centroid instead of the buildings on screen) -- untouched, since that was never the issue here; only the framing DISTANCE changed, not what the camera looks at.
+
+`controls.maxDistance` (still `BOROUGH_MAX_DISTANCE`, 18000) is untouched and comfortably larger than any realistic `siteSize*5` framing distance, so a normal scroll-out still reaches the old full-island view for anyone who wants that overview back -- this changes the default framing, not what's reachable.
+
+`audit_deploy.js`: 200/200 (4 new checks).
+
 v3.4.61 - 2026-09-02 - Joe: "the shape handles don't display" -- testing in perspective/octant, right after the Manhattan-context conversation. Traced it: not a bug, v3.4.11's own deliberate call from months back -- Joe had flagged that the handle cones looked broken in that exact view (a cone seen near edge-on reads as a flat, glitchy wedge from most perspective/octant angles), so they were turned off there on purpose, sliders left as the intended way to drag cutaway values in that view. Explained the history and asked whether to reconsider it now, given v3.4.60's audit had just found something new: under Option B, dragging a handle inside a locked elevation no longer visibly does anything at all (`cutawayVisiblyInert`) -- while free perspective/octant is now the ONE place left where a handle drag still does real, visible work (genuine octant carving, confirmed live via the actual clip-plane values updating in real time). Joe: "both."
 
 Two changes to `handlesOn` in `refreshViewToggles()`:

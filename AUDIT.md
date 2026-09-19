@@ -923,6 +923,44 @@ unchanged. **None of that is equivalent to clicking through the real
 thing in a browser** — say so plainly rather than implying it's been
 proven the way a live-verified rendering fix has been.
 
+## Panel consolidation / IA redesign phase 2 (v3.4.66-68)
+
+**Redundant controls, not new features.** Three small, independent
+follow-ups from Joe's screenshots, none touching rendering/geometry:
+
+- **v3.4.66**: the top View compass's N/S/E/W and the box panel's own
+  "Box drawn — view it from:" N/S/E/W were doing the exact same thing —
+  `goToDirection()` (the compass's handler) has forwarded to
+  `applyPlanBoxDirection()` whenever `pendingPlanBox` is set since the
+  v3.4.40 fix (see the box-draw section below), just never surfaced as a
+  visible duplication until Joe's screenshot showed both sets stacked.
+  `setCompassDirectionsVisible(visible)` hides/shows just `navN/S/E/W`
+  (never `navHome`, a genuinely different action) — called `false` the
+  moment `planBoxPanel` shows, `true` in `cancelPlanBox()` (covers both
+  Cancel and a direction actually being picked, since
+  `applyPlanBoxDirection()` calls `cancelPlanBox()` once it's done).
+- **v3.4.67**: Units (Metric/Imperial) only ever affects the Advanced
+  tab's slider labels/values — confirmed back at v3.4.35, just gated
+  behind a compute (`#exploreExtras`) rather than behind the specific
+  tab that reads it. Relocated to the top of `#advancedCutawayControls`
+  itself. Pure DOM move, same ids/listeners.
+- **v3.4.68**: `navHome`'s tooltip said "Recenter," but `recenterCamera()`
+  (its handler) does more — `activeCamera = camera` switches back to the
+  perspective camera and undoes whichever locked N/S/E/W/Plan
+  orthographic view is active, on top of the actual fit-to-bounds. Text
+  fix only (`title="Home (3D view)"`), already correctly labeled
+  `'Perspective'` in `VIEW_LABELS` internally (v3.4.33).
+
+**Stale-check maintenance, not new risk**: v3.4.67's move broke two
+pre-existing v3.4.34 audit checks and one v3.4.35 check that used
+`<p class="label">Units` as a text boundary/anchor for unrelated
+assertions (the nav-compass and `planBoxPanel` DOM-nesting checks) — all
+three re-pointed at stable anchors rather than weakened or dropped; see
+`audit_deploy.js`'s own v3.4.67 section comments for the specifics. Same
+thing happened once already at v3.4.65 (a `cancelPlanBox()` length-window
+check) — worth remembering any time a change touches DOM/code a nearby
+check happens to string-match against, even unintentionally.
+
 ## Plan-view box-draw section workflow (v3.4.0)
 
 **Plan itself never respected a drawn box until v3.4.28 — a real, separate

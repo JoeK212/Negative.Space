@@ -18,8 +18,9 @@ const path = require('path');
 const ROOT = __dirname;
 const INDEX = path.join(ROOT, 'index.html');
 const CHANGELOG = path.join(ROOT, 'CHANGELOG.md');
+const EXTENDED = path.join(ROOT, 'EXTENDED.md'); // v3.4.72 -- read alongside index.html/CHANGELOG.md so doc-content checks (not just index.html markup) are possible; not fatal if missing, since older checkouts/partial deliveries shouldn't hard-fail the whole suite over a docs file
 
-let html, changelog;
+let html, changelog, extended = '';
 try {
   html = fs.readFileSync(INDEX, 'utf8');
 } catch (e) {
@@ -31,6 +32,11 @@ try {
 } catch (e) {
   console.error('FATAL: could not read CHANGELOG.md -- ' + e.message);
   process.exit(1);
+}
+try {
+  extended = fs.readFileSync(EXTENDED, 'utf8');
+} catch (e) {
+  console.warn('WARNING: could not read EXTENDED.md -- doc-content checks will fail -- ' + e.message);
 }
 
 let pass = 0, fail = 0;
@@ -519,13 +525,20 @@ check(
 );
 check(
   'the six nav-compass buttons (navHome/navPlan/navN/navS/navE/navW) now live inside #exploreExtras, not a separate #navGrid',
+  // v3.4.67: end-of-window marker changed from "<p class=\"label\">Units" to
+  // the Display accordion's own opening tag -- Units itself moved OUT of
+  // #exploreExtras this version (see the new v3.4.67 section below), so it
+  // can no longer serve as a boundary here. The Display accordion is still
+  // real, still-present content inside #exploreExtras that comes after the
+  // nav buttons, so it does the same job.
   !/id="navGrid"/.test(html)
-  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units/); return m && /id="navHome"/.test(m[0]) && /id="navPlan"/.test(m[0]) && /id="navN"/.test(m[0]); })()
+  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<summary>Display<\/summary>/); return m && /id="navHome"/.test(m[0]) && /id="navPlan"/.test(m[0]) && /id="navN"/.test(m[0]); })()
 );
 check(
   '#planBoxPanel is a plain inline block inside #exploreExtras now, not a separate floating .panel',
+  // v3.4.67: same boundary-marker fix as the check above.
   !/class="panel" id="planBoxPanel"/.test(html)
-  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units/); return m && /id="planBoxPanel"/.test(m[0]); })()
+  && (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<summary>Display<\/summary>/); return m && /id="planBoxPanel"/.test(m[0]); })()
 );
 check(
   'positionPlanBoxPanel() is a documented no-op -- #planBoxPanel no longer needs anchoring to #navPanel\'s position since it flows inline',
@@ -570,8 +583,14 @@ check(
   && /document\.getElementById\('drawBoxBtn'\)\.click\(\);/.test(html)
 );
 check(
-  'Units moved inside #exploreExtras (gated behind a compute) instead of always visible above Neighborhood with nothing yet to apply it to',
-  (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<p class="label">Units[\s\S]*?<\/div>\s*\n  <\/div>/); return !!m; })()
+  'Units is gated behind a compute (inside #sectionRow, shown only once a compute has run) instead of always visible above Neighborhood with nothing yet to apply it to',
+  // v3.4.67: superseded in place -- Units relocated one level further in,
+  // from #exploreExtras to #advancedCutawayControls (see the new v3.4.67
+  // section below for the full move and its own, more specific checks).
+  // The original intent here -- Units shouldn't be visible before there's
+  // a real reason to touch it -- still holds and is re-verified against
+  // the new location rather than dropped.
+  (() => { const m = html.match(/id="sectionRow"[\s\S]*?id="advancedCutawayControls"[\s\S]*?<button class="btn active" id="unitsMetric">/); return !!m; })()
 );
 
 /* ===================================================================
@@ -896,7 +915,11 @@ check(
 );
 check(
   'cancelPlanBox() restores the outline via updatePlanBoxOutline() rather than leaving it hidden with no new box to replace it',
-  /function cancelPlanBox\(\)\{[\s\S]{0,600}updatePlanBoxOutline\(\);\s*\}/.test(html)
+  // v3.4.66: widened from {0,600} to {0,900} -- the v3.4.66 setCompassDirectionsVisible(true) line
+  // (plus its comment) added real, correct content to this function's body and pushed its total
+  // length past the old window; the check's actual intent (updatePlanBoxOutline() is the last real
+  // call in this function) is unchanged.
+  /function cancelPlanBox\(\)\{[\s\S]{0,900}updatePlanBoxOutline\(\);\s*\}/.test(html)
 );
 check(
   'the too-small-drag abort path in the pointerup handler also restores the outline, same reasoning as cancelPlanBox()',
@@ -1003,12 +1026,12 @@ check(
 sectionHeader("v3.4.59 -- box-edge drag-to-resize (hitTestBoxEdge/boxEdgeDragSide)");
 
 check(
-  'hitTestBoxEdge() refuses to hit-test when there is no activeSectionBox, when not in Plan, or while a NEW box is being drawn',
-  /function hitTestBoxEdge\(wx, wy\)\{\s*if \(!activeSectionBox \|\| !isPlanViewActive \|\| boxDrawMode\) return null;/.test(html)
+  'hitTestBoxEdge() refuses to hit-test when neither box exists or not in Plan (superseded by v3.4.65 -- was unconditionally activeSectionBox + excluded boxDrawMode entirely; now selects pendingPlanBox vs activeSectionBox based on boxDrawMode instead of excluding on it, see v3.4.65\'s own check above for the current exact form)',
+  /function hitTestBoxEdge\(wx, wy\)\{\s*const b = boxDrawMode \? pendingPlanBox : activeSectionBox;\s*if \(!b \|\| !isPlanViewActive\) return null;/.test(html)
 );
 check(
-  'the pointerdown handler checks for an edge grab before falling through to the boxDrawMode-gated new-box-draw start, and only when NOT already drawing a new box',
-  /if \(!boxDrawMode\)\{\s*const side = hitTestBoxEdge\(hit\.x, hit\.y\);\s*if \(side\)\{\s*boxEdgeDragSide = side;/.test(html)
+  'the pointerdown handler checks for an edge grab before falling through to the boxDrawMode-gated new-box-draw start (superseded by v3.4.65 -- was wrapped in `if (!boxDrawMode)`, which is exactly what blocked edge-grabs on the awaiting-direction box; the check now always runs unconditionally, see v3.4.65\'s own check above)',
+  /const side = hitTestBoxEdge\(hit\.x, hit\.y\); \/\/ v3\.4\.65[\s\S]{0,600}if \(side\)\{\s*boxEdgeDragSide = side;/.test(html)
 );
 check(
   'pointermove updates the correct single bound for each of the 4 sides, each clamped against BOX_EDGE_MIN_SIZE so a resize can never collapse or invert the box',
@@ -1018,16 +1041,16 @@ check(
   /else if \(boxEdgeDragSide === 'yMax'\) b\.yMax = Math\.max\(hit\.y, b\.yMin \+ BOX_EDGE_MIN_SIZE\);/.test(html)
 );
 check(
-  'pointermove calls updatePlanBoxOutline() during an edge drag, so the outline redraws live rather than only jumping once on release',
-  /if \(boxEdgeDragSide === 'yMax'\) b\.yMax = Math\.max\(hit\.y, b\.yMin \+ BOX_EDGE_MIN_SIZE\);\s*updatePlanBoxOutline\(\);/.test(html)
+  'pointermove redraws the edited box\'s live visual during an edge drag, not only once on release (superseded by v3.4.65 -- was an unconditional updatePlanBoxOutline() call; now branches between that and updatePlanBoxOverlayFromWorldBounds() depending which box is being edited, see v3.4.65\'s own check above)',
+  /if \(b === activeSectionBox\) updatePlanBoxOutline\(\);\s*else updatePlanBoxOverlayFromWorldBounds\(b\);/.test(html)
 );
 check(
   'the window pointerup handler clears boxEdgeDragSide and returns before reaching the unrelated boxDrawMode/planBoxDragStart new-box-completion logic',
   /window\.addEventListener\('pointerup', \(e\) => \{\s*if \(boxEdgeDragSide\)\{\s*boxEdgeDragSide = null;\s*return;\s*\}/.test(html)
 );
 check(
-  'hover-cursor feedback (ew-resize/ns-resize) is gated on activeSectionBox && isPlanViewActive before doing any raycast, so it costs nothing in every other view',
-  /if \(!boxDrawMode && !dragAxis && activeSectionBox && isPlanViewActive\)\{\s*const hit = screenToWorldGround\(e\.clientX, e\.clientY\);\s*const side = hit \? hitTestBoxEdge/.test(html)
+  'hover-cursor feedback (ew-resize/ns-resize) is gated on a relevant box existing and isPlanViewActive before doing any raycast (superseded by v3.4.65 -- was `!boxDrawMode && !dragAxis && activeSectionBox`, which is exactly what suppressed cursor feedback while pendingPlanBox was the relevant box; see v3.4.65\'s own check above for the current exact form)',
+  /if \(!dragAxis && isPlanViewActive && \(boxDrawMode \? pendingPlanBox : activeSectionBox\)\)\{/.test(html)
 );
 
 /* ===================================================================
@@ -1087,6 +1110,333 @@ check(
 check(
   'the v3.4.13 !activeSectionBox guard on handlesOn is untouched -- box-active still force-hides handles regardless of view, unrelated to this change',
   /const handlesOn = showNegative && !activeSectionBox && document\.getElementById\('sectionRow'\)\.style\.display !== 'none'/.test(html)
+);
+
+/* ===================================================================
+   v3.4.62 -- Manhattan context frames off the site's own size, not the
+   borough's -- site stays a workable scale, borough context still visible
+   =================================================================== */
+sectionHeader("v3.4.62 -- zoomToBoroughContext() frames off siteSize * 5 instead of boroughSize, so the site itself doesn't become imperceptible");
+
+check(
+  'span is now derived from siteSize (the site\'s own bounding-box size), not boroughSize -- the old boroughSize/boroughBox variables are gone from this function',
+  /const span = Math\.max\(siteSize\.x, siteSize\.y, 300\) \* 5;/.test(html) && !/const boroughSize = boroughBox\.getSize/.test(html)
+);
+check(
+  'siteSize is computed from siteBox (solidGroup\'s real bounding box), the same box already used for siteCenter -- one measurement, not a second unrelated one',
+  /const siteBox = new THREE\.Box3\(\)\.setFromObject\(solidGroup\);\s*const siteSize = siteBox\.getSize\(new THREE\.Vector3\(\)\);\s*const siteCenter = siteBox\.getCenter\(new THREE\.Vector3\(\)\);/.test(html)
+);
+check(
+  'the camera position and orbit target are still anchored on siteCenter (v3.2.23\'s own fix, unrelated to this change) -- only the DISTANCE (span) changed, not what the camera looks at or dollies toward',
+  /camera\.position\.copy\(siteCenter\)\.addScaledVector\(BOROUGH_VIEW_DIR, span \* 0\.9\);\s*controls\.target\.copy\(siteCenter\);/.test(html)
+);
+check(
+  'controls.maxDistance is untouched (still BOROUGH_MAX_DISTANCE, 18000) -- comfortably larger than any realistic siteSize*5 framing distance, so scrolling out still reaches the old full-island view for anyone who wants it',
+  /const BOROUGH_MAX_DISTANCE = 18000;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.63 -- resetCutaway() routes through the canonical setHeightCut()/
+   setXCutaway()/setYCutaway() instead of duplicating their effects, and
+   re-centers on the active box instead of a flat 0 when one exists
+   =================================================================== */
+sectionHeader("v3.4.63 -- resetCutaway() uses the real setters; re-centers on activeSectionBox when one exists");
+
+check(
+  'resetCutaway() calls setHeightCut(0) rather than hand-setting sectionPlane.constant/slider value/updateValueInput itself',
+  /function resetCutaway\(\)\{[\s\S]{0,1600}setHeightCut\(0\);/.test(html)
+);
+check(
+  'resetCutaway() calls setXCutaway()/setYCutaway() with the box\'s own center when activeSectionBox exists, not a flat 0',
+  /if \(activeSectionBox\)\{\s*setXCutaway\(\(activeSectionBox\.xMin \+ activeSectionBox\.xMax\) \/ 2\);\s*setYCutaway\(\(activeSectionBox\.yMin \+ activeSectionBox\.yMax\) \/ 2\);\s*\} else \{\s*setXCutaway\(0\);\s*setYCutaway\(0\);\s*\}/.test(html)
+);
+check(
+  'the old duplicated logic (manual xThreshold/yThreshold assignment, bypassing the setters entirely) is gone from resetCutaway()',
+  !/function resetCutaway\(\)\{[\s\S]{0,1500}xThreshold = Number\(xSlider\.value\)/.test(html)
+);
+check(
+  'setXCutaway()/setYCutaway()/setHeightCut() themselves are untouched -- this fix only changes what CALLS them, not their own clamping or refreshActiveSectionProfile() logic',
+  /const clamped = Math\.min\(Math\.max\(value, Number\(slider\.min\)\), Number\(slider\.max\)\);\s*slider\.value = clamped;\s*xThreshold = clamped;/.test(html) &&
+  /const clamped = Math\.min\(Math\.max\(value, Number\(slider\.min\)\), Number\(slider\.max\)\);\s*slider\.value = clamped;\s*yThreshold = clamped;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.64 -- entering Plan via "Draw section box" preserves the
+   perspective camera's current framing instead of resetting to full-site
+   =================================================================== */
+sectionHeader("v3.4.64 -- setOrthogonalView() accepts an optional overrideTargetSpan; setBoxDrawMode() supplies it from the current perspective camera");
+
+check(
+  'setOrthogonalView() now takes a second, optional overrideTargetSpan parameter',
+  /function setOrthogonalView\(direction, overrideTargetSpan\)\{/.test(html)
+);
+check(
+  'target/span destructuring falls back to currentTargetAndSpan() only when overrideTargetSpan is not supplied -- every other existing caller (which passes nothing) is unaffected',
+  /let \{ target, span \} = overrideTargetSpan \|\| currentTargetAndSpan\(\);/.test(html)
+);
+check(
+  'setBoxDrawMode(true) only captures an override when actually coming from the perspective camera (activeCamera === camera) -- no perspective FOV/distance to convert from otherwise, falls through to normal full-site framing',
+  /if \(activeCamera === camera\)\{\s*const dist = camera\.position\.distanceTo\(controls\.target\);\s*const vFOV = camera\.fov \* Math\.PI \/ 180;/.test(html)
+);
+check(
+  'the captured span is floored at 100m so an extreme close-up zoom in perspective can\'t produce a degenerate/unusably tiny Plan frustum',
+  /overrideTargetSpan = \{ target: controls\.target\.clone\(\), span: Math\.max\(approxSpan, 100\) \};/.test(html)
+);
+check(
+  'setOrthogonalView(\'plan\', overrideTargetSpan) is the actual call site -- the override is threaded through, not just computed and discarded',
+  /setOrthogonalView\('plan', overrideTargetSpan\);/.test(html)
+);
+check(
+  'the deliberate v3.0.42 default (currentTargetAndSpan(), always full-site) is untouched for every other caller of setOrthogonalView() -- this is additive, not a replacement of that reasoning',
+  /N\/S\/E\/W now always frames the FULL model/.test(html)
+);
+
+/* ===================================================================
+   v3.4.65 -- box-edge drag now also works on pendingPlanBox (the just-
+   drawn, awaiting-direction box), not just the committed activeSectionBox
+   =================================================================== */
+sectionHeader("v3.4.65 -- hitTestBoxEdge()/edge-drag extended to pendingPlanBox, plus worldToScreenXY() to keep the CSS overlay in sync while editing it");
+
+check(
+  'hitTestBoxEdge() selects pendingPlanBox vs activeSectionBox based on boxDrawMode -- no longer unconditionally activeSectionBox, and no longer excludes boxDrawMode entirely',
+  /function hitTestBoxEdge\(wx, wy\)\{\s*const b = boxDrawMode \? pendingPlanBox : activeSectionBox;\s*if \(!b \|\| !isPlanViewActive\) return null;/.test(html)
+);
+check(
+  'the pointerdown handler no longer wraps the edge-check in `if (!boxDrawMode)` -- hitTestBoxEdge() itself now decides which box is relevant, so the check always runs',
+  /const side = hitTestBoxEdge\(hit\.x, hit\.y\); \/\/ v3\.4\.65/.test(html)
+);
+check(
+  'pointermove\'s edge-drag branch selects the same box hitTestBoxEdge() would (boxDrawMode ? pendingPlanBox : activeSectionBox), not hardcoded to activeSectionBox',
+  /const b = boxDrawMode \? pendingPlanBox : activeSectionBox; \/\/ v3\.4\.65: same selection hitTestBoxEdge/.test(html)
+);
+check(
+  'editing pendingPlanBox calls the new updatePlanBoxOverlayFromWorldBounds(b) instead of updatePlanBoxOutline() (which only ever draws activeSectionBox and would silently no-op for pendingPlanBox)',
+  /if \(b === activeSectionBox\) updatePlanBoxOutline\(\);\s*else updatePlanBoxOverlayFromWorldBounds\(b\);/.test(html)
+);
+check(
+  'worldToScreenXY() projects via activeCamera and renderer.domElement\'s own bounding rect -- the deliberate algebraic inverse of screenToWorldGround()\'s NDC formula, not a fresh/independent derivation',
+  /function worldToScreenXY\(wx, wy, wz\)\{\s*const rect = renderer\.domElement\.getBoundingClientRect\(\);\s*const v = new THREE\.Vector3\(wx, wy, wz\)\.project\(activeCamera\);\s*return \{ x: rect\.left \+ \(v\.x \+ 1\) \/ 2 \* rect\.width, y: rect\.top \+ \(1 - v\.y\) \/ 2 \* rect\.height \};/.test(html)
+);
+check(
+  'updatePlanBoxOverlayFromWorldBounds() projects both corners and takes min/max for left/top/width/height, so it produces a correct rect regardless of which corner ends up numerically smaller on screen',
+  /const p1 = worldToScreenXY\(b\.xMin, b\.yMin, z\);\s*const p2 = worldToScreenXY\(b\.xMax, b\.yMax, z\);\s*const overlay = document\.getElementById\('planBoxOverlay'\);\s*overlay\.style\.left = Math\.min\(p1\.x, p2\.x\) \+ 'px';/.test(html)
+);
+check(
+  'the hover-cursor check now also fires during boxDrawMode when pendingPlanBox exists, not just when a box is already committed, and preserves the crosshair (not "auto") as its non-edge fallback while boxDrawMode is on',
+  /if \(!dragAxis && isPlanViewActive && \(boxDrawMode \? pendingPlanBox : activeSectionBox\)\)\{/.test(html) &&
+  /: \(boxDrawMode \? 'crosshair' : 'auto'\); \/\/ v3\.4\.65/.test(html)
+);
+
+/* ===================================================================
+   v3.4.66 -- one N/S/E/W picker visible at a time: the top View compass's
+   direction buttons hide while the box panel's own "Box drawn -- view it
+   from:" picker is up (they've been functionally identical since
+   goToDirection() started forwarding to applyPlanBoxDirection() whenever
+   pendingPlanBox is set), restored once a direction is picked or cancelled
+   =================================================================== */
+sectionHeader("v3.4.66 -- setCompassDirectionsVisible() hides navN/S/E/W while pendingPlanBox awaits a direction, restores them on pick or cancel");
+
+check(
+  'setCompassDirectionsVisible() toggles navN/S/E/W display -- navHome is deliberately untouched, a genuinely different action (exits to perspective) not a duplicate of the box panel',
+  /function setCompassDirectionsVisible\(visible\)\{\s*const display = visible \? '' : 'none';\s*document\.getElementById\('navN'\)\.style\.display = display;\s*document\.getElementById\('navS'\)\.style\.display = display;\s*document\.getElementById\('navE'\)\.style\.display = display;\s*document\.getElementById\('navW'\)\.style\.display = display;\s*\}/.test(html)
+);
+check(
+  'the box-draw pointerup handler that shows planBoxPanel also hides the compass directions in the same step',
+  /document\.getElementById\('planBoxPanel'\)\.style\.display = 'block';\s*setCompassDirectionsVisible\(false\);/.test(html)
+);
+check(
+  'cancelPlanBox() restores the compass directions -- covers both the Cancel button AND applyPlanBoxDirection() (which calls cancelPlanBox() after committing a direction), so there is no path that hides them and never brings them back',
+  /document\.getElementById\('planBoxOverlay'\)\.style\.display = 'none';\s*setCompassDirectionsVisible\(true\);/.test(html)
+);
+check(
+  'navHome has no display-toggling reference anywhere near setCompassDirectionsVisible -- it should stay visible in every box-draw state',
+  !/document\.getElementById\('navHome'\)\.style\.display/.test(html)
+);
+
+/* ===================================================================
+   v3.4.67 -- Units toggle moved from above the Simple/Advanced tabs to
+   the top of Advanced's own content, the only place it actually does
+   anything (v3.4.35's own finding: it only affects Advanced's slider
+   labels/values, nothing in Simple reads it)
+   =================================================================== */
+sectionHeader("v3.4.67 -- Units (unitsMetric/unitsImperial) relocated inside #advancedCutawayControls, no longer above the Simple/Advanced tabs");
+
+check(
+  'the Units row no longer sits above #sectionRow/#uiModeTabs -- it is not in #exploreExtras between the info-badge row and the Display accordion anymore',
+  !/<span class="info-badge" tabindex="0">\?<span class="tip">Independent toggles[\s\S]{0,400}<p class="label">Units<\/p>/.test(html)
+);
+check(
+  'unitsMetric/unitsImperial now render as the first real content inside #advancedCutawayControls, before the "red lines" caption',
+  /<div id="advancedCutawayControls" style="display:none; flex-direction:column; gap:8px;">[\s\S]{0,600}<button class="btn active" id="unitsMetric">Metric \(m\)<\/button>[\s\S]{0,200}<button class="btn secondary" id="unitsImperial">Imperial \(ft\)<\/button>[\s\S]{0,900}The red lines in the 3D view/.test(html)
+);
+check(
+  'Display and Export accordions are untouched -- still directly inside #exploreExtras, not pulled into Advanced along with Units (unlike Units, both apply regardless of which tab is open)',
+  /<details class="accordion">\s*<summary>Display<\/summary>[\s\S]{0,50}<div class="accordion-body">/.test(html) &&
+  /<\/details>\s*<\/div>\s*<div id="sectionRow"/.test(html)
+);
+
+/* ===================================================================
+   v3.4.68 -- Home button tooltip corrected: "Recenter" understated what
+   it actually does (also switches back to perspective/undoes a locked
+   orthographic view), text-only fix
+   =================================================================== */
+sectionHeader("v3.4.68 -- navHome's title attribute now reads \"Home (3D view)\" instead of \"Recenter\"");
+
+check(
+  'navHome\'s title attribute is "Home (3D view)", not the old "Recenter" (which undersold what recenterCamera() actually does -- switches back to the perspective camera, not just repositioning within whatever view was already active)',
+  /id="navHome" title="Home \(3D view\)"/.test(html)
+  && !/title="Recenter"/.test(html)
+);
+
+/* ===================================================================
+   v3.4.69 -- zoomToBoroughContext() restores controls.enableRotate, so a
+   locked-off elevation's rotate lock doesn't silently carry into
+   Manhattan context (Joe: "can't do anything but pan around")
+   =================================================================== */
+sectionHeader("v3.4.69 -- zoomToBoroughContext() sets controls.enableRotate = true right alongside its existing camera switch");
+
+check(
+  'zoomToBoroughContext() resets controls.enableRotate to true immediately after switching activeCamera back to the perspective camera -- so an N/S/E/W/Plan elevation\'s v3.2.34 rotate lock can\'t silently carry into Manhattan context',
+  // anchored on the function's own opening AND its unique trailing line
+  // (camera.near = BOROUGH_CAMERA_NEAR) rather than just "activeCamera =
+  // camera; controls.object = camera;" alone -- resetToDefaultView() has
+  // that identical pair of lines too, so a looser anchor risks silently
+  // matching the WRONG function's already-correct enableRotate reset.
+  // {0,1000} covers this function's own comment blocks between
+  // activeCamera/controls.object and enableRotate; the final {0,1050}
+  // (widened from {0,50}) covers the v3.4.70 updateCurrentViewIndicator()
+  // addition and its own comment block, now sitting between enableRotate
+  // and camera.near.
+  // {0,1100} widened at v3.4.74 -- that version's boxDrawMode/
+  // cancelPlanBox() guard added another comment block between this
+  // function's opening and activeCamera = camera;.
+  /function zoomToBoroughContext\(\)\{[\s\S]{0,1100}activeCamera = camera;\s*controls\.object = camera;[\s\S]{0,1000}controls\.enableRotate = true;[\s\S]{0,1050}camera\.near = BOROUGH_CAMERA_NEAR;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.70 -- zoomToBoroughContext() also syncs the View compass's
+   current-view indicator (was stuck on the prior elevation's N/S/E/W
+   button/label), without touching sectionModeAxis/clipping state
+   =================================================================== */
+sectionHeader("v3.4.70 -- zoomToBoroughContext() calls updateCurrentViewIndicator('home')");
+
+check(
+  'zoomToBoroughContext() calls updateCurrentViewIndicator(\'home\') -- anchored on its unique trailing BOROUGH_CAMERA_NEAR line (same disambiguation reasoning as the v3.4.69 check above) so this can\'t accidentally match resetToDefaultView()\'s own updateCurrentViewIndicator(\'home\') call',
+  // {0,1700} widened at v3.4.74 -- that version's own new comment block
+  // (the boxDrawMode/cancelPlanBox() guard) landed between this
+  // function's opening and controls.enableRotate, same class of window
+  // breakage as v3.4.70's own note above about the enableRotate check.
+  /function zoomToBoroughContext\(\)\{[\s\S]{0,1700}controls\.enableRotate = true;[\s\S]{0,1050}updateCurrentViewIndicator\('home'\);[\s\S]{0,50}camera\.near = BOROUGH_CAMERA_NEAR;/.test(html)
+);
+check(
+  'zoomToBoroughContext() does NOT call applySectionMode(null) -- fixing the indicator must not revert the box-scoped elevation cutaway clipping v3.2.23 deliberately preserves through Manhattan context',
+  // matches the real call form (a semicolon right after the closing paren)
+  // rather than a bare "applySectionMode(" substring -- this function's
+  // own v3.4.70 comment explicitly NAMES applySectionMode(null) as the
+  // thing it's deliberately avoiding, which would otherwise self-trip a
+  // looser substring check.
+  (() => { const m = html.match(/function zoomToBoroughContext\(\)\{[\s\S]*?\n\}/); return m && !/applySectionMode\(null\);/.test(m[0]); })()
+);
+
+/* ===================================================================
+   v3.4.71 -- tooltip coverage pass: every previously-untooltipped left-
+   panel control (Draw section box, box-direction picker, Flip X/Y, Reset
+   cutaway, Manhattan context/Major streets, Export, High detail) now has
+   a real .info-badge or title attribute
+   =================================================================== */
+sectionHeader("v3.4.71 -- tooltip coverage: drawBoxBtn/planBoxPanel/flipX/flipY/resetCutawayBtn/viewBoroughs-viewStreets/export/highDetailToggle");
+
+check(
+  'Draw section box has a real .info-badge (not just its pre-existing title) explaining the box-draw-then-pick-a-direction workflow end to end',
+  /id="drawBoxBtn" style="flex:1;" title="Draw a box in Plan view[\s\S]{0,150}<\/button>\s*<span class="info-badge"[\s\S]{0,50}<span class="tip">Switches to Plan view/.test(html)
+);
+check(
+  'the box-direction picker panel has an info-badge next to "Box drawn -- view it from:" explaining the top compass does the same thing, and what Cancel does',
+  /Box drawn — view it from:<\/p>\s*<span class="info-badge"[\s\S]{0,50}<span class="tip">Picking a direction here/.test(html)
+);
+check(
+  'Flip X and Flip Y both have title attributes explaining the mirror-not-move behavior',
+  (html.match(/title="Mirror which side of this cut gets carved away, without moving the cut position itself"/g) || []).length === 2
+);
+check(
+  'Reset cutaway\'s title reflects the v3.4.63 box-aware behavior (site center, or the active box\'s own center), not the old always-0 description',
+  /id="resetCutawayBtn" style="margin-top:2px;" title="Resets Height\/X\/Y to the site's center — or, if a box is active, to that box's own center"/.test(html)
+);
+check(
+  'Manhattan context/Major streets share one info-badge in their row, same pattern as the existing Buildings/Negative-space badge',
+  /id="viewBoroughs">Manhattan context<\/button>\s*<button class="btn secondary" id="viewStreets">Major streets<\/button>\s*<span class="info-badge"[\s\S]{0,50}<span class="tip">Manhattan context zooms out/.test(html)
+);
+check(
+  'Export (model scale + Export STL) has a badge covering both, explaining what the scale number does to the real geometry',
+  /id="exportScale"[\s\S]{0,300}<span class="info-badge"[\s\S]{0,50}<span class="tip">Exports whichever layer/.test(html)
+);
+check(
+  'High detail\'s tooltip lives on the <label> (title attribute), not inside a way that could toggle the checkbox on click',
+  /<label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution[\s\S]{0,300}<input type="checkbox" id="highDetailToggle">/.test(html)
+);
+
+/* ===================================================================
+   v3.4.72 -- help modal and EXTENDED.md updated to cover the box-draw
+   workflow (v3.4.0+), which both had predated entirely; audit_deploy.js
+   itself now also reads EXTENDED.md so doc content can be checked
+   =================================================================== */
+sectionHeader("v3.4.72 -- help modal + EXTENDED.md doc updates (box-draw workflow, Simple/Advanced, Units/Export relocations)");
+
+check(
+  'the help modal has a "Drawing a section" heading covering the box-draw-then-pick-a-direction workflow, not just the old slider-only flow',
+  /<h3>Drawing a section<\/h3>\s*<p>The main way to see inside the mold: click <b>Draw section box<\/b>/.test(html)
+);
+check(
+  'the help modal\'s cutaway section is retitled for the Advanced tab and folds in Units (matching its v3.4.67 relocation) and Reset cutaway (v3.4.63\'s box-aware behavior)',
+  /<h3>Fine-tuning a cut \(Advanced tab\)<\/h3>/.test(html)
+  && /<dt>Reset cutaway<\/dt>\s*<dd>Back to the site's own center — or, if a box is active, that box's own center\.<\/dd>/.test(html)
+  && /<dt>Units<\/dt>\s*<dd>Metric \(m\) \/ Imperial \(ft\) — only affects these slider labels/.test(html)
+);
+check(
+  'EXTENDED.md has a "Drawing a section (box-draw workflow, v3.4.0+)" section',
+  extended.includes('### Drawing a section (box-draw workflow, v3.4.0+)')
+);
+check(
+  'EXTENDED.md documents the Simple / Advanced tabs as their own entry',
+  extended.includes('### Simple / Advanced tabs')
+);
+check(
+  'EXTENDED.md\'s Units entry reflects its v3.4.67 move into Advanced only, not the old always-visible description',
+  extended.includes('Only meaningful inside Advanced — nothing in Simple reads it')
+);
+check(
+  'EXTENDED.md\'s Manhattan context entry documents both halves of v3.4.69/70 -- the camera/rotate/indicator reset AND the deliberate cutaway-state preservation -- not just one',
+  extended.includes("rotate lock and stale label don't carry over (v3.4.69/70)")
+  && extended.includes('deliberately does carry over')
+);
+
+/* ===================================================================
+   v3.4.73 -- resetToDefaultView() cancels an in-progress box draw
+   (boxDrawMode) before switching to perspective, so Home doesn't leave a
+   stale "Box drawn" panel and hidden compass floating over an unrelated
+   full-site view
+   =================================================================== */
+sectionHeader("v3.4.73 -- resetToDefaultView() calls cancelPlanBox() when boxDrawMode is true");
+
+check(
+  'resetToDefaultView() calls cancelPlanBox() when boxDrawMode is true, as its own first real statement -- before the camera switch, so nothing box-draw-related survives a Home/reset',
+  /function resetToDefaultView\(\)\{[\s\S]{0,1500}if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.74 -- same root cause as v3.4.73, two more places it was found:
+   zoomToBoroughContext() (Manhattan context) and goToDirection()'s
+   fallback path (top compass clicked mid-draw, before a box exists)
+   =================================================================== */
+sectionHeader("v3.4.74 -- zoomToBoroughContext() and goToDirection() both call cancelPlanBox() when boxDrawMode is true");
+
+check(
+  'zoomToBoroughContext() calls cancelPlanBox() when boxDrawMode is true, before its own camera switch (anchored on its own opening AND the pre-existing v3.0.42 comment right after, so this can\'t drift onto the wrong function)',
+  /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;[\s\S]{0,700}if \(boxDrawMode\) cancelPlanBox\(\);[\s\S]{0,50}\/\/ v3\.0\.42: Manhattan context always uses the perspective camera/.test(html)
+);
+check(
+  'goToDirection() calls cancelPlanBox() when boxDrawMode is true (and pendingPlanBox is not already set -- that case is handled separately by applyPlanBoxDirection() above it) before falling through to setOrthogonalView()',
+  /function goToDirection\(direction\)\{\s*if \(pendingPlanBox\) \{ applyPlanBoxDirection\(direction\); return; \}[\s\S]{0,700}if \(boxDrawMode\) cancelPlanBox\(\);\s*setOrthogonalView\(direction\);\s*\}/.test(html)
 );
 
 /* ===================================================================

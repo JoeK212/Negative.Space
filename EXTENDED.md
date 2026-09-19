@@ -16,19 +16,29 @@ A dropdown, not a search box. Each entry is a real, pre-built site — its own `
 
 ### Buildings / Negative space
 
-Two display layers. Buildings shows the real extruded footprints as-is. Negative space shows the computed void (requires a compute to have run first).
+Two display layers, independent toggles — not either/or. Buildings shows the real extruded footprints as-is. Negative space shows the computed void (requires a compute to have run first). Both can be on together, useful for confirming the carve is accurate.
 
 ### Compute negative space
 
 Runs the actual CSG subtraction. Takes under a second even for Chelsea's 1,226 buildings — Manifold guarantees a manifold (watertight, non-degenerate) boolean result, which is what makes this fast and correct; the project's early versions used a different CSG library that produced ~49% broken geometry and needed workarounds this version doesn't.
 
-### Cutaway sliders (Height / X / Y)
+### Drawing a section (box-draw workflow, v3.4.0+)
 
-Each slider moves a clipping plane along one axis, carving away one octant of the mold at a time — like pulling one corner off a cube. Flip X / Flip Y mirror which side gets carved, without moving the cut position itself.
+The primary way to see inside the mold, and the Simple tab's default path. Click **Draw section box**, which switches to Plan view; drag a rectangle around the area you want to see in section; pick N/S/E/W (either the box panel's own picker or the top View compass — they call the same code, `applyPlanBoxDirection()`/`goToDirection()`) to cut through just that box, centered on it. **Full width** (appears once a box is active) clears it and reverts to the whole site's elevation. Reset cutaway (Advanced tab) re-centers on the active box's own center rather than an arbitrary site-wide default, if one is active.
+
+Internally this sets the same `xThreshold`/`yThreshold` state the Advanced sliders drive — drawing a box and dragging a slider are two ways to reach the same underlying section, not two separate systems.
+
+### Cutaway sliders (Height / X / Y) — Advanced tab
+
+Each slider moves a clipping plane along one axis. With no box active, this carves away one octant of the mold at a time — like pulling one corner off a cube. With a box active, the slab centers on the box instead. Flip X / Flip Y mirror which side gets carved, without moving the cut position itself.
+
+### Simple / Advanced tabs
+
+Simple (default) is Draw section box plus whatever it surfaces (the "Cropped to..." caption, Full width). Advanced reveals the original slider-driven precision controls (Height/X/Y Cutaway, Flip X/Y, Reset cutaway, Show cutaway handles) for dialing an exact meter value or nudging with arrow keys — useful with or without a box drawn. Switching tabs doesn't change any actual state; the sliders keep whatever value they're at, visible or not.
 
 ### Section fill (poché)
 
-Shades the newly-exposed cut faces translucent red — the real convention from architectural section drawings, where the poché (the solid material a cutting plane passes through) is filled in to distinguish "material the cut passed through" from "material behind the cut." Here it marks the boundary of the void itself.
+Shades the newly-exposed cut faces translucent red — the real convention from architectural section drawings, where the poché (the solid material a cutting plane passes through) is filled in to distinguish "material the cut passed through" from "material behind the cut." Here it marks the boundary of the void itself. Only visible in an N/S/E/W section view with Negative space on.
 
 ### 3D drag handles
 
@@ -36,25 +46,25 @@ Small cone handles sit at the corner where the three cutaway planes meet — dra
 
 ### High detail (slower)
 
-Bumps supersampling to reduce fine-geometry aliasing (visible as faint mottling on distant cavity walls, from real building geometry finer than screen resolution) — a genuine frame-time cost, so it's opt-in.
+Bumps supersampling to reduce fine-geometry aliasing (visible as faint mottling on distant cavity walls, from real building geometry finer than screen resolution) — a genuine frame-time cost, so it's opt-in. Lives in the Export accordion, not a general viewing setting — the one real use case is a crisp image (a screenshot, a portfolio shot), an export concern.
 
 ### Units (Metric / Imperial)
 
-Switches every displayed length (slider labels, drag-handle readouts). The underlying geometry always stays in meters.
+Switches every displayed length (Advanced-tab slider labels, drag-handle readouts). The underlying geometry always stays in meters. Only meaningful inside Advanced — nothing in Simple reads it, so it lives at the top of Advanced's own content rather than always-visible.
 
 ### Manhattan context
 
-Zooms out to a real extruded Manhattan solid (from NYC Open Data borough boundaries) with the current neighborhood's real buildings visible in their true position on the island. Real major streets show through this view too, if that toggle is also on.
+Zooms out to a real extruded Manhattan solid (from NYC Open Data borough boundaries) with the current neighborhood's real buildings visible in their true position on the island. Always switches to the free-orbit perspective camera and resets the View compass's current-view indicator, regardless of what was active before — a locked N/S/E/W/Plan elevation's rotate lock and stale label don't carry over (v3.4.69/70). A box-scoped elevation's cutaway state, on the other hand, deliberately does carry over — Manhattan context doesn't reset the actual clipping planes, just the camera and its indicator. Real major streets show through this view too, if that toggle is also on.
 
 ### Major streets
 
 Real NYC Street Centerline data (avenue-width and up, ≥60ft) for the current neighborhood, extruded to a thin schematic curb height so it reads from any camera angle, not just top-down. Each unique street name gets one label, placed along its longest real run in the current view — not one per block, to keep it legible.
 
-### Navigation (bottom-right panel)
+### Navigation (top of the left panel)
 
-- **N / S / E / W** — true flat orthographic elevations. No perspective foreshortening: a building's apparent height on screen is independent of camera distance, the way a real elevation drawing works. The camera always frames the whole current model (site or borough, whichever is active).
-- **P (Plan)** — true straight-down orthographic plan view, north-up.
-- **⌂ (Home)** — returns to the default 3/4 perspective view.
+- **N / S / E / W** — true flat orthographic elevations. No perspective foreshortening: a building's apparent height on screen is independent of camera distance, the way a real elevation drawing works. The camera always frames the whole current model (site or borough, whichever is active) — or, entering Plan to draw a box from an already-zoomed-in perspective view, roughly that same framing (v3.4.64).
+- **P (Plan)** — true straight-down orthographic plan view, north-up. Also where a section box is drawn.
+- **⌂ (Home)** — returns to the default 3/4 perspective view, free orbit.
 - **Compass** — needle always points at real true north, corrected for the local street grid's own tilt (Manhattan's avenues run about 29° off true north — each neighborhood's exact tilt is measured independently from its own building data, not assumed).
 
 ### Export

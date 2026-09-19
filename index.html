@@ -528,19 +528,27 @@
         <dt>Neighborhood</dt>
         <dd>Pick a real, pre-built site from the dropdown. Each one is real Overture Maps building data, not a live search-any-area system.</dd>
         <dt>Compute negative space</dt>
-        <dd>Runs the boolean subtraction. Needed once per neighborhood before Negative space, the cutaway sliders, or poché become available.</dd>
+        <dd>Runs the boolean subtraction. Needed once per neighborhood before Negative space, drawing a section, or poché become available.</dd>
         <dt>Buildings / Negative space</dt>
-        <dd>Toggle which layer you're looking at.</dd>
+        <dd>Independent toggles, not either/or — turn on Buildings, Negative space, or both together (useful for confirming the carve is accurate).</dd>
       </dl>
 
-      <h3>Exploring the cut</h3>
+      <h3>Drawing a section</h3>
+      <p>The main way to see inside the mold: click <b>Draw section box</b>, drag a rectangle around the area you want to see in section, then pick N/S/E/W to cut through just that box, centered on it. <b>Full width</b> (appears once a box is active) clears it and goes back to the whole site's elevation. The top View compass and the box panel's own N/S/E/W do the same thing once a box is drawn — either works.</p>
+
+      <h3>Fine-tuning a cut (Advanced tab)</h3>
+      <p>Switch from Simple to Advanced for precision controls, whether or not a box is drawn:</p>
       <dl>
         <dt>Height / X / Y cutaway</dt>
-        <dd>Sliders carve away one octant of the mold, corner by corner, so you can look inside. Flip X / Flip Y switch which side gets carved.</dd>
+        <dd>Sliders carve away one octant of the mold, corner by corner, or fine-tune a box-drawn section's slab position. Flip X / Flip Y mirror which side gets carved, without moving the cut itself.</dd>
+        <dt>Reset cutaway</dt>
+        <dd>Back to the site's own center — or, if a box is active, that box's own center.</dd>
         <dt>Section fill (poché)</dt>
-        <dd>Shades the cut faces translucent red, architectural-section style — the boundary of the void itself.</dd>
+        <dd>Shades the cut faces translucent red, architectural-section style — the boundary of the void itself. Only visible in an N/S/E/W section view with Negative space on.</dd>
         <dt>3D drag handles</dt>
         <dd>Colored handles (blue = Height, orange = X, green = Y) sit at the center of each cut face and can be dragged directly in the viewport instead of using the sliders.</dd>
+        <dt>Units</dt>
+        <dd>Metric (m) / Imperial (ft) — only affects these slider labels and values; the underlying geometry always stays in meters.</dd>
       </dl>
 
       <h3>Navigation</h3>
@@ -548,9 +556,9 @@
         <dt>N / S / E / W</dt>
         <dd>True flat orthographic elevations (no perspective foreshortening) — an actual architectural elevation, not just a rotated 3D view.</dd>
         <dt>P (Plan)</dt>
-        <dd>True straight-down orthographic plan view, north-up.</dd>
+        <dd>True straight-down orthographic plan view, north-up. Also where you draw a section box.</dd>
         <dt>⌂ (Home)</dt>
-        <dd>Returns to the default 3/4 perspective view, framed to the current model.</dd>
+        <dd>Returns to the default 3/4 perspective view, free orbit, framed to the current model.</dd>
         <dt>Compass</dt>
         <dd>Needle always points at real true north, corrected for Manhattan's own ~29° street-grid tilt.</dd>
       </dl>
@@ -558,10 +566,13 @@
       <h3>Context</h3>
       <dl>
         <dt>Manhattan context</dt>
-        <dd>Zooms out to show the neighborhood's real position on the island.</dd>
+        <dd>Zooms out to show the neighborhood's real position on the island — still a free 3D view, cutaway tools stay usable while it's on.</dd>
         <dt>Major streets</dt>
         <dd>Real NYC avenue-and-up streets (Street Centerline data) around the site.</dd>
       </dl>
+
+      <h3>Export</h3>
+      <p>Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL. Set "Model scale 1:N" first (default 1:500) — the app's geometry is real-world meters, converted to millimeters at that scale. Negative space must be computed first.</p>
 
       <p style="margin-top:16px; color:var(--ink-soft); font-size:13px;">Full write-up: <a href="README.md">README.md</a> · deeper technical notes: <a href="EXTENDED.md">EXTENDED.md</a></p>
     </div>
@@ -643,7 +654,7 @@
     <div id="viewCompassGrid">
       <button class="btn secondary navBtn compassN" id="navN">N</button>
       <button class="btn secondary navBtn compassW" id="navW">W</button>
-      <button class="btn secondary navBtn compassHome" id="navHome" title="Recenter">⌂</button>
+      <button class="btn secondary navBtn compassHome" id="navHome" title="Home (3D view)">⌂</button>
       <button class="btn secondary navBtn compassE" id="navE">E</button>
       <button class="btn secondary navBtn compassS" id="navS">S</button>
     </div>
@@ -653,7 +664,10 @@
     2D section/elevation" -- an alternative, more direct way to set the same
     section inputs the sliders below already drive (which slab, how wide a
     crop), by drawing directly on the model instead of dialing meter values. -->
-    <button class="btn secondary" id="drawBoxBtn" title="Draw a box in Plan view to scope a section to just that area">Draw section box</button>
+    <div class="row" style="align-items:center;">
+      <button class="btn secondary" id="drawBoxBtn" style="flex:1;" title="Draw a box in Plan view to scope a section to just that area">Draw section box</button>
+      <span class="info-badge" tabindex="0">?<span class="tip">Switches to Plan view — drag a rectangle around the area you want to see in section, then pick N/S/E/W to cut through just that box instead of the whole site.</span></span>
+    </div>
     <!-- v3.4.34: was a separate floating .panel (#planBoxPanel) positioned
     via positionPlanBoxPanel()'s getBoundingClientRect() math off navPanel
     -- now a plain inline block, same ids/listeners, flows in the normal
@@ -661,7 +675,10 @@
     now a no-op (see its own comment at the call site) since there's
     nothing left to anchor. -->
     <div id="planBoxPanel" style="display:none; flex-direction:column; gap:8px; background:var(--paper-deep); border:1.5px dashed var(--line); border-radius:8px; padding:10px;">
-      <p style="font-family:var(--font-ui); font-size:12px; margin:0; color:var(--ink-soft);">Box drawn — view it from:</p>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <p style="font-family:var(--font-ui); font-size:12px; margin:0; color:var(--ink-soft); flex:1;">Box drawn — view it from:</p>
+        <span class="info-badge" tabindex="0">?<span class="tip">Picking a direction here (or the top View compass — they do the same thing) cuts through just the box you drew, centered on it. Cancel discards the box and keeps whatever section was active before.</span></span>
+      </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
         <button class="btn secondary" id="boxViewN">N</button>
         <button class="btn secondary" id="boxViewS">S</button>
@@ -670,27 +687,16 @@
       </div>
       <button class="btn secondary" id="boxCancelBtn" style="width:100%; font-size:12px;">Cancel</button>
     </div>
-    <!-- v3.4.35: Joe -- "units make no sense in the beginning when there
-    are no values to enter." Metric/Imperial only actually affects the
-    Advanced-cutaway slider labels and values (m vs ft) -- both already
-    gated behind a compute, inside #sectionRow -- so showing the toggle
-    itself before that point offered a choice with nothing yet to apply it
-    to. Moved from its old always-visible spot above Data source to here,
-    gated the same as everything else in this wrapper. -->
-    <p class="label">Units</p>
-    <div class="row">
-      <button class="btn active" id="unitsMetric">Metric (m)</button>
-      <button class="btn secondary" id="unitsImperial">Imperial (ft)</button>
-    </div>
-    <!-- v3.4.38: Display and Export moved in here too, same reasoning as
-    Units just above -- neither means anything before there's a real
-    computed site to show context around or export. -->
+    <!-- v3.4.38: Display and Export moved in here too, same reasoning that
+    led to moving Units out below -- neither means anything before there's
+    a real computed site to show context around or export. -->
     <details class="accordion">
       <summary>Display</summary>
       <div class="accordion-body">
-        <div class="row">
+        <div class="row" style="align-items:center;">
           <button class="btn secondary" id="viewBoroughs">Manhattan context</button>
           <button class="btn secondary" id="viewStreets">Major streets</button>
+          <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays real avenue-and-up streets around the current site.</span></span>
         </div>
       </div>
     </details>
@@ -700,6 +706,7 @@
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="font-family:var(--font-ui); font-size:13px; color:var(--ink-soft); white-space:nowrap;">Model scale 1 :</span>
           <input type="number" id="exportScale" value="500" min="1" step="1" style="width:70px; font-family:var(--font-ui); font-size:13px; padding:6px 8px; border-radius:6px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
+          <span class="info-badge" tabindex="0">?<span class="tip">Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL, converted from real-world meters to millimeters at this scale — 1:500 is a standard architectural-model size. Negative space must be computed first.</span></span>
         </div>
         <button class="btn secondary" id="exportStlBtn">Export STL</button>
         <!-- v3.4.39: Joe -- "is [High detail] useful?" Genuinely marginal
@@ -709,7 +716,7 @@
         general viewing setting. Moved from the Simple tab (where it sat
         with no connection to anything else nearby) to here, next to the
         other actual export option. -->
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls — a real frame-time cost, so it's off by default">
           <input type="checkbox" id="highDetailToggle">
           High detail (slower)
         </label>
@@ -737,6 +744,17 @@
       <span class="info-badge" tabindex="0">?<span class="tip">Advanced reveals precision sliders to fine-tune a cut after drawing a section box, or to set one directly without drawing a box at all.</span></span>
     </div>
     <div id="advancedCutawayControls" style="display:none; flex-direction:column; gap:8px;">
+    <!-- v3.4.67: Joe's screenshot -- Units only ever changes the Advanced
+    tab's slider labels/values (m vs ft, v3.4.35's own finding); Simple has
+    nothing that reads Metric/Imperial at all. It sat above the Simple/
+    Advanced tabs, visible (and inert) in Simple too -- moved to the top of
+    Advanced's own content, the one place it actually does anything, same
+    reasoning v3.4.35/38 already used to gate Units/Display/Export behind a
+    compute in the first place, just carried one level further in. -->
+    <div class="row">
+      <button class="btn active" id="unitsMetric">Metric (m)</button>
+      <button class="btn secondary" id="unitsImperial">Imperial (ft)</button>
+    </div>
     <!-- v3.2.43: Joe screenshotted the auto-shown red cut-lines with arrows
     asking "what is being cut" -- Buildings and Negative space are
     independent toggles (see viewSolid/viewNegative below), so Compute
@@ -764,7 +782,7 @@
         <div style="display:flex; align-items:center; gap:4px;">
           <input type="number" id="xClipValueInput" style="width:60px; font-family:var(--font-ui); font-size:12px; padding:3px 6px; border-radius:5px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
           <span id="xClipUnitLabel" style="font-family:var(--font-ui); font-size:12px; color:var(--ink-soft);">m</span>
-          <button class="btn secondary" id="flipXBtn" style="padding:2px 8px; font-size:11px; margin-left:4px;">Flip X</button>
+          <button class="btn secondary" id="flipXBtn" style="padding:2px 8px; font-size:11px; margin-left:4px;" title="Mirror which side of this cut gets carved away, without moving the cut position itself">Flip X</button>
         </div>
       </div>
       <input type="range" id="xClipSlider" min="0" max="100" value="50" style="width:100%;">
@@ -775,7 +793,7 @@
         <div style="display:flex; align-items:center; gap:4px;">
           <input type="number" id="yClipValueInput" style="width:60px; font-family:var(--font-ui); font-size:12px; padding:3px 6px; border-radius:5px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
           <span id="yClipUnitLabel" style="font-family:var(--font-ui); font-size:12px; color:var(--ink-soft);">m</span>
-          <button class="btn secondary" id="flipYBtn" style="padding:2px 8px; font-size:11px; margin-left:4px;">Flip Y</button>
+          <button class="btn secondary" id="flipYBtn" style="padding:2px 8px; font-size:11px; margin-left:4px;" title="Mirror which side of this cut gets carved away, without moving the cut position itself">Flip Y</button>
         </div>
       </div>
       <input type="range" id="yClipSlider" min="0" max="100" value="50" style="width:100%;">
@@ -785,7 +803,7 @@
       <input type="checkbox" id="showHandlesToggle" checked>
       Show cutaway handles
     </label>
-    <button class="btn secondary" id="resetCutawayBtn" style="margin-top:2px;">Reset cutaway</button>
+    <button class="btn secondary" id="resetCutawayBtn" style="margin-top:2px;" title="Resets Height/X/Y to the site's center — or, if a box is active, to that box's own center">Reset cutaway</button>
     </div>
     <button class="btn secondary" id="fullWidthBtn" style="margin-top:2px; display:none;" title="Clear the drawn box and go back to the full-width elevation">Full width</button>
     <div id="capFillRow" style="display:flex; align-items:center; gap:6px; margin-top:2px;">
@@ -863,7 +881,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.61'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.74'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -3135,24 +3153,33 @@ async function computeNegativeSpace(){
 // is needed.
 function resetCutaway(){
   if (siteCapHeight === undefined) { toast('Compute negative space first'); return; }
-  const slider = document.getElementById('sectionSlider');
-  const xSlider = document.getElementById('xClipSlider');
-  const ySlider = document.getElementById('yClipSlider');
-
-  slider.value = 0;
-  xSlider.value = 0;
-  ySlider.value = 0;
-
-  sectionPlane.constant = Number(slider.value);
-  xThreshold = Number(xSlider.value);
-  yThreshold = Number(ySlider.value);
-
-  updateValueInput('sectionValueInput', Number(slider.value));
-  updateValueInput('xClipValueInput', xThreshold);
-  updateValueInput('yClipValueInput', yThreshold);
-  syncCapFillPlanes(); // v3.0.37: must run BEFORE updateCutLinePlanes() now -- the new cross-section cut lines read the epsilon-biased stencil planes that this call keeps current, so syncing first ensures they reflect this frame, not the previous one
-  updateCutLinePlanes();
-  syncHandlePositions();
+  // v3.4.63: Joe -- follow-up on the v3.4.60 audit's own flagged gap. This
+  // used to set xThreshold/yThreshold directly and duplicate everything
+  // setXCutaway()/setYCutaway()/setHeightCut() already do (slider value,
+  // updateValueInput, syncCapFillPlanes/updateCutLinePlanes/
+  // syncHandlePositions, and -- the one those three canonical setters have
+  // that this hand-rolled version didn't -- refreshActiveSectionProfile()
+  // when the reset axis matches the active section). Two code paths doing
+  // the same thing is how the v3.4.51 gap happened in the first place;
+  // routing through the real setters here means any future fix to those
+  // (bounds-checking, box-awareness, whatever comes next) applies here
+  // automatically instead of needing a second, easy-to-forget edit.
+  //
+  // Also a genuine behavior improvement, not just a bypass fix: resetting
+  // to a flat 0 made sense for the old octant-cutaway-only world, but
+  // means nothing relative to a drawn box -- 0 could easily sit outside
+  // the box's own bounds entirely. When a box is active, "reset" now
+  // means "back to this box's own center" (what applyPlanBoxDirection()
+  // already sets on a fresh direction pick) rather than an arbitrary
+  // site-wide default that may have no relationship to what's on screen.
+  setHeightCut(0);
+  if (activeSectionBox){
+    setXCutaway((activeSectionBox.xMin + activeSectionBox.xMax) / 2);
+    setYCutaway((activeSectionBox.yMin + activeSectionBox.yMax) / 2);
+  } else {
+    setXCutaway(0);
+    setYCutaway(0);
+  }
   refreshViewToggles(); // keep handle visibility consistent if this ran after an earlier compute
 }
 document.getElementById('resetCutawayBtn').addEventListener('click', resetCutaway);
@@ -4019,7 +4046,7 @@ function updateOrthoLight(direction, target, camDist){
   orthoLight.target.position.copy(target);
   orthoLight.target.updateMatrixWorld();
 }
-function setOrthogonalView(direction){
+function setOrthogonalView(direction, overrideTargetSpan){
   // v3.4.31: Joe -- "if i select N S E W negative space should be active
   // by default." A fresh compute always leaves showNegative false (see
   // computeNegativeSpace()'s own reset), and every test throughout this
@@ -4134,7 +4161,18 @@ function setOrthogonalView(direction){
   // box was to see just that block/cluster, not the full-width elevation
   // currentTargetAndSpan() computes by default. Plan and perspective/Home
   // are unaffected (direction is never 'n'/'s'/'e'/'w' there).
-  let { target, span } = currentTargetAndSpan();
+  // v3.4.64: `overrideTargetSpan`, when provided, replaces
+  // currentTargetAndSpan()'s own always-full-site framing entirely --
+  // added specifically for setBoxDrawMode()'s call below, so entering
+  // Plan to draw a box can preserve wherever you'd already zoomed to in
+  // perspective instead of resetting to the whole district every time
+  // (Joe: "if i zoom into an area and select draw section box the frame
+  // zooms out"). Optional and additive -- every other caller of
+  // setOrthogonalView() passes nothing here and gets 100% the same
+  // behavior as before this change, including the deliberate v3.0.42
+  // "N/S/E/W/Plan always frame the full model" default for every case
+  // that isn't this one specific entry point.
+  let { target, span } = overrideTargetSpan || currentTargetAndSpan();
   if (activeSectionBox && siteCapHeight !== undefined && (direction === 'n' || direction === 's' || direction === 'e' || direction === 'w')){
     const cx = (activeSectionBox.xMin + activeSectionBox.xMax) / 2;
     const cy = (activeSectionBox.yMin + activeSectionBox.yMax) / 2;
@@ -4243,6 +4281,23 @@ function fitCameraToBox(box){
 // currently exists -- called automatically any time a materially NEW view
 // should open (see call sites), not just from the Home button.
 function resetToDefaultView(){
+  // v3.4.73: Joe -- draw a box in Plan (the "Box drawn -- view it from:"
+  // panel showing, awaiting a direction pick), then press Home, and he's
+  // "completely lost." Root cause: this function switches to the free-
+  // orbit perspective camera and fits to the WHOLE site below, but never
+  // touched anything box-draw-related -- so `planBoxPanel` kept floating
+  // on screen, the top compass's N/S/E/W stayed hidden (v3.4.66 hides
+  // them the moment that panel shows), and the actual 3D view had jumped
+  // to a full-site perspective with no relationship to the box just
+  // drawn or any way to pick a direction from the now-hidden compass.
+  // cancelPlanBox() is exactly the existing cleanup for "the box-draw
+  // workflow is ending without a direction being picked" (already used
+  // by its own Cancel button) -- safe to call unconditionally here since
+  // it's a no-op beyond restoring state when boxDrawMode is already
+  // false, and every function it touches (setCompassDirectionsVisible,
+  // setBoxDrawMode, updatePlanBoxOutline) is itself safe to call from
+  // outside Plan view.
+  if (boxDrawMode) cancelPlanBox();
   activeCamera = camera;
   controls.object = camera;
   controls.enableRotate = true; // v3.2.34's rotation lock only applies to N/S/E/W/Plan -- undo it here same as recenterCamera() always has
@@ -4303,6 +4358,16 @@ function updateCurrentViewIndicator(viewKey){
 // from) that logic a second time.
 function goToDirection(direction){
   if (pendingPlanBox) { applyPlanBoxDirection(direction); return; }
+  // v3.4.74: same root cause as v3.4.73's Home fix, different trigger --
+  // if boxDrawMode is true but no box has been drawn yet (the "Drag a
+  // box... Cancel" banner is showing, pendingPlanBox is still null), the
+  // top compass's N/S/E/W are still visible at this point (v3.4.66 only
+  // hides them once a box is actually drawn) and clicking one switches
+  // straight into a locked elevation via setOrthogonalView() below --
+  // which never touches boxDrawMode, leaving the banner/crosshair cursor/
+  // "Drag a box…" button label stuck as if still mid-draw. cancelPlanBox()
+  // is the same safe, existing cleanup v3.4.73 uses.
+  if (boxDrawMode) cancelPlanBox();
   setOrthogonalView(direction);
 }
 document.getElementById('navN').addEventListener('click', () => goToDirection('n'));
@@ -4746,6 +4811,15 @@ function refreshBoroughToggle(){
 }
 function zoomToBoroughContext(){
   if (!boroughsGroup) return;
+  // v3.4.74: same class of bug as v3.4.73's Home fix -- Manhattan context
+  // switches to the wide-framed perspective camera below regardless of
+  // what was active before it (deliberately, v3.0.42), but never checked
+  // boxDrawMode, so toggling it on mid-box-draw left the "Box drawn --
+  // view it from:" panel (or the "Drag a box... Cancel" banner, if no
+  // box was drawn yet) floating over an unrelated borough-scale view,
+  // with the top compass's N/S/E/W still hidden if a box panel was
+  // showing. Same fix, same safe existing cleanup.
+  if (boxDrawMode) cancelPlanBox();
   // v3.0.42: Manhattan context always uses the perspective camera, even if
   // an N/S/E/W flat elevation was active when toggled on -- this function
   // repositions `camera` directly below, and without this the renderer
@@ -4753,6 +4827,29 @@ function zoomToBoroughContext(){
   // reflecting the new borough framing until Home was also pressed.
   activeCamera = camera;
   controls.object = camera;
+  // v3.4.69: an N/S/E/W/Plan elevation's v3.2.34 rotate lock
+  // (controls.enableRotate = false) otherwise silently carries into this
+  // view too -- Joe: "can't do anything but pan around" once here.
+  // resetToDefaultView() already resets it for the exact same reason
+  // (its own comment: "undo it here same as recenterCamera() always
+  // has") -- exitBoroughContext() routes through that, which is why this
+  // never showed up leaving context, only while staying inside it.
+  controls.enableRotate = true;
+  // v3.4.70: same family of bug as v3.4.69, caught in the same screenshot
+  // -- the View compass's W button and the "West Elevation" corner label
+  // stayed stuck active/showing after switching into Manhattan context,
+  // even though the camera above just switched back to perspective.
+  // updateCurrentViewIndicator() (v3.4.33) is the one function that syncs
+  // both of those; resetToDefaultView() already calls it for the exact
+  // same reason ("undo it here same as recenterCamera() always has," same
+  // comment as the enableRotate fix above) -- this function never did.
+  // Deliberately ONLY the indicator: does not touch sectionModeAxis or
+  // call applySectionMode(null), which would revert the actual cutaway
+  // clipping planes back to the full-site octant view -- v3.2.23's own
+  // comment right below explains why a box-scoped elevation's cutaway
+  // state is meant to persist into Manhattan context, not be silently
+  // reset by entering it.
+  updateCurrentViewIndicator('home');
   camera.near = BOROUGH_CAMERA_NEAR;
   camera.far = BOROUGH_CAMERA_FAR;
   camera.updateProjectionMatrix();
@@ -4780,11 +4877,29 @@ function zoomToBoroughContext(){
   // camera position and the orbit target on the SITE's own center instead
   // of the borough's -- zooming in now approaches the actual buildings on
   // screen, never an arbitrary empty point elsewhere on the island.
-  const boroughBox = new THREE.Box3().setFromObject(boroughsGroup);
-  const boroughSize = boroughBox.getSize(new THREE.Vector3());
-  const span = Math.max(boroughSize.x, boroughSize.y, 1000);
+  // v3.4.62: Joe -- the borough overview made the actual site imperceptible
+  // (a few-hundred-meter cutaway edit against a ~20km-wide island view is
+  // sub-pixel), which read as the cutaway tools being broken when they
+  // weren't -- confirmed live via the real clip-plane values still updating
+  // correctly underneath. Discussed two fixes; Joe picked changing the
+  // framing itself over dimming the controls while this is on. `span` here
+  // used to be the BOROUGH's own size (`boroughSize`), which is exactly
+  // what put the camera far enough back to fit the whole island -- keeping
+  // the site itself workable and functionally invisible were the same
+  // number. Framing off the SITE's own size instead (already computed just
+  // below as `siteBox`/`siteCenter`, previously only used for the orbit
+  // target, not the distance) keeps the site at a size where you can
+  // actually see and use the cutaway tools on it, with real borough context
+  // still visible around it rather than dominating the view. The multiplier
+  // (5x the site's own footprint) is a judgment call, not a measured
+  // constraint -- enough surrounding context to read as "here's where this
+  // sits in the city" without swallowing the site; `controls.maxDistance`
+  // (still BOROUGH_MAX_DISTANCE, untouched) means a normal scroll-out still
+  // reaches the full-island view for anyone who wants that framing back.
   const siteBox = new THREE.Box3().setFromObject(solidGroup);
+  const siteSize = siteBox.getSize(new THREE.Vector3());
   const siteCenter = siteBox.getCenter(new THREE.Vector3());
+  const span = Math.max(siteSize.x, siteSize.y, 300) * 5;
   camera.position.copy(siteCenter).addScaledVector(BOROUGH_VIEW_DIR, span * 0.9);
   controls.target.copy(siteCenter);
   controls.update();
@@ -5724,7 +5839,36 @@ function setBoxDrawMode(on){
     // a screen drag through any other camera angle wouldn't map cleanly to a
     // horizontal rectangle. Auto-switch rather than silently no-op or asking
     // Joe to remember to click Plan first himself.
-    setOrthogonalView('plan');
+    //
+    // v3.4.64: Joe -- "if i zoom into an area and select draw section box
+    // the frame zooms out." Confirmed against the code, not just the
+    // report: setOrthogonalView('plan') has always framed on the whole
+    // site (v3.0.42's own deliberate default, currentTargetAndSpan()),
+    // regardless of whatever the perspective camera happened to be
+    // zoomed into first -- reasonable for N/S/E/W true elevations (that
+    // comment's own reasoning: an elevation is normally about seeing the
+    // whole thing flat), but wrong for THIS specific entry point, where
+    // the entire point of having just zoomed in was to draw a box around
+    // that exact area. Only captured when actually coming from the
+    // perspective camera (`activeCamera === camera`) -- if boxDrawMode
+    // gets toggled on while already in an orthographic view for some
+    // other reason, there's no perspective FOV/distance to convert from,
+    // so this falls through to the original full-site framing unchanged.
+    let overrideTargetSpan;
+    if (activeCamera === camera){
+      const dist = camera.position.distanceTo(controls.target);
+      const vFOV = camera.fov * Math.PI / 180;
+      // Perspective's visible half-height at the target plane, at a
+      // vertical FOV of `camera.fov`, is dist*tan(vFOV/2) -- the same
+      // relationship halfH = span*0.55 below inverts for an orthographic
+      // frustum. Not an exact pixel-for-pixel match between two
+      // different projection types (not the goal, and not really
+      // possible) -- close enough that "roughly where and how zoomed in
+      // I just was" reads correctly, which is what actually matters here.
+      const approxSpan = 2 * dist * Math.tan(vFOV / 2);
+      overrideTargetSpan = { target: controls.target.clone(), span: Math.max(approxSpan, 100) };
+    }
+    setOrthogonalView('plan', overrideTargetSpan);
     // Live-verify fix: this used to be `controls.enabled = false`, which
     // disables OrbitControls entirely -- rotate, pan, AND zoom. Reported
     // live as "zooms all the way out and there is no control": clicking
@@ -5760,11 +5904,30 @@ document.getElementById('drawBoxBtn').addEventListener('click', () => setBoxDraw
 // that's already right except in three other respects. Same drag-a-plane
 // technique the X/Y/Height cutaway handles already use (screenToWorldGround()
 // + a live bound update), applied to the 4 edges of activeSectionBox
-// instead of the single-plane thresholds. Deliberately independent of
-// boxDrawMode -- this edits the COMMITTED box (activeSectionBox, the one
-// planBoxOutlineMesh already draws), not a box mid-draw; the two never
-// overlap since the outline (and so these edges) are hidden for the
-// whole time a new box is being drawn (v3.4.54).
+// instead of the single-plane thresholds.
+//
+// v3.4.65: Joe -- "after a section box is drawn i cannot select the box
+// edges to drag." Confirmed live: v3.4.59 only ever targeted
+// activeSectionBox, the COMMITTED box (the one a direction has already
+// been picked for) -- the box you've just drawn but haven't picked a
+// direction for yet is `pendingPlanBox`, a completely different variable,
+// which hitTestBoxEdge() never looked at. Worse, `boxDrawMode` stays true
+// through that whole "drawn, awaiting direction" stage (it only goes
+// false on Cancel or a direction pick), and the pointerdown handler's old
+// `if (!boxDrawMode)` wrapper around the edge-check meant grabbing an
+// edge there fell straight through to the NEW-drag-start branch instead
+// -- exactly what the live repro showed: dragging an "edge" of the
+// just-drawn box silently replaced it with a fresh one instead of
+// resizing it.
+//
+// hitTestBoxEdge() now tests against `boxDrawMode ? pendingPlanBox :
+// activeSectionBox` -- whichever box is actually the current subject,
+// covering both stages with the one function, and correctly returning
+// null while boxDrawMode is true but pendingPlanBox doesn't exist yet
+// (mid-fresh-drag, nothing drawn to grab an edge of regardless). The
+// `boxDrawMode` exclusion is gone from hitTestBoxEdge() itself -- it's
+// now the thing that SELECTS which box to test, not a reason to skip
+// testing.
 let boxEdgeDragSide = null; // 'xMin' | 'xMax' | 'yMin' | 'yMax' | null
 const BOX_EDGE_MIN_SIZE = 5; // meters -- same floor as MIN_BOX_SIZE below, so a resize can't collapse a box thinner than a fresh draw would ever allow
 function boxEdgeGrabTolerance(){
@@ -5778,8 +5941,8 @@ function boxEdgeGrabTolerance(){
   return Math.max(modelSpan * 0.015, 4);
 }
 function hitTestBoxEdge(wx, wy){
-  if (!activeSectionBox || !isPlanViewActive || boxDrawMode) return null;
-  const b = activeSectionBox;
+  const b = boxDrawMode ? pendingPlanBox : activeSectionBox;
+  if (!b || !isPlanViewActive) return null;
   const tol = boxEdgeGrabTolerance();
   // Only counts as a hit on an edge if the point also falls within that
   // edge's own span (plus a little slop) -- otherwise grabbing anywhere
@@ -5793,18 +5956,46 @@ function hitTestBoxEdge(wx, wy){
   if (withinX && Math.abs(wy - b.yMax) <= tol) return 'yMax';
   return null;
 }
+// v3.4.65: worldToScreenXY() is the deliberate inverse of
+// screenToWorldGround() above -- same rect (renderer.domElement's own
+// bounding rect, not raw window.innerWidth/innerHeight, which can differ
+// from the canvas's actual rendered size/position) and the same camera
+// (activeCamera, whichever one is actually driving the current view; in
+// every case this gets called from, that's orthoCamera via Plan). Kept
+// as a small standalone pair rather than a single bidirectional helper,
+// since one takes a screen point and raycasts to a world plane while the
+// other projects a known world point straight to NDC -- different enough
+// operations that a shared function would need its own branching anyway.
+function worldToScreenXY(wx, wy, wz){
+  const rect = renderer.domElement.getBoundingClientRect();
+  const v = new THREE.Vector3(wx, wy, wz).project(activeCamera);
+  return { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height };
+}
+function updatePlanBoxOverlayFromWorldBounds(b){
+  // z barely matters here -- Plan's camera looks straight down, so an
+  // orthographic top-down projection's X/Y screen position doesn't shift
+  // with Z the way a perspective camera's would. siteCapHeight/2 is just
+  // a reasonable existing mid-height value already used elsewhere for
+  // this same "give a world point in Plan a sensible Z" purpose.
+  const z = siteCapHeight !== undefined ? siteCapHeight / 2 : 0;
+  const p1 = worldToScreenXY(b.xMin, b.yMin, z);
+  const p2 = worldToScreenXY(b.xMax, b.yMax, z);
+  const overlay = document.getElementById('planBoxOverlay');
+  overlay.style.left = Math.min(p1.x, p2.x) + 'px';
+  overlay.style.top = Math.min(p1.y, p2.y) + 'px';
+  overlay.style.width = Math.abs(p2.x - p1.x) + 'px';
+  overlay.style.height = Math.abs(p2.y - p1.y) + 'px';
+}
 function attachPlanBoxListeners(){
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (dragAxis) return; // don't fight the cutaway-handle drag listener above if a handle somehow already grabbed the pointer
   const hit = screenToWorldGround(e.clientX, e.clientY);
   if (!hit) return;
-  if (!boxDrawMode){
-    const side = hitTestBoxEdge(hit.x, hit.y);
-    if (side){
-      boxEdgeDragSide = side;
-      e.preventDefault();
-      return;
-    }
+  const side = hitTestBoxEdge(hit.x, hit.y); // v3.4.65: hitTestBoxEdge() now picks pendingPlanBox vs activeSectionBox itself based on boxDrawMode -- no longer wrapped in `if (!boxDrawMode)` here, since that wrapper was exactly what made an edge-grab on the just-drawn, awaiting-direction box fall through to starting a brand new draw instead
+  if (side){
+    boxEdgeDragSide = side;
+    e.preventDefault();
+    return;
   }
   if (!boxDrawMode) return;
   planBoxDragStart = { x: hit.x, y: hit.y, sx: e.clientX, sy: e.clientY };
@@ -5831,18 +6022,30 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (boxEdgeDragSide){
     const hit = screenToWorldGround(e.clientX, e.clientY);
     if (!hit) return;
-    const b = activeSectionBox;
+    const b = boxDrawMode ? pendingPlanBox : activeSectionBox; // v3.4.65: same selection hitTestBoxEdge() itself uses -- kept in sync deliberately rather than caching which box boxEdgeDragSide was grabbed from, since boxDrawMode can't change mid-drag anyway (nothing in this drag toggles it)
+    if (!b) return;
     if (boxEdgeDragSide === 'xMin') b.xMin = Math.min(hit.x, b.xMax - BOX_EDGE_MIN_SIZE);
     else if (boxEdgeDragSide === 'xMax') b.xMax = Math.max(hit.x, b.xMin + BOX_EDGE_MIN_SIZE);
     else if (boxEdgeDragSide === 'yMin') b.yMin = Math.min(hit.y, b.yMax - BOX_EDGE_MIN_SIZE);
     else if (boxEdgeDragSide === 'yMax') b.yMax = Math.max(hit.y, b.yMin + BOX_EDGE_MIN_SIZE);
-    updatePlanBoxOutline();
+    // v3.4.65: activeSectionBox has its own dedicated 3D outline mesh
+    // (planBoxOutlineMesh, updated via updatePlanBoxOutline()) -- but
+    // pendingPlanBox's only visual is the screen-space CSS overlay
+    // (planBoxOverlay), normally driven directly by raw pointer
+    // coordinates during a fresh drag. Editing pendingPlanBox's WORLD
+    // bounds here needs the reverse of that -- projecting the updated
+    // world bounds back to screen pixels via worldToScreenXY() -- rather
+    // than trying to feed a screen-space delta back into a world-space
+    // box, which would need its own separate (and easy to get subtly
+    // wrong) conversion.
+    if (b === activeSectionBox) updatePlanBoxOutline();
+    else updatePlanBoxOverlayFromWorldBounds(b);
     return;
   }
-  if (!boxDrawMode && !dragAxis && activeSectionBox && isPlanViewActive){
+  if (!dragAxis && isPlanViewActive && (boxDrawMode ? pendingPlanBox : activeSectionBox)){
     const hit = screenToWorldGround(e.clientX, e.clientY);
     const side = hit ? hitTestBoxEdge(hit.x, hit.y) : null;
-    renderer.domElement.style.cursor = side ? ((side === 'xMin' || side === 'xMax') ? 'ew-resize' : 'ns-resize') : 'auto';
+    renderer.domElement.style.cursor = side ? ((side === 'xMin' || side === 'xMax') ? 'ew-resize' : 'ns-resize') : (boxDrawMode ? 'crosshair' : 'auto'); // v3.4.65: while boxDrawMode is on, the base cursor is the crosshair setBoxDrawMode() already sets, not 'auto' -- only override it for an actual edge hit, don't stomp the crosshair back to a plain pointer between edges
   }
   if (!boxDrawMode || !planBoxDragStart) return;
   const overlay = document.getElementById('planBoxOverlay');
@@ -5877,9 +6080,27 @@ window.addEventListener('pointerup', (e) => {
   pendingPlanBox = box;
   positionPlanBoxPanel();
   document.getElementById('planBoxPanel').style.display = 'block';
+  setCompassDirectionsVisible(false); // v3.4.66: the box panel's own N/S/E/W picker takes over while a box awaits a direction -- see setCompassDirectionsVisible()'s own comment for why
   const banner = document.getElementById('boxDrawBanner'); // v3.4.2: box is drawn now -- the "drag a box" instruction no longer applies once the direction picker is up
   if (banner) banner.style.display = 'none';
 });
+// v3.4.66: Joe's screenshot -- once a box is drawn, the top View compass's
+// own N/S/E/W sat directly above the box panel's "Box drawn -- view it
+// from:" N/S/E/W, both doing the exact same thing (goToDirection() below
+// already forwards to applyPlanBoxDirection() whenever pendingPlanBox is
+// set, so they've been functionally identical, not just visually similar).
+// Picked keeping the box panel's set, since it's the one with the
+// explanatory label right next to it -- hides just the four direction
+// buttons (compassN/S/E/W) while a box is pending, leaving Home in place
+// (a genuinely different action -- exits back to perspective -- not a
+// duplicate of anything in the box panel).
+function setCompassDirectionsVisible(visible){
+  const display = visible ? '' : 'none';
+  document.getElementById('navN').style.display = display;
+  document.getElementById('navS').style.display = display;
+  document.getElementById('navE').style.display = display;
+  document.getElementById('navW').style.display = display;
+}
 function positionPlanBoxPanel(){
   // v3.4.34: no-op. #planBoxPanel used to be a separate floating .panel,
   // positioned here via #navPanel's own getBoundingClientRect() -- it's
@@ -5911,6 +6132,7 @@ function cancelPlanBox(){
   pendingPlanBox = null;
   document.getElementById('planBoxPanel').style.display = 'none';
   document.getElementById('planBoxOverlay').style.display = 'none';
+  setCompassDirectionsVisible(true); // v3.4.66: box panel's picker is gone (direction picked OR cancelled) -- top compass's N/S/E/W are the only way to change view again, bring them back
   setBoxDrawMode(false);
   // v3.4.54: cancelling doesn't touch activeSectionBox -- the old box (if
   // any) is still the real current one, just hidden since the pointerdown
