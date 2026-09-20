@@ -58,7 +58,7 @@ Zooms out to a real extruded Manhattan solid (from NYC Open Data borough boundar
 
 ### Major streets
 
-Real NYC Street Centerline data (avenue-width and up, ≥60ft) for the current neighborhood, extruded to a thin schematic curb height so it reads from any camera angle, not just top-down. Each unique street name gets one label, placed along its longest real run in the current view — not one per block, to keep it legible.
+Real NYC Street Centerline data (every real named street, no width filter as of v3.4.75) for the current neighborhood, extruded to a thin schematic curb height so it reads from any camera angle, not just top-down. Each unique street name gets one label, placed along its longest real run in the current view — not one per block, to keep it legible. Because the dataset's own name field isn't purely streets (park drives, bike paths, bridge/tunnel access ramps carry real names too), a few non-street labels can show up alongside real streets — a known tradeoff of "every named street" over a width cutoff, not yet revisited.
 
 ### Navigation (top of the left panel)
 
@@ -85,7 +85,7 @@ Not a live search-any-area system by design — every district is fetched, check
 4. **Dedupe tile-boundary duplicates** (largest-fragment-wins per id) and **filter outbuilding/roof** clutter, same as always.
 5. **Clip to the real polygon** by building centroid, not just the fetch bbox — otherwise neighboring districts' buildings bleed across the boundary.
 6. **Measure the real grid tilt** from the district's own building wall bearings (weighted circular mean, favoring longer walls) — never copy another district's value. Also worth computing R (circular-statistics concentration, `|resultant vector| / total weight`) alongside the angle: R close to 1 means a genuinely coherent single grid (District 4: 0.967); R well below that (District 2: 0.429) means the district doesn't really have one dominant grid direction, and the measured angle is a compromise, not a clean fact — worth flagging before shipping, not just measuring and moving on.
-7. **Filter major streets** (≥60ft width) to the same real polygon, from NYC's Street Centerline dataset (`inkn-q76z`).
+7. **Filter major streets** to the same real polygon, from NYC's Street Centerline dataset (`inkn-q76z`) — every real named street (`full_street_name` not null) as of v3.4.75, no width cutoff.
 8. **Drop the three files** in `data/<new-id>/`: `buildings.geojson`, `building_parts.geojson`, `streets.json`.
 9. **Add one entry** to the `NEIGHBORHOODS` array in `index.html`: `{ id, name, gridRotationDeg }`.
 

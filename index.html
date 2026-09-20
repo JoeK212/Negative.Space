@@ -568,7 +568,7 @@
         <dt>Manhattan context</dt>
         <dd>Zooms out to show the neighborhood's real position on the island — still a free 3D view, cutaway tools stay usable while it's on.</dd>
         <dt>Major streets</dt>
-        <dd>Real NYC avenue-and-up streets (Street Centerline data) around the site.</dd>
+        <dd>Every real named street (Street Centerline data) around the site — not just avenues.</dd>
       </dl>
 
       <h3>Export</h3>
@@ -696,7 +696,7 @@
         <div class="row" style="align-items:center;">
           <button class="btn secondary" id="viewBoroughs">Manhattan context</button>
           <button class="btn secondary" id="viewStreets">Major streets</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays real avenue-and-up streets around the current site.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays every real named street around the current site, not just avenues.</span></span>
         </div>
       </div>
     </details>
@@ -881,7 +881,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.74'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.75'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4648,14 +4648,29 @@ function updateBoroughLabelScales(){
 
 /* ================= Major streets (v3.0.26, per-neighborhood as of v3.1.1) ================= */
 // Real NYC Street Centerline (CSCL) data, resource inkn-q76z, filtered to
-// streetwidth >= 60ft (avenue-width and up) -- same source and filter
-// [[pluto-massing]] already established for this exact feature. Fetched
-// live in a browser session (data.cityofnewyork.us isn't reachable from
-// this project's own build sandbox) via MASSING's own cached localStorage
-// copy (it already fetches+caches this citywide), then trimmed per
-// neighborhood to a buffered radius around that neighborhood's own real
-// site bounds -- covers real site-orientation context without embedding
-// a citywide dataset this app has no other use for.
+// any real named street (full_street_name not null) -- no width filter, as
+// of v3.4.75. The original streetwidth>=60ft ("avenue-width and up") rule
+// came from v3.0.26, when this was a single citywide-then-trimmed embedded
+// payload and a tight cutoff kept that payload small; since v3.1.1 moved
+// to small per-district files, that reason no longer applied, but the
+// threshold itself just carried forward unchanged for 3+ years anyway.
+// Flagged once before as a real design question (CD6, v3.2.9-era changelog
+// entry) when Fifth/Park/Madison/Lexington Ave -- unquestionably major
+// avenues -- turned out to be narrower than 60ft in this exact dataset
+// (54/44/46/50ft respectively) and were silently excluded. Joe: "the
+// streets and avenues need some work ... there was a decision in the
+// beginning that does not apply anymore" -- confirmed this was that
+// decision, dropped the width filter entirely per his choice ("show every
+// named street"). Real tradeoff of that choice, not yet resolved: this
+// also surfaces named non-street features from the same dataset (park
+// drives, bike paths, tunnel/bridge access ramps -- e.g. "W 47 STREET
+// BIKE PATH") that a width filter had been incidentally screening out
+// too. Left in rather than second-guessed, since Joe's own instruction
+// was "every named street" -- flagged to him, not silently re-filtered.
+// Fetched live in a browser session (data.cityofnewyork.us isn't reachable
+// from this project's own build sandbox), same real-polygon-clip method
+// (segment midpoint within ~380m of the district's real boundary) as
+// every prior district build, boroughcode='1' still applied.
 // v3.1.1: was a single shared #streetsData embedded tag (Hudson Yards'
 // own ~1.1km-radius set, shown misleadingly under every neighborhood --
 // see v3.1.0's KNOWN LIMITATION note). Reworked to fetch

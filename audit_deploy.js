@@ -39,6 +39,22 @@ try {
   console.warn('WARNING: could not read EXTENDED.md -- doc-content checks will fail -- ' + e.message);
 }
 
+// v3.4.75 -- per-district streets.json files, read so this file can check
+// actual street data (not just index.html markup or docs prose). Missing
+// or unparsable files degrade to an empty array per district rather than
+// a fatal error, same reasoning as EXTENDED.md above -- a partial delivery
+// shouldn't hard-fail the whole suite, just fail the specific checks that
+// need that district's data.
+const districtStreets = {};
+for (let i = 1; i <= 12; i++){
+  const p = path.join(ROOT, 'data', `district-${i}`, 'streets.json');
+  try {
+    districtStreets[i] = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) {
+    districtStreets[i] = [];
+  }
+}
+
 let pass = 0, fail = 0;
 let currentSection = '';
 function sectionHeader(name){
@@ -1437,6 +1453,32 @@ check(
 check(
   'goToDirection() calls cancelPlanBox() when boxDrawMode is true (and pendingPlanBox is not already set -- that case is handled separately by applyPlanBoxDirection() above it) before falling through to setOrthogonalView()',
   /function goToDirection\(direction\)\{\s*if \(pendingPlanBox\) \{ applyPlanBoxDirection\(direction\); return; \}[\s\S]{0,700}if \(boxDrawMode\) cancelPlanBox\(\);\s*setOrthogonalView\(direction\);\s*\}/.test(html)
+);
+
+/* ===================================================================
+   v3.4.75 -- Major streets: the streetwidth>=60ft filter dropped entirely
+   (every real named street now), re-fetched for all 12 districts, docs
+   and code comments updated to match
+   =================================================================== */
+sectionHeader("v3.4.75 -- width filter dropped from Major streets; all 12 districts re-fetched; docs updated");
+
+check(
+  'every district\'s streets.json has meaningfully more unique named streets than the old streetwidth>=60 baseline ever could (each has at least 100 unique names -- the old data topped out around 26)',
+  Object.values(districtStreets).every(list => new Set(list.map(s => s.n)).size >= 100)
+);
+check(
+  'District 5 (Midtown) specifically includes Fifth, Park, Madison and Lexington Ave -- the four streets whose exclusion (54/44/46/50ft, all under the old 60ft cutoff) originally flagged this as a real design question back at District 6',
+  (() => {
+    const names = new Set(districtStreets[5].map(s => s.n));
+    return ['5 AVE', 'PARK AVE', 'MADISON AVE', 'LEXINGTON AVE'].every(n => names.has(n));
+  })()
+);
+check(
+  'the Major streets tooltip/badge and help-modal copy no longer claim an avenue-width/60ft cutoff as the CURRENT rule (a historical mention in a code comment explaining what changed is fine and expected -- this checks the two old exact UI strings are gone, not the substring everywhere)',
+  !/Real NYC avenue-and-up streets \(Street Centerline data\) around the site\.<\/dd>/.test(html)
+  && !/Major streets overlays real avenue-and-up streets around the current site\./.test(html)
+  && !extended.includes('Real NYC Street Centerline data (avenue-width and up, ≥60ft)')
+  && !extended.includes('7. **Filter major streets** (≥60ft width)')
 );
 
 /* ===================================================================

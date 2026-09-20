@@ -58,7 +58,16 @@ Manifold's wasm-from-unpkg already had. As of v3.1.1: **Hudson Yards**
    shared, not per-neighborhood). Manhattan only as of v3.0.22 —
    Queens/Brooklyn data stays embedded but unused (cheap to revisit).
 3. **Major streets**: real NYC Street Centerline data (Socrata resource
-   `inkn-q76z`, `streetwidth>=60`). **As of v3.1.1**, fetched live per
+   `inkn-q76z`). **As of v3.4.75, every real named street** (`full_street_name`
+   not null) — no width cutoff; the original `streetwidth>=60` rule (from
+   when this was a single citywide-then-trimmed embedded payload, v3.0.26)
+   silently excluded Fifth/Park/Madison/Lexington Ave (54/44/46/50ft in this
+   dataset) among others, and had outlived the payload-size reason it
+   existed for once v3.1.1 moved to small per-district files. Tradeoff:
+   the dataset's name field also covers some non-street features (park
+   drives, bike paths, bridge/tunnel ramps) that the old width filter had
+   incidentally screened out too — left in per Joe's explicit choice, not
+   yet revisited. **As of v3.1.1**, fetched live per
    neighborhood from `data/<id>/streets.json` (same pattern as
    buildings/building_parts) instead of a single shared embedded
    `#streetsData` tag — each neighborhood now shows its own real streets,
