@@ -544,7 +544,7 @@
         <dt>Reset cutaway</dt>
         <dd>Back to the site's own center — or, if a box is active, that box's own center.</dd>
         <dt>Section fill (poché)</dt>
-        <dd>Shades the cut faces translucent red, architectural-section style — the boundary of the void itself. Only visible in an N/S/E/W section view with Negative space on.</dd>
+        <dd>Shades the newly-exposed cut faces translucent — red for negative space (the void), charcoal for Buildings (cut solid mass) — instead of leaving a hollow outline. Works in a locked N/S/E/W section, and in free Perspective/Plan wherever the current viewing angle isn't too edge-on to the cut face.</dd>
         <dt>3D drag handles</dt>
         <dd>Colored handles (blue = Height, orange = X, green = Y) sit at the center of each cut face and can be dragged directly in the viewport instead of using the sliders.</dd>
         <dt>Units</dt>
@@ -811,7 +811,7 @@
         <input type="checkbox" id="capFillToggle" checked>
         Section fill (poché)
       </label>
-      <span class="info-badge" tabindex="0">?<span class="tip">Fills the void between buildings so a section reads as one solid mass instead of just an outline. Only visible in an N/S/E/W section view with Negative space on.</span></span>
+      <span class="info-badge" tabindex="0">?<span class="tip">Fills whichever layer's actually cut -- red for negative space (the void), charcoal for Buildings (real cut mass) -- so it reads as solid material instead of a hollow outline. Works in a locked section, and in free Perspective/Plan too as long as the current angle isn't too edge-on to the cut face.</span></span>
     </div>
   </div>
 </div>
@@ -842,7 +842,7 @@
   panel's own highlighted button. -->
 </div>
 
-<div id="planBoxOverlay" style="display:none; position:fixed; border:2px dashed var(--accent); background:rgba(178,58,46,0.15); z-index:14; pointer-events:none;"></div>
+<div id="planBoxOverlay" style="display:none; position:fixed; border:2px dashed var(--accent); background:rgba(255,107,87,0.35); z-index:14; pointer-events:none;"></div>
 
 <div id="smallScreenGate">
   <div class="icon">
@@ -879,9 +879,10 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.75'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.87'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1063,7 +1064,8 @@ let sun, orthoLight; // v3.4.24: sun = perspective view's fixed-direction light 
 let orthoCamera, activeCamera; // v3.0.42 -- orthoCamera only becomes activeCamera during a true N/S/E/W flat elevation view; Home/free-orbit use the perspective camera
 let solidGroup, negativeMesh; // negativeMesh is a THREE.Group of [outerSkin, cavityWalls] once computed
 let groundMesh; // v3.0.20 -- needed so zoomToBoroughContext() can hide it (a real extruded borough slab now sits well above the small 4000-unit ground plane, poking out oddly around its edges otherwise)
-let planBoxOutlineMesh; // v3.4.37: persistent world-space outline of the active box, shown only in Plan -- see updatePlanBoxOutline()
+let planBoxOutlineMesh; // v3.4.37: persistent world-space outline of the active box, shown only in Plan -- see updatePlanBoxOutline(). v3.4.79: now a ribbon (real triangle geometry, same technique as buildRibbonGeometry) plus a filled companion quad, not a bare LineLoop -- see that function's own comment for why.
+let planBoxFillMesh; // v3.4.79: companion translucent fill, echoes #planBoxOverlay's rgba(178,58,46,0.15) tint so a restored box reads as clearly as one just drawn
 let siteMinX, siteMaxX, siteMinY, siteMaxY, siteCapHeight; // set once computeNegativeSpace runs; reused by resetCutaway()
 let siteFootprintLonLat; // v3.0.15 -- raw building-footprint lon/lat bounds, set at load time (before any compute), used only for the Manhattan-context "you are here" marker
 let boroughsGroup; // v3.0.15 -- Manhattan/Queens/Brooklyn outline layer, built once in loadData(), toggled via viewBoroughs button
@@ -1402,6 +1404,19 @@ function updateSkylineProfileLine(axis){
 // blends with what's behind it, so fine aliasing patterns read far less
 // prominently than on a fully opaque fill.
 const POCHE_COLOR = 0xB23A2E; // light theme --accent; kept in sync with the live CSS var by updatePocheTheme() below
+// v3.4.82: buildings' own poché (Height/X/Y cutaway cap when Buildings,
+// not Negative space, is showing) -- Joe: "would it be possible to cap
+// and color w/ a poche when cutting through building in 3d views." A
+// FIXED charcoal, not theme-swapped like POCHE_COLOR -- buildingMat's own
+// base color (0x8a94a3) is fixed across themes too, and reusing the same
+// red here would make a building's cap and the void's cap indistinguishable
+// whenever Buildings + Negative space are both showing (a real, supported
+// combination -- "useful for confirming the carve is accurate," per
+// EXTENDED.md). Same hue family as buildingMat, just much darker/denser --
+// reads as "the same material, this is where it was cut" rather than an
+// unrelated color, matching real architectural section convention (cut
+// solid renders darker than uncut surfaces) without going fully black.
+const BUILDING_POCHE_COLOR = 0x2B2E38;
 // ============================================================================
 // FOUNDING DESIGN DECISION -- DO NOT FLIP WITHOUT RE-READING THIS FIRST.
 // ============================================================================
@@ -1950,7 +1965,7 @@ const sectionPlaneStencil = new THREE.Plane(sectionPlane.normal.clone(), section
 const xClipPlaneStencil = new THREE.Plane(xClipPlane.normal.clone(), xClipPlane.constant + STENCIL_EPSILON);
 const yClipPlaneStencil = new THREE.Plane(yClipPlane.normal.clone(), yClipPlane.constant + STENCIL_EPSILON);
 
-function createPlaneStencilGroup(geometry, plane, renderOrder){
+function createPlaneStencilGroup(geometry, plane, renderOrder, opaqueWritePass){
   const group = new THREE.Group();
   const baseMat = new THREE.MeshBasicMaterial();
   baseMat.depthWrite = false;
@@ -1987,7 +2002,30 @@ function createPlaneStencilGroup(geometry, plane, renderOrder){
   // Z-quad-read+clear(3.1) -- each axis's own clear now correctly happens
   // right after ITS OWN read and right before the NEXT axis's write, instead
   // of all three writes bunching up before any read ever happens.
-  baseMat.transparent = true;
+  //
+  // v3.4.82: Joe's poché feature for Buildings surfaced a SECOND, different
+  // failure mode this fix doesn't cover -- live-verified with a controlled
+  // A/B test (same camera, same geometry, only this flag changed):
+  // transparent:true reliably produces NO poché at all against buildings'
+  // much larger merged geometry (205k+ vertices, vs negative space's far
+  // smaller CSG-cleaned solid), even in the simplest single-axis case this
+  // fix was written for. `opaqueWritePass` lets a caller opt OUT of the
+  // v3.0.38 fix -- negative space's own 3 calls don't pass it, so their
+  // exact existing (working) behavior is untouched; buildings' 3 calls do.
+  // Confirmed this doesn't reopen the ordering bug transparent:true fixed:
+  // negative space and buildings are geometrically COMPLEMENTARY (negative
+  // space is the mold minus every building, by construction) -- a stencil
+  // ray at any given (x,y) column only ever crosses ONE of the two
+  // geometries, never both, so buildings' opaque write pass (which now
+  // runs earlier, in three.js's separate opaque list) can't leave
+  // cross-contaminating parity in a pixel negative space's own sequence
+  // later reads. And even in the theoretical case it did, real building
+  // geometry (normal depthTest:true, unlike the stencil-write meshes
+  // themselves) already occupies and would depth-occlude that same pixel,
+  // so nothing would be visible regardless. Live-verified both layers
+  // shown together afterward -- negative space's own poché still read
+  // correctly, not just reasoned through.
+  baseMat.transparent = !opaqueWritePass;
 
   const mat0 = baseMat.clone(); // back faces
   mat0.side = THREE.BackSide;
@@ -2013,11 +2051,31 @@ function createPlaneStencilGroup(geometry, plane, renderOrder){
 }
 
 
-function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis){
+// v3.4.85: Joe -- "why give the ability to see/goto a 3d view" if the
+// X/Y octant cutaway's own poché never showed there. v3.2.40's fix threw
+// out every free-Perspective viewing angle to avoid a problem (a flat
+// full-site plane reading as a solid wall) that only actually happens at
+// grazing/near-edge-on angles. This replaces that blanket hide with a
+// live per-angle check: GRAZING_THRESHOLD is the minimum |cos| between
+// the camera's view direction and the plane's own normal for the quad to
+// stay visible -- 1.0 would mean dead-on face-first, 0.0 would mean
+// perfectly edge-on (the exact case that broke). 0.25 is a deliberately
+// conservative floor (roughly 75° off face-on) -- comfortably inside the
+// range v3.2.40's screenshot showed the artifact, without needing every
+// orbit to be near-perfect before the cap reappears.
+const GRAZING_THRESHOLD = 0.25;
+function capQuadFaceOnEnough(planeNormal){
+  if (activeCamera !== camera) return false; // orthographic Plan view: a vertical X/Y cut plane is ALWAYS edge-on from directly above, not just sometimes -- no angle check needed, just off
+  const dir = new THREE.Vector3();
+  activeCamera.getWorldDirection(dir);
+  return Math.abs(dir.dot(planeNormal)) > GRAZING_THRESHOLD;
+}
+
+function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis, color, opacity){
   const geom = new THREE.PlaneGeometry(size, size);
   const mat = new THREE.MeshStandardMaterial({
-    color: POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, // DoubleSide so the fill stays visible from either side as the user orbits
-    transparent: true, opacity: 0.4, // v3.0.29 -- translucent plane instead of a solid opaque wall, see POCHE_COLOR comment above
+    color: color || POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, // DoubleSide so the fill stays visible from either side as the user orbits
+    transparent: true, opacity: opacity != null ? opacity : 0.4, // v3.0.29 -- translucent plane instead of a solid opaque wall, see POCHE_COLOR comment above. v3.4.84: optional override -- buildings' charcoal at the original 0.4 blended into shaded building facades (confirmed live: a bright-green swap at the same opacity showed the cap WAS rendering correctly, just illegible at this color+opacity against dark, unlit building faces), Joe chose a denser fill over a lighter color or different hue
     clippingPlanes: restrictPlanes, // clipIntersection left at default (false/union): kept only where BOTH restrictPlanes agree
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
     stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp,
@@ -2038,7 +2096,8 @@ function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis){
     // -- shimmer fully gone, poché reads as a clean solid translucent fill.
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
-  pocheMaterials.push(mat); // v3.0.29 -- so updatePocheTheme() can keep it in sync with the live --accent CSS var
+  pocheMaterials.push(mat); // v3.0.29 -- so updatePocheTheme() can keep it in sync with the live --accent CSS var. v3.4.82: only the DEFAULT (negative-space) color goes through theme-sync -- a caller passing its own fixed `color` (buildings' charcoal) opts out below, since that color is deliberately NOT theme-tied the way POCHE_COLOR is.
+  if (color) pocheMaterials.pop(); // v3.4.82: undo the push above for a custom color -- see the comment on it. Simpler than duplicating the push logic with an if/else; the pop is O(1) and mat is still returned/used normally either way.
   if (skySampleAxis){
     // v3.2.35: this quad's own mapping is fixed for its lifetime (the X-cut
     // quad, shown in E/W views, always needs local roofline as a function of
@@ -2092,6 +2151,8 @@ function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis){
 }
 
 let capFillGroups = null; // { z: THREE.Group, x: THREE.Group, y: THREE.Group }
+let buildingCapFillGroups = null; // v3.4.82: same shape as capFillGroups, but stenciled against mergedBuildingsGeometry with BUILDING_POCHE_COLOR instead of the negative-space solid
+let mergedBuildingsGeometry = null; // v3.4.82: one combined BufferGeometry across every building mesh in solidGroup -- see buildBuildingCapFillGroups()'s own comment for why this is needed
 function buildCapFillGroups(geometry){
   if (capFillGroups){
     scene.remove(capFillGroups.z, capFillGroups.x, capFillGroups.y);
@@ -2142,6 +2203,71 @@ function buildCapFillGroups(geometry){
   capFillGroups = { z: zGroup, x: xGroup, y: yGroup };
   syncCapFillPlanes();
   refreshCapFillVisibility(); // recompute may run after a prior compute, so respect the current toggle/view state rather than defaulting to visible
+}
+
+// v3.4.82: Joe -- "would it be possible to cap and color w/ a poche when
+// cutting through building in 3d views." Buildings, unlike negative space,
+// don't come as one continuous geometry -- solidGroup is thousands of
+// separate per-building THREE.Meshes, one per building or building part,
+// and the stencil-cap technique above needs exactly one BufferGeometry to
+// test against. Merges every building mesh's geometry into one first
+// (mergeGeometries, a standard three.js addon -- each mesh's geometry is
+// already baked in real world-space coordinates by extrudedMesh(), and
+// every mesh's own transform is always identity, so no per-mesh
+// applyMatrix4() is actually needed here, but it costs nothing to keep for
+// correctness if that ever changes), then reuses createPlaneStencilGroup()/
+// makeCapQuad() completely unchanged -- the same technique, new input.
+//
+// Deliberately no skySampleAxis/sky-discard on any of the 3 quads here,
+// unlike negative space's X/Y quads (which need it, see makeCapQuad's own
+// skySampleAxis branch): that mechanism exists because negative space's
+// mold extends to the SITE's overall max height everywhere, so a naive cap
+// would show poché reaching to the full site ceiling even above a short
+// building, and the sky-discard trick pulls it back down to each area's
+// own real local roofline. A building's geometry has no such artificial
+// ceiling -- it already ends exactly at its own real roof, so the stencil
+// test alone produces the correct cap shape with nothing extra needed.
+//
+// Renders after negative space's own 3 stencil pairs (renderOrder 4-6.x,
+// negative space uses 1-3.x) -- keeps each pair's write-then-read-then-
+// clear atomic and sequential in the shared stencil buffer, the same
+// ordering discipline v3.0.34/v3.0.38's own comments establish and rely on.
+function buildBuildingCapFillGroups(){
+  if (buildingCapFillGroups){
+    scene.remove(buildingCapFillGroups.z, buildingCapFillGroups.x, buildingCapFillGroups.y);
+    buildingCapFillGroups = null;
+  }
+  if (mergedBuildingsGeometry){ mergedBuildingsGeometry.dispose(); mergedBuildingsGeometry = null; }
+  if (!solidMeshes.length) return; // nothing to cap (shouldn't happen post-compute, but a defensive no-op costs nothing)
+  mergedBuildingsGeometry = mergeGeometries(solidMeshes.map(m => m.geometry), false);
+  if (!mergedBuildingsGeometry) return; // defensive -- mergeGeometries can return null on mismatched vertex attributes
+
+  const quadSize = Math.max(siteMaxX - siteMinX, siteMaxY - siteMinY, siteCapHeight) * 3; // same sizing convention as buildCapFillGroups() above
+
+  const xGroup = new THREE.Group();
+  xGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, xClipPlaneStencil, 4, true));
+  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 4.1, null, BUILDING_POCHE_COLOR, 0.85);
+  xQuad.rotation.y = Math.PI / 2;
+  xGroup.add(xQuad);
+  xGroup.userData.quad = xQuad;
+
+  const yGroup = new THREE.Group();
+  yGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, yClipPlaneStencil, 5, true));
+  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES], 5.1, null, BUILDING_POCHE_COLOR, 0.85);
+  yQuad.rotation.x = -Math.PI / 2;
+  yGroup.add(yQuad);
+  yGroup.userData.quad = yQuad;
+
+  const zGroup = new THREE.Group();
+  zGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, sectionPlaneStencil, 6, true));
+  const zQuad = makeCapQuad(quadSize, [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 6.1, null, BUILDING_POCHE_COLOR, 0.85);
+  zGroup.add(zQuad);
+  zGroup.userData.quad = zQuad;
+
+  scene.add(zGroup, xGroup, yGroup);
+  buildingCapFillGroups = { z: zGroup, x: xGroup, y: yGroup };
+  syncCapFillPlanes();
+  refreshCapFillVisibility();
 }
 
 // v3.0.41: real fix for "Flip X/Y not moving in the right direction" --
@@ -2212,6 +2338,10 @@ function syncCapFillPlanes(){
   capFillGroups.z.userData.quad.position.set(cx, cy, sectionPlane.constant);
   capFillGroups.x.userData.quad.position.set(xThreshold, cy, cz);
   capFillGroups.y.userData.quad.position.set(cx, yThreshold, cz);
+  if (!buildingCapFillGroups) return; // v3.4.82: same 3 positions, buildings' own cap quads -- share the exact same clip-plane state as negative space's (one physical cut position, whichever layer is actually showing), so nothing else in this function needed to change
+  buildingCapFillGroups.z.userData.quad.position.set(cx, cy, sectionPlane.constant);
+  buildingCapFillGroups.x.userData.quad.position.set(xThreshold, cy, cz);
+  buildingCapFillGroups.y.userData.quad.position.set(cx, yThreshold, cz);
 }
 
 function initScene(){
@@ -2279,6 +2409,8 @@ function initScene(){
   controls.maxDistance = ORIGINAL_MAX_DISTANCE;
   controls.update();
   controls.addEventListener('change', updateCompass); // v3.0.13 nav compass -- see updateCompass() below
+  controls.addEventListener('change', updateStreetLabelScale); // v3.4.77: same pattern as the compass listener right above -- keeps label size responsive to manual scroll-wheel zoom/pan within a view, not just discrete view switches (which already call it via updateStreetLabelVisibility())
+  controls.addEventListener('change', refreshCapFillVisibility); // v3.4.85: X/Y poché's new free-Perspective visibility depends on the live camera angle, not just view mode -- same established pattern as the two listeners just above, re-evaluates on every orbit/pan/zoom, not only on discrete view switches. v3.4.86: MOVED here from right after refreshCapFillVisibility()'s own definition (much later in the file, at top-level module scope) -- that spot runs synchronously during initial script parse, before initScene() (and this very `controls = new OrbitControls(...)` assignment a few lines up) has ever executed, so `controls` was still undefined there -- crashed the entire app on load (TypeError: Cannot read properties of undefined (reading 'addEventListener')), confirmed via the real browser console, not guessed. function declarations hoist, so refreshCapFillVisibility() itself is safely callable from here regardless of where it's defined in the file; only the controls REFERENCE needed to wait until after this line.
   updateCompass();
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3226, 1.1));
@@ -2577,6 +2709,8 @@ async function loadData(neighborhoodId){
   if (solidGroup) { scene.remove(solidGroup); solidGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
   if (negativeMesh) { scene.remove(negativeMesh); negativeMesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); negativeMesh = null; }
   if (capFillGroups) { scene.remove(capFillGroups.z, capFillGroups.x, capFillGroups.y); capFillGroups = null; }
+  if (buildingCapFillGroups) { scene.remove(buildingCapFillGroups.z, buildingCapFillGroups.x, buildingCapFillGroups.y); buildingCapFillGroups = null; } // v3.4.82: same reasoning as capFillGroups just above -- a district switch's OLD building caps belong to the PREVIOUS site's coordinates, and won't get rebuilt until the NEW district's own compute runs
+  if (mergedBuildingsGeometry) { mergedBuildingsGeometry.dispose(); mergedBuildingsGeometry = null; }
   if (zCutLineMesh) { scene.remove(zCutLineMesh, xCutLineMesh, yCutLineMesh); zCutLineMesh = xCutLineMesh = yCutLineMesh = undefined; }
   siteMinX = siteMaxX = siteMinY = siteMaxY = siteCapHeight = undefined;
   activeSectionBox = null; // v3.4.0: a drawn box's coordinates belong to the PREVIOUS district's geometry -- stale across a switch, same as every other site-bound state cleared here
@@ -3083,6 +3217,15 @@ async function computeNegativeSpace(){
   // filtering reverted), so the poché stencil pass can just use it directly
   // -- no separate copy needed.
   buildCapFillGroups(cleanedGeo); // needs siteMinX/Y/capHeight for quad sizing+centering, so must run after they're set above
+  // v3.4.82: buildings' own poché, same siteMinX/Y/capHeight dependency as
+  // the line above -- buildings themselves are ready right after
+  // loadData(), but the site bounds their cap quads need to be sized/
+  // centered against only exist once a compute has actually run, so this
+  // builds alongside negative space's own cap-fill rather than back in
+  // loadData(). Rebuilt fresh every compute, same as buildCapFillGroups()
+  // itself just above (pocheMaterials' own comment: "rebuilt fresh each
+  // compute").
+  buildBuildingCapFillGroups();
   // v3.0.37: buildCutLineMeshes() moved to AFTER buildCapFillGroups()
   // (previously ran first, before siteMinX/Y/siteCapHeight even existed).
   // The new exact-cross-section cut lines reuse the SAME epsilon-biased
@@ -3558,27 +3701,67 @@ function getPlanBoxClipPlanes(){
 function updatePlanBoxOutline(){
   if (!isPlanViewActive || !activeSectionBox){
     if (planBoxOutlineMesh) planBoxOutlineMesh.visible = false;
+    if (planBoxFillMesh) planBoxFillMesh.visible = false;
     return;
   }
   const b = activeSectionBox;
   const z = 0.5; // just above groundMesh's own z=-0.5
-  const pts = [
-    new THREE.Vector3(b.xMin, b.yMin, z),
-    new THREE.Vector3(b.xMax, b.yMin, z),
-    new THREE.Vector3(b.xMax, b.yMax, z),
-    new THREE.Vector3(b.xMin, b.yMax, z),
-  ];
+  // v3.4.79: Joe's screenshot -- returning to Plan with an existing box,
+  // this outline read as barely visible next to how bold the box looked
+  // while actually being drawn. Root cause: #planBoxOverlay (the DOM
+  // element shown live during an actual drag) is a 2px dashed border PLUS
+  // a rgba(178,58,46,0.15) tinted fill -- genuinely bold. This mesh was
+  // just a bare THREE.LineLoop -- no fill at all, and WebGL only reliably
+  // renders line primitives at ~1px regardless of any linewidth set on
+  // the material (a real, well-known cross-browser/GPU limitation, not a
+  // bug in this code) -- a hairline next to the overlay's 2px+fill
+  // treatment. Rebuilt as a real ribbon (actual triangle geometry, same
+  // buildRibbonGeometry() technique the street ribbons already use, so
+  // its on-screen width is real geometry, not an unreliable line-width
+  // hint) plus a translucent fill quad echoing the overlay's own tint --
+  // a restored box now reads the same as one just drawn, not a fainter
+  // afterimage of it.
+  // v3.4.87: Joe's next screenshot -- the fill's actual color depends
+  // heavily on what's underneath (buildings' own roof faces already
+  // render quite dark from directly above, the same characteristic
+  // BUILDING_POCHE_COLOR needed a higher opacity to read against) -- a
+  // box drawn over open ground looked like a light pink tint, the same
+  // box over a dense dark cluster looked near-black, "not consistent...
+  // otherwise it's confusing." Confirmed the blend math before picking a
+  // fix rather than guessing: at the original 0.15 opacity, even the
+  // brightest reasonable red barely moves the blended result over a
+  // near-black building roof (rgb 20,20,25 -> just 44,26,28 with the old
+  // color, 55,33,34 with a much brighter one) -- color alone physically
+  // can't make a 15%-opacity layer "stay reddish" over near-black, only
+  // a real opacity increase can. Raised to the same 0xff6b57 the outline
+  // ribbon already uses (dark theme's own accent, brighter than the old
+  // 0xb23a2e) at 0.35 opacity (rgb 102,50,47 over that same dark
+  // building -- genuinely reads red now) -- matched on #planBoxOverlay's
+  // own CSS background too, so the drawing and drawn states still look
+  // like the same indicator, not two different ones.
+  const loopPts = [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax], [b.xMin, b.yMin]]; // repeats the first point to close the loop
+  const outlineWidthM = 3; // real-world meters -- visible at any normal zoom without dwarfing the box it's marking
+  const outlineGeo = buildRibbonGeometry(loopPts, outlineWidthM, 0.4);
+  const fillGeo = new THREE.PlaneGeometry(b.xMax - b.xMin, b.yMax - b.yMin);
   if (!planBoxOutlineMesh){
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-    const mat = new THREE.LineBasicMaterial({ color: 0xff6b57, depthTest: false, transparent: true, opacity: 0.9 });
-    planBoxOutlineMesh = new THREE.LineLoop(geo, mat);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff6b57, depthTest: false, transparent: true, opacity: 0.9 });
+    planBoxOutlineMesh = new THREE.Mesh(outlineGeo, mat);
     planBoxOutlineMesh.renderOrder = 999;
     scene.add(planBoxOutlineMesh);
+    const fillMat = new THREE.MeshBasicMaterial({ color: 0xff6b57, depthTest: false, transparent: true, opacity: 0.35, side: THREE.DoubleSide }); // v3.4.87: same rgba(255,107,87,0.35) as #planBoxOverlay's own CSS background -- was 0xb23a2e/0.15
+    planBoxFillMesh = new THREE.Mesh(fillGeo, fillMat);
+    planBoxFillMesh.renderOrder = 998; // just under the outline
+    scene.add(planBoxFillMesh);
   } else {
     planBoxOutlineMesh.geometry.dispose();
-    planBoxOutlineMesh.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    planBoxOutlineMesh.geometry = outlineGeo;
+    planBoxFillMesh.geometry.dispose();
+    planBoxFillMesh.geometry = fillGeo;
   }
+  planBoxOutlineMesh.position.z = z;
+  planBoxFillMesh.position.set((b.xMin + b.xMax) / 2, (b.yMin + b.yMax) / 2, z - 0.05); // sits just under the outline, centered on the box (PlaneGeometry is centered on its own origin, unlike the outline's absolute corner points)
   planBoxOutlineMesh.visible = true;
+  planBoxFillMesh.visible = true;
 }
 function syncBuildingClipping(axis, isPlanView){
   const mat = solidGroup?.children?.[0]?.material;
@@ -3911,6 +4094,17 @@ function applySectionMode(axis, isPlanView){
   // rather than duplicated at each of applySectionMode()'s several call
   // sites (nav buttons, applyPlanBoxDirection, resetToDefaultView) since
   // they all funnel through this one function already.
+  // v3.4.76: Joe's screenshot -- with every real named street now shown
+  // (v3.4.75 dropped the old streetwidth>=60 filter), a box-scoped
+  // elevation was covered edge-to-edge in street-name text from all over
+  // the district, most of it nowhere near the box. Labels only matter
+  // near what's actually being looked at once a box is active -- ribbons
+  // (the actual street geometry) stay untouched, this only hides/shows
+  // the text sprites. Synchronous, not deferred like the rAF/setTimeout
+  // calls below -- sectionModeAxis/activeSectionBox/isPlanViewActive are
+  // all already final by this point in the function, nothing here needs
+  // to wait a frame for.
+  updateStreetLabelVisibility();
   requestAnimationFrame(() => {
     if (axis !== null) syncSectionSkyUniforms(axis);
     if (sectionModeAxis === axis) refreshActiveSectionProfile(); // guards against a later view change already having moved on by the time this frame runs
@@ -3995,9 +4189,18 @@ function refreshCutawayRowActiveState(axis){
   // identical "this control is currently inert" situation, just the
   // opposite condition -- poché matters exactly when axis !== null,
   // where those three rows are instead the ones being dimmed.
+  // v3.4.82: that premise was already stale by the time this ran --
+  // capFillGroups.z has shown correctly in Plan/free perspective since
+  // v3.4.44 ("on... for Plan and free perspective/octant, where Height
+  // Cut is the genuinely active axis"), not "only ever" a locked section
+  // -- and now actively blocks the main scenario buildings' own poché is
+  // FOR (Joe's ask was literally Perspective + Height Cut through a
+  // building). Inert only in the one combination where NEITHER layer's
+  // fill could show: axis===null (so X/Y don't apply) AND a box is
+  // active (blocking Z too, per its own !activeSectionBox guard).
   const capRow = document.getElementById('capFillRow');
   if (capRow){
-    const capInert = axis === null;
+    const capInert = axis === null && !!activeSectionBox;
     capRow.style.opacity = capInert ? '0.4' : '';
     capRow.querySelectorAll('input').forEach(el => { el.disabled = capInert; });
   }
@@ -4739,6 +4942,7 @@ async function buildStreetsLayer(neighborhoodId){
   }
 
   scene.add(streetsGroup);
+  updateStreetLabelVisibility(); // v3.4.76: sets initial label visibility -- a no-op scoping-wise right after a district switch (activeSectionBox is already cleared by then), but keeps this function as the one source of truth for label visibility rather than assuming "just built" always means "show everything"
 }
 
 function makeStreetLabel(text, x, y){
@@ -4771,7 +4975,77 @@ function toTitleCaseStreet(name){
   return name.split(' ').map(w => w.length <= 2 ? w : w[0] + w.slice(1).toLowerCase()).join(' ');
 }
 
-const STREET_HEIGHT = 4; // a thin, schematic raised curb -- not literal (real curbs are ~15cm), just enough real height to have a visible vertical face at any camera angle, including the grazing oblique angles this app's default views use
+// v3.4.77: Joe -- "the labels are not showing." Root cause, confirmed live
+// (isolated individual label sprites, hid everything else, zoomed the
+// camera right to them): they're not missing or broken, they're just
+// genuinely too small to notice at typical zoom. The 90m world-width
+// (v3.1.9) was chosen for close-up, already-zoomed-into-a-site viewing --
+// reasonable back when Major streets only showed a handful of streetwidth
+// >=60 segments near the site. Now every real named street across the
+// whole district renders (v3.4.75), and the DEFAULT Plan/Perspective view
+// (before any box is drawn) has to show the whole ~1-2km district at
+// once, where a 90m label is well under 2% of the visible width --
+// readable up close, imperceptible zoomed out.
+//
+// v3.4.79: Joe's next screenshot showed the OPPOSITE problem -- inside a
+// box-scoped elevation, zoomed in close to actually read the box's own
+// labels, giant overlapping text. A fixed 90m floor (this function's
+// first version) fixes the too-small case but doesn't shrink back down
+// for a genuinely tight zoom -- confirmed live: a ~258m-wide view (a
+// realistic close-in-on-the-box zoom) with a 90m-floored label is ~35%
+// of screen width, exactly the overlapping mess in the screenshot.
+// Removed the 90 floor entirely -- `visibleWidth * 0.045` alone, at
+// EITHER scale (confirmed both the ~7234m default-view case from v3.4.77
+// and this ~258m tight-zoom case), lands labels around 70-80px on
+// screen, genuinely legible without dominating -- a real constant-
+// screen-fraction relationship, not two different special cases needing
+// two different constants. 10 is a pure degenerate-value guard (avoids a
+// zero/negative width if a caller ever passes visibleWidth<=0), not a
+// "preserve some minimum size" floor the way 90 was.
+function updateStreetLabelScale(){
+  if (!streetsGroup) return;
+  const cam = activeCamera;
+  let visibleWidth;
+  if (cam.isOrthographicCamera){
+    visibleWidth = (cam.right - cam.left) / cam.zoom;
+  } else {
+    const dist = cam.position.distanceTo(controls.target);
+    const vFOV = cam.fov * Math.PI / 180;
+    visibleWidth = 2 * dist * Math.tan(vFOV / 2) * cam.aspect;
+  }
+  const worldWidth = Math.max(10, visibleWidth * 0.045);
+  const worldHeight = worldWidth * (128 / 512); // same canvas aspect ratio makeStreetLabel's own scale.set uses
+  for (const child of streetsGroup.children){
+    if (!(child instanceof THREE.Sprite)) continue;
+    child.scale.set(worldWidth, worldHeight, 1);
+  }
+}
+
+// v3.4.76: hides/shows street-name label sprites (never the street ribbons
+// themselves) based on whether a box is actually scoping the current view
+// -- same condition sectionModeNote already uses for its own "Cropped to
+// the box you drew" vs "Full elevation shown" text (axis !== null &&
+// activeSectionBox), extended to also cover a box-scoped Plan view
+// (isPlanViewActive && activeSectionBox), since that's a real box-scoped
+// state too even though it has no section axis. No box scoping the view
+// -> every label shows, same as always. `pad` is generous on purpose: a
+// label whose real street continues slightly past the box edge should
+// still show, not disappear right at the boundary.
+function updateStreetLabelVisibility(){
+  if (!streetsGroup) return;
+  const boxScoped = !!activeSectionBox && (sectionModeAxis !== null || isPlanViewActive);
+  const pad = 60;
+  for (const child of streetsGroup.children){
+    if (!(child instanceof THREE.Sprite)) continue; // ribbons are Mesh, always stay visible
+    if (!boxScoped){ child.visible = true; continue; }
+    const { x, y } = child.position;
+    child.visible = x >= activeSectionBox.xMin - pad && x <= activeSectionBox.xMax + pad
+                 && y >= activeSectionBox.yMin - pad && y <= activeSectionBox.yMax + pad;
+  }
+  updateStreetLabelScale(); // v3.4.77: every view-mode-switch call site that already updates visibility should also refresh size for the new view's zoom
+}
+
+const STREET_HEIGHT = 1; // v3.4.81: Joe -- "streets are very thick needs to be reduced." Was 4m (v3.0.28) -- deliberately non-literal (real curbs are ~15cm) so the ribbon has a visible vertical face at any camera angle, but at 4m every street's ribbon (now every real named street, v3.4.75, not just the old streetwidth>=60 set) stacks into one continuous, dominant band across a full-width elevation, regardless of that street's own real-world direction -- confirmed in Joe's screenshot: the band's thickness reads uniform across the whole image width, which only happens because STREET_HEIGHT itself (not each street's real, varying pavement width) is what a side elevation actually shows as vertical thickness. Cut to 1m -- a 4x reduction, still a genuine, unmistakably-visible face from any angle, far less dominant in elevation.
 
 // Per-segment perpendicular-offset ribbon, no miter joins -- same technique
 // MASSING's own buildPolylineRibbonGeometry uses (confirmed by reading its
@@ -5170,8 +5444,38 @@ function refreshCapFillVisibility(){
   // the axis matching the current N/S/E/W direction should show while a
   // section view is active; Plan and perspective (sectionModeAxis===null)
   // keep both, unchanged.
-  capFillGroups.x.visible = on && (sectionModeAxis === 'x');
-  capFillGroups.y.visible = on && (sectionModeAxis === 'y');
+  // v3.4.85: Joe -- "so why give the ability to see/goto a 3d view?" if
+  // the X/Y octant cutaway's own poché never showed there at all. Fair
+  // challenge -- v3.2.40 threw out ALL of free Perspective's real value
+  // (most orbit angles are perfectly fine) to avoid a problem that only
+  // actually occurs at grazing/near-edge-on angles. Now shows there too,
+  // but only when the camera's actual angle to that specific plane is
+  // face-on enough -- capQuadFaceOnEnough() re-evaluates on every
+  // controls 'change' event (same pattern updateCompass()/
+  // updateStreetLabelScale() already use), so orbiting toward a grazing
+  // angle live-hides it before the v3.2.40 artifact would reappear, and
+  // orbiting back to a reasonable angle brings it back. Orthographic Plan
+  // view is excluded entirely (capQuadFaceOnEnough() returns false
+  // whenever activeCamera isn't the perspective camera) -- a vertical X/Y
+  // cut plane is ALWAYS viewed edge-on from directly above, by
+  // construction, not just sometimes.
+  const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(xClipPlane.normal);
+  const yFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(yClipPlane.normal);
+  capFillGroups.x.visible = on && (sectionModeAxis === 'x' || xFreePerspective);
+  capFillGroups.y.visible = on && (sectionModeAxis === 'y' || yFreePerspective);
+  // v3.4.82: buildings' own caps, same 3 visibility formulas as negative
+  // space's own just above -- swapped showNegative for showBuildings, every
+  // other condition (locked-elevation guard, box-active guard, axis match)
+  // reused exactly as-is. Both layers can be shown together (a real,
+  // supported combination), so both caps can legitimately be visible at
+  // once -- that's exactly why BUILDING_POCHE_COLOR has to be a different
+  // color from POCHE_COLOR, not a bug to guard against here.
+  if (buildingCapFillGroups){
+    const onBuildings = showBuildings && capFillToggleEl.checked;
+    buildingCapFillGroups.z.visible = onBuildings && sectionModeAxis === null && !activeSectionBox;
+    buildingCapFillGroups.x.visible = onBuildings && (sectionModeAxis === 'x' || xFreePerspective);
+    buildingCapFillGroups.y.visible = onBuildings && (sectionModeAxis === 'y' || yFreePerspective);
+  }
 }
 capFillToggleEl.addEventListener('change', refreshCapFillVisibility);
 // v3.2.29: "Show cutaway handles" -- Joe's ask, hides the cone/guide-line
@@ -5330,11 +5634,39 @@ async function switchNeighborhood(id){
   const btn = document.getElementById('neighborhoodBtn');
   const list = document.getElementById('neighborhoodList');
   document.body.appendChild(list); // v3.4.5: escape #controls's overflow-y:auto clipping -- see the CSS comment on #neighborhoodList
+  // v3.4.78: Joe's mobile screenshot -- the list cut off mid-option
+  // ("Mi..." for Midtown), nowhere near its own max-height:260px/
+  // overflow-y:auto cap. Root cause: this always opened UPWARD (`bottom`
+  // anchored just above the button, growing toward the top of the
+  // viewport), with no check for whether there was actually 260px of
+  // room above the button to grow into. On a short mobile viewport with
+  // the button positioned high up, the list's own top edge lands above
+  // y=0 -- genuinely off-screen, not just scrolled-away-but-reachable,
+  // since a position:fixed element clipped by the viewport edge has no
+  // page scroll to bring it back (the internal overflow-y:auto only
+  // governs scrolling WITHIN the box's own drawn bounds, which is exactly
+  // the part that was missing here). Now measures real space above vs
+  // below the button each time it opens, picks whichever side has more
+  // room (same direction-flip a native <select> or any well-behaved
+  // dropdown already does), and caps max-height to what that side
+  // actually has -- so the internal scrollbar engages for whatever
+  // doesn't fit, instead of silently running off the visible viewport.
   function positionList(){
     const rect = btn.getBoundingClientRect();
     list.style.left = rect.left + 'px';
     list.style.width = rect.width + 'px';
-    list.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+    const spaceAbove = rect.top - 12;
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const openAbove = spaceAbove > spaceBelow;
+    const available = Math.max(120, openAbove ? spaceAbove : spaceBelow); // 120 floor -- still shows a few real options even in a very cramped viewport, rather than collapsing toward nothing
+    list.style.maxHeight = Math.min(260, available) + 'px';
+    if (openAbove){
+      list.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+      list.style.top = '';
+    } else {
+      list.style.top = (rect.bottom + 6) + 'px';
+      list.style.bottom = '';
+    }
   }
   for (const nb of NEIGHBORHOODS){
     const opt = document.createElement('div');
@@ -6027,6 +6359,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   // point that unambiguously means "this old box is being replaced" --
   // matches the moment Joe actually sees it happen, not one step later.
   if (planBoxOutlineMesh) planBoxOutlineMesh.visible = false;
+  if (planBoxFillMesh) planBoxFillMesh.visible = false; // v3.4.79: same reasoning as the outline right above -- the fill is a new companion mesh, needs the same old-box-being-replaced hide
   const overlay = document.getElementById('planBoxOverlay');
   overlay.style.display = 'block';
   overlay.style.left = e.clientX + 'px'; overlay.style.top = e.clientY + 'px';

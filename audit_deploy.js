@@ -661,10 +661,10 @@ check(
 sectionHeader('v3.4.39 -- zCutLineMesh in perspective, poché row dimming, High detail relocated, tooltip repositioning');
 
 check(
-  '#capFillRow exists (Section fill row given an id so it can be dimmed) and refreshCutawayRowActiveState() dims it whenever axis===null, the exact mirror of when the Height/X/Y rows are NOT dimmed',
+  '#capFillRow exists (Section fill row given an id so it can be dimmed) and refreshCutawayRowActiveState() dims it only when nothing could show (axis===null && a box is blocking Z too) -- v3.4.82 narrowed this from the old bare axis===null, which disabled the checkbox in exactly the Perspective+Height-Cut scenario buildings\' own poché is for; see that version\'s own check for the full reasoning',
   /id="capFillRow"/.test(html)
   && /const capRow = document\.getElementById\('capFillRow'\);/.test(html)
-  && /const capInert = axis === null;/.test(html)
+  && /const capInert = axis === null && !!activeSectionBox;/.test(html)
 );
 check(
   'High detail moved out of the Simple tab into the Export accordion, next to Export STL -- it was never a viewing setting, only ever relevant when producing an image or file to keep',
@@ -1479,6 +1479,217 @@ check(
   && !/Major streets overlays real avenue-and-up streets around the current site\./.test(html)
   && !extended.includes('Real NYC Street Centerline data (avenue-width and up, ≥60ft)')
   && !extended.includes('7. **Filter major streets** (≥60ft width)')
+);
+
+/* ===================================================================
+   v3.4.76 -- street-name labels scoped to the active box's bounds when a
+   box is actually scoping the current view; ribbons untouched
+   =================================================================== */
+sectionHeader("v3.4.76 -- updateStreetLabelVisibility() scopes label sprites to activeSectionBox when box-scoped, called from applySectionMode() and after initial label build");
+
+check(
+  'updateStreetLabelVisibility() only touches Sprite children (labels) -- ribbons (Mesh) are explicitly skipped, matching Joe\'s complaint being specifically about text, not the street geometry',
+  /function updateStreetLabelVisibility\(\)\{[\s\S]{0,400}if \(!\(child instanceof THREE\.Sprite\)\) continue;[\s\S]{0,400}\}/.test(html)
+);
+check(
+  'applySectionMode() calls updateStreetLabelVisibility() synchronously (before the deferred rAF/setTimeout calls, since sectionModeAxis/activeSectionBox/isPlanViewActive are already final by then) and buildStreetsLayer() calls it once right after scene.add(streetsGroup)',
+  /updateStreetLabelVisibility\(\);\s*requestAnimationFrame\(\(\) => \{/.test(html)
+  && /scene\.add\(streetsGroup\);\s*updateStreetLabelVisibility\(\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.77 -- street-label world size now scales with the current view's
+   visible width (floors at the original 90m so a drawn-box elevation is
+   unchanged, grows for the wide default Plan/Perspective view)
+   =================================================================== */
+sectionHeader("v3.4.77/v3.4.79 -- updateStreetLabelScale() sizes labels to visibleWidth * 0.045 (v3.4.79 dropped the original 90 floor -- see that check's own comment), called from updateStreetLabelVisibility() and controls' 'change' event");
+
+check(
+  'updateStreetLabelScale() uses visibleWidth * 0.045 alone -- no fixed floor beyond the pure degenerate-value guard Math.max(10, ...) -- so labels shrink for a tight zoom as well as growing for a wide one (v3.4.79 superseded the original 90-floor version, which fixed too-small but not too-big)',
+  /const worldWidth = Math\.max\(10, visibleWidth \* 0\.045\);/.test(html)
+);
+check(
+  'controls has a second \'change\' listener (updateStreetLabelScale) alongside the pre-existing updateCompass one -- same established continuous-update pattern, so manual zoom/pan stays responsive, not just discrete view switches',
+  /controls\.addEventListener\('change', updateCompass\);[\s\S]{0,200}controls\.addEventListener\('change', updateStreetLabelScale\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.78 -- neighborhood dropdown flips open direction (above/below)
+   based on real available space, instead of always opening upward and
+   silently clipping off the top of a short/mobile viewport
+   =================================================================== */
+sectionHeader("v3.4.78 -- positionList() measures space above/below the button and flips direction + clamps max-height accordingly");
+
+check(
+  'positionList() computes both spaceAbove and spaceBelow from the button\'s real getBoundingClientRect(), rather than unconditionally anchoring to `bottom` (the old always-opens-upward behavior)',
+  /const spaceAbove = rect\.top - 12;\s*const spaceBelow = window\.innerHeight - rect\.bottom - 12;\s*const openAbove = spaceAbove > spaceBelow;/.test(html)
+);
+check(
+  'positionList() sets list.style.maxHeight to whichever side\'s available space is smaller (capped at the original 260px, floored at 120px) -- so the list never claims more room than the chosen direction actually has',
+  /const available = Math\.max\(120, openAbove \? spaceAbove : spaceBelow\);[^\n]*\n\s*list\.style\.maxHeight = Math\.min\(260, available\) \+ 'px';/.test(html)
+);
+
+/* ===================================================================
+   v3.4.80 -- persistent Plan-view box outline rebuilt as a real ribbon
+   (buildRibbonGeometry) plus a translucent fill quad, replacing a bare
+   hairline LineLoop with no fill
+   =================================================================== */
+sectionHeader("v3.4.80 -- updatePlanBoxOutline() builds planBoxOutlineMesh via buildRibbonGeometry() and a companion planBoxFillMesh");
+
+check(
+  'planBoxOutlineMesh is built via buildRibbonGeometry() as a real Mesh, not a THREE.LineLoop -- real triangle-geometry width instead of an unreliable ~1px GL line',
+  /const outlineGeo = buildRibbonGeometry\(loopPts, outlineWidthM, 0\.4\);[\s\S]{0,400}planBoxOutlineMesh = new THREE\.Mesh\(outlineGeo, mat\);/.test(html)
+);
+check(
+  'planBoxFillMesh exists as a companion translucent fill (0xff6b57, opacity 0.35 -- matching #planBoxOverlay\'s own rgba(255,107,87,0.35) CSS background) so a restored box shows the same fill tint it had while being drawn -- v3.4.87 raised this from 0xb23a2e/0.15, which blended to near-black over dark building roofs; see that version\'s own comment for the blend-math reasoning',
+  /planBoxFillMesh = new THREE\.Mesh\(fillGeo, fillMat\);/.test(html)
+  && /color: 0xff6b57, depthTest: false, transparent: true, opacity: 0\.35/.test(html)
+);
+
+/* ===================================================================
+   v3.4.81 -- STREET_HEIGHT cut from 4m to 1m -- every street's ribbon
+   shares this constant regardless of direction, so a full-width elevation
+   was reading as one continuous, uniformly-thick band once every real
+   named street rendered (v3.4.75)
+   =================================================================== */
+sectionHeader("v3.4.81 -- STREET_HEIGHT reduced from 4 to 1");
+
+check(
+  'STREET_HEIGHT is 1, not the old 4 -- still non-zero (a genuine visible face at any camera angle), just far less dominant in a full elevation',
+  /const STREET_HEIGHT = 1;/.test(html)
+  && !/const STREET_HEIGHT = 4;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.82 -- buildings' own poché (Height/X/Y cutaway cap when Buildings
+   is showing), reusing the existing stencil-cap technique against a
+   merged buildings geometry, plus a real pre-existing dimming bug fixed
+   along the way
+   =================================================================== */
+sectionHeader("v3.4.82 -- buildBuildingCapFillGroups(), BUILDING_POCHE_COLOR, and the capInert fix");
+
+check(
+  'mergeGeometries is imported from the addon path, and buildBuildingCapFillGroups() merges every solidMeshes geometry with it (not a hand-rolled merge)',
+  /import \{ mergeGeometries \} from 'three\/addons\/utils\/BufferGeometryUtils\.js';/.test(html)
+  && /mergedBuildingsGeometry = mergeGeometries\(solidMeshes\.map\(m => m\.geometry\), false\);/.test(html)
+);
+check(
+  'BUILDING_POCHE_COLOR is a fixed charcoal (0x2B2E38), distinct from POCHE_COLOR (the theme-accent red) -- both layers can show together, so the two caps must stay visually distinguishable',
+  /const BUILDING_POCHE_COLOR = 0x2B2E38;/.test(html)
+);
+check(
+  'makeCapQuad() accepts an optional color param (defaulting to POCHE_COLOR) and opts a custom color OUT of pocheMaterials/updatePocheTheme()\'s theme-sync -- buildings\' charcoal must not get swapped to the accent color on theme toggle',
+  /function makeCapQuad\(size, restrictPlanes, renderOrder, skySampleAxis, color, opacity\)\{/.test(html)
+  && /color: color \|\| POCHE_COLOR,/.test(html)
+  && /if \(color\) pocheMaterials\.pop\(\);/.test(html)
+);
+check(
+  'buildBuildingCapFillGroups() builds all 3 axes (z/x/y) via the unchanged createPlaneStencilGroup()/makeCapQuad() helpers against mergedBuildingsGeometry, and is called from computeNegativeSpace() right alongside buildCapFillGroups(cleanedGeo) -- both need siteMinX/Y/capHeight, which only exist post-compute',
+  /function buildBuildingCapFillGroups\(\)\{/.test(html)
+  && /buildCapFillGroups\(cleanedGeo\);[\s\S]{0,800}buildBuildingCapFillGroups\(\);/.test(html)
+);
+check(
+  'syncCapFillPlanes() and refreshCapFillVisibility() both extend to buildingCapFillGroups (position sync and showBuildings-gated visibility) rather than only touching capFillGroups -- otherwise the cutaway sliders would move negative space\'s cap but leave buildings\' cap stranded at its last position',
+  /if \(!buildingCapFillGroups\) return; \/\/ v3\.4\.82[\s\S]{0,300}buildingCapFillGroups\.z\.userData\.quad\.position\.set\(cx, cy, sectionPlane\.constant\);/.test(html)
+  && /const onBuildings = showBuildings && capFillToggleEl\.checked;/.test(html)
+);
+check(
+  'refreshCutawayRowActiveState()\'s capInert is now axis===null && !!activeSectionBox (only the genuine nothing-can-show case), not the old bare axis===null which disabled the Section-fill checkbox in exactly the Perspective+Height-Cut scenario this whole feature is for',
+  /const capInert = axis === null && !!activeSectionBox;/.test(html)
+  && !/const capInert = axis === null;\n/.test(html)
+);
+
+/* ===================================================================
+   v3.4.83 -- createPlaneStencilGroup() gains an opaqueWritePass parameter;
+   buildings' 3 calls opt in (fixes the poché never appearing), negative
+   space's 3 calls are untouched
+   =================================================================== */
+sectionHeader("v3.4.83 -- createPlaneStencilGroup(geometry, plane, renderOrder, opaqueWritePass), buildings pass true, negative space unchanged");
+
+check(
+  'createPlaneStencilGroup() takes a 4th opaqueWritePass parameter and computes transparent as !opaqueWritePass -- undefined (negative space\'s 3 call sites, still only 3 args) still computes to transparent:true, unchanged from before this version',
+  /function createPlaneStencilGroup\(geometry, plane, renderOrder, opaqueWritePass\)\{/.test(html)
+  && /baseMat\.transparent = !opaqueWritePass;/.test(html)
+);
+check(
+  'all 3 of buildBuildingCapFillGroups()\'s createPlaneStencilGroup() calls pass true for opaqueWritePass, and all 3 of buildCapFillGroups()\'s (negative space) calls still pass only 3 arguments',
+  (html.match(/createPlaneStencilGroup\(mergedBuildingsGeometry, \w+, \d, true\)/g) || []).length === 3
+  && (html.match(/createPlaneStencilGroup\(geometry, \w+, \d\)/g) || []).length === 3
+);
+
+/* ===================================================================
+   v3.4.84 -- makeCapQuad() gains an optional opacity parameter; buildings'
+   3 calls pass 0.85 (was blending into shaded building faces at the
+   original 0.4), negative space's 3 calls are untouched
+   =================================================================== */
+sectionHeader("v3.4.84 -- makeCapQuad(..., color, opacity), buildings pass 0.85, negative space unchanged at the default 0.4");
+
+check(
+  'makeCapQuad() takes a 6th opacity parameter and falls back to 0.4 when not passed (opacity != null ? opacity : 0.4) -- negative space\'s 3 call sites, still passing only their original arguments, are unaffected',
+  /function makeCapQuad\(size, restrictPlanes, renderOrder, skySampleAxis, color, opacity\)\{/.test(html)
+  && /opacity: opacity != null \? opacity : 0\.4,/.test(html)
+);
+check(
+  'all 3 of buildBuildingCapFillGroups()\'s makeCapQuad() calls pass 0.85 for opacity, and negative space\'s 3 makeCapQuad() calls still pass no opacity argument at all',
+  (html.match(/makeCapQuad\(quadSize, \[[^\]]+\], \d\.1, null, BUILDING_POCHE_COLOR, 0\.85\)/g) || []).length === 3
+  && /makeCapQuad\(quadSize, \[sectionPlaneNeg, yClipPlaneNeg, localCeilingPlane, \.\.\.SITE_BOUND_PLANES\], 1\.1, 'y'\);/.test(html)
+  && /makeCapQuad\(quadSize, \[sectionPlaneNeg, xClipPlaneNeg, localCeilingPlane, \.\.\.SITE_BOUND_PLANES\], 2\.1, 'x'\);/.test(html)
+  && /makeCapQuad\(quadSize, \[xClipPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\], 3\.1\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.85 -- X/Y cutaway poché now shows in free Perspective too, gated
+   by a live grazing-angle check (capQuadFaceOnEnough), instead of being
+   hidden there unconditionally
+   =================================================================== */
+sectionHeader("v3.4.85 -- capQuadFaceOnEnough(), GRAZING_THRESHOLD, X/Y visibility formulas extended for both layers, controls 'change' wired to refreshCapFillVisibility");
+
+check(
+  'capQuadFaceOnEnough() returns false outright when activeCamera isn\'t the perspective camera (orthographic Plan is always edge-on to a vertical plane), otherwise compares the camera\'s real view direction to the plane normal against GRAZING_THRESHOLD',
+  /const GRAZING_THRESHOLD = 0\.25;/.test(html)
+  && /function capQuadFaceOnEnough\(planeNormal\)\{\s*if \(activeCamera !== camera\) return false;/.test(html)
+  && /return Math\.abs\(dir\.dot\(planeNormal\)\) > GRAZING_THRESHOLD;/.test(html)
+);
+check(
+  'both capFillGroups.x/y AND buildingCapFillGroups.x/y visibility formulas now OR in a free-Perspective case (sectionModeAxis===null && !activeSectionBox && capQuadFaceOnEnough) alongside the original locked-elevation case, not just the locked case alone',
+  /const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough\(xClipPlane\.normal\);/.test(html)
+  && /capFillGroups\.x\.visible = on && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html)
+  && /buildingCapFillGroups\.x\.visible = onBuildings && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html)
+);
+check(
+  'controls has a third \'change\' listener (refreshCapFillVisibility) alongside updateCompass and updateStreetLabelScale -- the new free-Perspective visibility depends on live camera angle, not just discrete view switches',
+  /controls\.addEventListener\('change', refreshCapFillVisibility\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.86 -- v3.4.85's new controls.addEventListener('change',
+   refreshCapFillVisibility) moved from top-level module scope (crashed
+   the entire app on load -- controls was still undefined there) into
+   initScene(), right alongside the two listeners it was modeled on
+   =================================================================== */
+sectionHeader("v3.4.86 -- controls.addEventListener('change', refreshCapFillVisibility) now lives inside initScene(), not at top-level module scope");
+
+check(
+  'the refreshCapFillVisibility controls listener sits directly after the updateCompass/updateStreetLabelScale ones, inside initScene() -- not right after refreshCapFillVisibility()\'s own definition, which runs before controls is ever assigned',
+  /controls\.addEventListener\('change', updateCompass\);[\s\S]{0,60}controls\.addEventListener\('change', updateStreetLabelScale\);[\s\S]{0,300}controls\.addEventListener\('change', refreshCapFillVisibility\);/.test(html)
+);
+check(
+  'exactly one controls.addEventListener(\'change\', refreshCapFillVisibility) call exists in the whole file -- the old, crashing top-level copy was moved, not duplicated',
+  (html.match(/controls\.addEventListener\('change', refreshCapFillVisibility\);/g) || []).length === 1
+);
+
+/* ===================================================================
+   v3.4.87 -- planBoxFillMesh and #planBoxOverlay both raised from
+   0xb23a2e/0.15 to 0xff6b57/0.35 -- the old color+opacity blended to
+   near-black over dark building roofs, confirmed with the actual blend
+   math before picking a fix
+   =================================================================== */
+sectionHeader("v3.4.87 -- box fill color+opacity raised to 0xff6b57/0.35, matched between #planBoxOverlay and planBoxFillMesh");
+
+check(
+  '#planBoxOverlay\'s CSS background matches planBoxFillMesh\'s material exactly (255,107,87 = 0xff6b57, both at 0.35) -- the actively-drawing state and the restored/committed state read as the same indicator',
+  /background:rgba\(255,107,87,0\.35\); z-index:14;/.test(html)
+  && /color: 0xff6b57, depthTest: false, transparent: true, opacity: 0\.35/.test(html)
 );
 
 /* ===================================================================
