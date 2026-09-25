@@ -690,7 +690,7 @@
     <!-- v3.4.38: Display and Export moved in here too, same reasoning that
     led to moving Units out below -- neither means anything before there's
     a real computed site to show context around or export. -->
-    <details class="accordion">
+    <details class="accordion" id="displayAccordion">
       <summary>Display</summary>
       <div class="accordion-body">
         <div class="row" style="align-items:center;">
@@ -881,7 +881,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.96'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.99'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2152,6 +2152,85 @@ function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis, color, op
 let capFillGroups = null; // { z: THREE.Group, x: THREE.Group, y: THREE.Group }
 let buildingCapFillGroups = null; // v3.4.82: same shape as capFillGroups, but stenciled against mergedBuildingsGeometry with BUILDING_POCHE_COLOR instead of the negative-space solid
 let mergedBuildingsGeometry = null; // v3.4.82: one combined BufferGeometry across every building mesh in solidGroup -- see buildBuildingCapFillGroups()'s own comment for why this is needed
+// v3.4.99: Joe -- "the red color as a cut plane what could we do with
+// this ? red outline boundary? Seem very strong against other colors."
+// The poché fill (see POCHE_COLOR above) is deliberate (v3.0.29 -- Joe
+// asked for a solid-reading fill instead of a hollow outline), and reads
+// fine at the size it's usually shown at. The problem is specific to one
+// case: Z's own cap is ALWAYS the full site rectangle whenever it's
+// shown (see the v3.4.88 comment on zQuad below -- its restrictPlanes
+// dropped the other two axes entirely), so at any Height Cut, in free
+// Perspective, the fill covers the WHOLE visible site -- that's what
+// read as "very strong," not the color itself. X/Y's own caps genuinely
+// vary in size (bounded by the OTHER axis's threshold + the height
+// range still exposed above the cut), so the same "large area, ease off
+// the fill" idea applies there too, just conditionally instead of
+// always.
+//
+// capQuadBounds(axis) computes each cap's REAL visible rectangle
+// directly from the same state its own restrictPlanes already encode
+// (no polygon-clipping needed -- every constraint here is a single
+// axis-aligned half-plane, so the clipped shape is always a plain
+// axis-aligned rectangle): corners for an exact outline, plus a 0-1
+// coverage ratio (fraction of the site's own extent on the relevant
+// axes) used to decide fill vs. outline.
+const POCHE_OUTLINE_COVERAGE_THRESHOLD = 0.5; // ratio above which a cap switches from a filled wash to a thin boundary outline instead
+function capQuadBounds(axis){
+  const zLo = sectionPlane.constant, zHi = siteCapHeight;
+  const heightSpan = siteCapHeight > 0 ? siteCapHeight : 1;
+  const heightCoverage = Math.min(1, Math.max(0, (zHi - zLo) / heightSpan));
+  if (axis === 'z'){
+    // always the full site rectangle -- see this function's own comment above
+    return {
+      corners: [[siteMinX, siteMinY, zLo], [siteMaxX, siteMinY, zLo], [siteMaxX, siteMaxY, zLo], [siteMinX, siteMaxY, zLo]],
+      ratio: 1,
+    };
+  }
+  if (axis === 'x'){
+    const yLo = flipYCutaway ? siteMinY : yThreshold, yHi = flipYCutaway ? yThreshold : siteMaxY;
+    const ySpan = (siteMaxY - siteMinY) || 1;
+    const yCoverage = Math.min(1, Math.max(0, (yHi - yLo) / ySpan));
+    return {
+      corners: [[xThreshold, yLo, zLo], [xThreshold, yHi, zLo], [xThreshold, yHi, zHi], [xThreshold, yLo, zHi]],
+      ratio: yCoverage * heightCoverage,
+    };
+  }
+  // axis === 'y'
+  const xLo = flipXCutaway ? siteMinX : xThreshold, xHi = flipXCutaway ? xThreshold : siteMaxX;
+  const xSpan = (siteMaxX - siteMinX) || 1;
+  const xCoverage = Math.min(1, Math.max(0, (xHi - xLo) / xSpan));
+  return {
+    corners: [[xLo, yThreshold, zLo], [xHi, yThreshold, zLo], [xHi, yThreshold, zHi], [xLo, yThreshold, zHi]],
+    ratio: xCoverage * heightCoverage,
+  };
+}
+function makeCapOutline(color){
+  const geom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color: color || POCHE_COLOR, depthTest: false, transparent: true, opacity: 0.9 });
+  if (!color) pocheMaterials.push(mat); // same theme-sync opt-out convention makeCapQuad's own color param uses
+  const line = new THREE.LineLoop(geom, mat);
+  line.renderOrder = 25; // above the handles (20) too -- an outline should never get hidden behind anything
+  line.visible = false;
+  return line;
+}
+function refreshCapFillCoverage(groups, colorOverride){
+  if (!groups) return;
+  for (const axis of ['x', 'y', 'z']){
+    const group = groups[axis];
+    const quad = group.userData.quad;
+    const outline = group.userData.outline;
+    if (!quad || !outline) continue;
+    const { corners, ratio } = capQuadBounds(axis);
+    const pts = corners.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    outline.geometry.setFromPoints(pts);
+    outline.geometry.computeBoundingSphere();
+    const large = ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;
+    quad.visible = !large;
+    outline.visible = large;
+  }
+}
 function buildCapFillGroups(geometry){
   if (capFillGroups){
     scene.remove(capFillGroups.z, capFillGroups.x, capFillGroups.y);
@@ -2182,6 +2261,9 @@ function buildCapFillGroups(geometry){
   xQuad.rotation.y = Math.PI / 2; // rotates the default +Z normal to +X
   xGroup.add(xQuad);
   xGroup.userData.quad = xQuad;
+  const xOutline = makeCapOutline();
+  xGroup.add(xOutline);
+  xGroup.userData.outline = xOutline;
 
   const yGroup = new THREE.Group();
   yGroup.add(createPlaneStencilGroup(geometry, yClipPlaneStencil, 2));
@@ -2189,6 +2271,9 @@ function buildCapFillGroups(geometry){
   yQuad.rotation.x = -Math.PI / 2; // rotates the default +Z normal to +Y
   yGroup.add(yQuad);
   yGroup.userData.quad = yQuad;
+  const yOutline = makeCapOutline();
+  yGroup.add(yOutline);
+  yGroup.userData.outline = yOutline;
 
   const zGroup = new THREE.Group();
   zGroup.add(createPlaneStencilGroup(geometry, sectionPlaneStencil, 3));
@@ -2221,10 +2306,14 @@ function buildCapFillGroups(geometry){
   // above) -- no rotation needed, just position it at the current cut height.
   zGroup.add(zQuad);
   zGroup.userData.quad = zQuad;
+  const zOutline = makeCapOutline();
+  zGroup.add(zOutline);
+  zGroup.userData.outline = zOutline;
 
   scene.add(zGroup, xGroup, yGroup);
   capFillGroups = { z: zGroup, x: xGroup, y: yGroup };
   syncCapFillPlanes();
+  refreshCapFillCoverage(capFillGroups); // v3.4.99: set the correct fill-vs-outline split for this district's real (freshly rebuilt) site bounds before the first paint
   refreshCapFillVisibility(); // recompute may run after a prior compute, so respect the current toggle/view state rather than defaulting to visible
 }
 
@@ -2516,6 +2605,7 @@ function syncCapFillPlanes(){
   capFillGroups.z.userData.quad.position.set(cx, cy, sectionPlane.constant);
   capFillGroups.x.userData.quad.position.set(xThreshold, cy, cz);
   capFillGroups.y.userData.quad.position.set(cx, yThreshold, cz);
+  refreshCapFillCoverage(capFillGroups); // v3.4.99: re-check fill-vs-outline for negative space's own caps every time a threshold that could change their real exposed area moves -- see capQuadBounds()'s own comment
   // v3.4.91/93: buildings' Z, X and Y caps no longer have a position to
   // sync here -- each rebuilds real world-baked geometry directly
   // (rebuildBuildingZCap() / rebuildBuildingXYCap()), called from
@@ -5838,7 +5928,21 @@ document.getElementById('viewSolid').addEventListener('click', () => {
 document.getElementById('viewNegative').addEventListener('click', () => {
   if (!negativeMesh) { toast('Click "Compute negative space" first'); return; }
   showNegative = !showNegative;
-  if (showNegative) dismissExploreHint(); // v3.4.35
+  if (showNegative){
+    dismissExploreHint(); // v3.4.35
+    // v3.4.97: Joe -- "when view the void should we expose the advanced
+    // tools as a part of sowing the void?? yes and also expose Display:
+    // street & Manhattan toggle". A flat, uncut shell doesn't show much
+    // by itself -- the actual point of the void is cutting through it,
+    // which lives in Advanced, and seeing where it sits in context, which
+    // lives behind the Display accordion. Both were one extra click away
+    // from turning Negative space on at all. This fires once, right here
+    // at the off->on transition (not from refreshViewToggles(), which
+    // runs on lots of other state changes) so it never fights a later
+    // manual collapse/tab-switch while Negative space stays on.
+    setUiMode('advanced');
+    document.getElementById('displayAccordion').open = true;
+  }
   refreshViewToggles();
 });
 document.getElementById('computeBtn').addEventListener('click', () => { computeNegativeSpace(); });
@@ -6221,7 +6325,20 @@ const AXIS_COLORS = {
 };
 function makeHandle(axis){
   const geom = new THREE.ConeGeometry(6, 22, 16);
-  const mat = new THREE.MeshStandardMaterial({ color: AXIS_COLORS[axis].base, metalness: 0.1, roughness: 0.6, depthTest: false });
+  // v3.4.98: Joe -- "can we get the shape handles to pop out more they
+  // appear a bit to transparent and are hard to see". They were never
+  // actually transparent (no `transparent`/`opacity` set, both default
+  // to fully opaque) -- the real cause is MeshStandardMaterial being a
+  // LIT material: its rendered brightness depends on the angle each face
+  // happens to catch the scene's hemisphere/directional lights at, so a
+  // handle facing away from the light reads dim/washed-out against a
+  // busy, already-translucent scene (negative space shell, poché) even
+  // though its own opacity was always 1. Switched to MeshBasicMaterial
+  // (unlit) -- renders the handle's pure, fully-saturated axis color
+  // every time, regardless of lighting angle, same reasoning most 3D
+  // editors use for gizmo handles that need to stay legible against
+  // anything behind them.
+  const mat = new THREE.MeshBasicMaterial({ color: AXIS_COLORS[axis].base, depthTest: false });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.renderOrder = 20; // draw on top of everything (negativeMesh is 10, poché/cut-lines are 1-3.1) so handles stay grabbable even when visually behind the mass
   mesh.userData.axis = axis;

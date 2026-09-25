@@ -1517,6 +1517,36 @@ same way for both cameras.
 
 ## Open / not yet started
 
+- **Large poché caps read as overwhelming, resolved v3.4.99** — Z's own
+  cap (Height Cut) is unconditionally the full site rectangle whenever
+  shown (its restrictPlanes dropped the other two axes in v3.4.88), so
+  the fill covered the entire view at any Height Cut. `capQuadBounds()`
+  now computes each cap's real rectangle + a 0-1 coverage ratio directly
+  from existing state (every cap constraint is a single axis-aligned
+  half-plane, so no polygon-clipping needed); `refreshCapFillCoverage()`
+  switches from a filled quad to a thin outline once ratio exceeds 0.5,
+  live as thresholds change. Scoped to negative space's own poché for
+  now — buildings' charcoal cap uses a different technique and wasn't
+  touched.
+
+- **Cutaway handles read as faint/transparent, resolved v3.4.98** — never
+  actually transparent (opacity always 1), but `MeshStandardMaterial` is
+  lit, so its rendered brightness varies with the angle each face catches
+  the scene's lights at — a handle facing away from the light reads dim
+  against a busy, already-translucent scene. Switched to unlit
+  `MeshBasicMaterial`: renders the handle's pure, saturated axis color
+  every time regardless of lighting. `depthTest:false` and the colors
+  themselves unchanged; `setHandleHighlight()` needed no changes
+  (`MeshBasicMaterial` has the same `.color` property).
+
+- **Negative space on now exposes Advanced + Display, v3.4.97** — a flat,
+  uncut void shell didn't show much on its own; turning Negative space
+  on (either the toggle or the "See the void" onboarding card, both
+  funnel through `viewNegative`'s click handler) now also calls
+  `setUiMode('advanced')` and opens the Display `<details>` accordion
+  (gave it an id, `displayAccordion`) on the off→true transition only —
+  never re-fights a later manual tab-switch/collapse.
+
 - **Zoomed-out clipping, resolved v3.4.95, formula corrected v3.4.96** —
   `camera.far`/`controls.maxDistance` for the site-scale (non-Manhattan-
   context) view were fixed constants (`ORIGINAL_CAMERA_FAR = 4000`,

@@ -568,8 +568,8 @@ check(
   && (() => { const m = html.match(/<div class="panel" id="navPanel">([\s\S]*?)<\/div>\s*\n\s*<div id="planBoxOverlay"/); return m && !/id="navHome"/.test(m[1]) && !/id="drawBoxBtn"/.test(m[1]); })()
 );
 check(
-  'Display and Export sections are collapsed <details> accordions; Units stayed outside any accordion',
-  (html.match(/<details class="accordion">/g) || []).length === 2
+  'Display and Export sections are collapsed <details> accordions; Units stayed outside any accordion. v3.4.97: Display gained an id (displayAccordion) to target from viewNegative\'s click handler -- still a details.accordion either way',
+  (html.match(/<details class="accordion"[^>]*>/g) || []).length === 2
 );
 
 /* ===================================================================
@@ -589,8 +589,8 @@ check(
   && /localStorage\.getItem\('ns_exploredOnce'\)/.test(html)
 );
 check(
-  'dismissExploreHint() is actually wired to all three real "figured it out" triggers -- Negative space on, a real N/S/E/W view, not just defined and never called',
-  /if \(showNegative\) dismissExploreHint\(\); \/\/ v3\.4\.35/.test(html)
+  'dismissExploreHint() is actually wired to all three real "figured it out" triggers -- Negative space on, a real N/S/E/W view, not just defined and never called. v3.4.97: the Negative-space-on trigger now sits inside a multi-line if(showNegative) block (which also does the Advanced/Display exposure), not the original one-liner, but still calls dismissExploreHint() unconditionally on that branch',
+  /if \(showNegative\)\{\s*\n\s*dismissExploreHint\(\); \/\/ v3\.4\.35/.test(html)
   && /dismissExploreHint\(\); \/\/ v3\.4\.35: picking a real elevation/.test(html)
 );
 check(
@@ -1289,7 +1289,7 @@ check(
 );
 check(
   'Display and Export accordions are untouched -- still directly inside #exploreExtras, not pulled into Advanced along with Units (unlike Units, both apply regardless of which tab is open)',
-  /<details class="accordion">\s*<summary>Display<\/summary>[\s\S]{0,50}<div class="accordion-body">/.test(html) &&
+  /<details class="accordion" id="displayAccordion">\s*<summary>Display<\/summary>[\s\S]{0,50}<div class="accordion-body">/.test(html) &&
   /<\/details>\s*<\/div>\s*<div id="sectionRow"/.test(html)
 );
 
@@ -1877,6 +1877,85 @@ check(
   && /siteAwareMaxDistance = Math\.max\(ORIGINAL_MAX_DISTANCE, siteDiagonal \* 1\.2\);/.test(html)
   && /siteAwareCameraFar = siteAwareMaxDistance \+ siteDiagonal \+ 500;/.test(html)
   && /if \(!showBoroughs\)\{\s*camera\.far = siteAwareCameraFar;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.97 -- turning Negative space on also exposes Advanced (the
+   cutaway controls) and opens the Display accordion (Manhattan
+   context/Major streets) -- a flat, uncut shell doesn't show much by
+   itself, and both were one extra click away from turning the void on
+   at all
+   =================================================================== */
+sectionHeader("v3.4.97 -- turning Negative space on also exposes Advanced and opens the Display accordion");
+
+check(
+  'the Display <details> accordion has an id (displayAccordion) to target -- previously anonymous, only reachable by position',
+  /<details class="accordion" id="displayAccordion">\s*<summary>Display<\/summary>/.test(html)
+);
+check(
+  'viewNegative\'s click handler calls setUiMode(\'advanced\') and opens displayAccordion only on the off->true transition (inside the showNegative-true branch), not from refreshViewToggles() or any other function that runs on unrelated state changes -- so it never fights a later manual tab-switch/collapse while Negative space stays on',
+  (() => {
+    const start = html.indexOf("document.getElementById('viewNegative').addEventListener('click'");
+    if (start === -1) return false;
+    const end = html.indexOf('\n});', start) + 4;
+    const body = html.slice(start, end);
+    return /if \(showNegative\)\{/.test(body)
+      && /setUiMode\('advanced'\);/.test(body)
+      && /document\.getElementById\('displayAccordion'\)\.open = true;/.test(body)
+      && /\n  refreshViewToggles\(\);\n\}\);/.test(body);
+  })()
+);
+check(
+  'choiceVoid ("See the void" onboarding card) still just clicks the real viewNegative button rather than duplicating any of this logic -- one source of truth, so the v3.4.97 behavior applies to both entry points automatically',
+  /document\.getElementById\('choiceVoid'\)\.addEventListener\('click', \(\) => \{\s*\n\s*dismissExploreHint\(\);\s*\n\s*document\.getElementById\('viewNegative'\)\.click\(\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.98 -- cutaway handles switched from a lit MeshStandardMaterial to
+   an unlit MeshBasicMaterial, so they render their pure axis color
+   regardless of scene lighting angle instead of reading dim/washed-out
+   against a busy, already-translucent scene
+   =================================================================== */
+sectionHeader("v3.4.98 -- cutaway handles use an unlit MeshBasicMaterial so they read as a flat, saturated color instead of dimming with scene lighting");
+
+check(
+  'makeHandle() builds each handle cone with MeshBasicMaterial (unlit), not MeshStandardMaterial (lit) -- depthTest:false and the axis color are unchanged, only the lighting dependency is removed',
+  /function makeHandle\(axis\)\{[\s\S]{0,1200}const mat = new THREE\.MeshBasicMaterial\(\{ color: AXIS_COLORS\[axis\]\.base, depthTest: false \}\);/.test(html)
+  && !/const mat = new THREE\.MeshStandardMaterial\(\{ color: AXIS_COLORS\[axis\]\.base/.test(html)
+);
+check(
+  'setHandleHighlight() still works unchanged against the new material -- MeshBasicMaterial has the same .color property MeshStandardMaterial did, so the hover-color swap needed no changes',
+  /function setHandleHighlight\(mesh, hovered\)\{ const c = AXIS_COLORS\[mesh\.userData\.axis\]; mesh\.material\.color\.set\(hovered \? c\.hover : c\.base\); \}/.test(html)
+);
+
+/* ===================================================================
+   v3.4.99 -- negative space's poché caps switch from a filled wash to a
+   thin outline once their real exposed area covers more than half the
+   site, instead of always filling regardless of size
+   =================================================================== */
+sectionHeader("v3.4.99 -- large poché caps show as an outline instead of an overwhelming fill");
+
+check(
+  'capQuadBounds(axis) computes each cap\'s real rectangle directly from state (siteMinX/MaxX/MinY/MaxY, xThreshold/yThreshold, flipXCutaway/flipYCutaway, sectionPlane.constant, siteCapHeight) -- z is unconditionally the full site (ratio 1, matching zQuad\'s own v3.4.88 restrictPlanes, which dropped the other two axes entirely), x/y multiply the OTHER axis\'s coverage by the height range still exposed above the cut',
+  /function capQuadBounds\(axis\)\{/.test(html)
+  && /if \(axis === 'z'\)\{[\s\S]{0,300}ratio: 1,/.test(html)
+  && /const yCoverage = Math\.min\(1, Math\.max\(0, \(yHi - yLo\) \/ ySpan\)\);/.test(html)
+  && /const xCoverage = Math\.min\(1, Math\.max\(0, \(xHi - xLo\) \/ xSpan\)\);/.test(html)
+);
+check(
+  'each of negative space\'s 3 cap groups (x/y/z) gets its own outline LineLoop (makeCapOutline()), added as a sibling of the existing fill quad and tracked as group.userData.outline -- default color goes through pocheMaterials for theme-sync, same opt-out convention makeCapQuad()\'s own color param already used',
+  /function makeCapOutline\(color\)\{/.test(html)
+  && /if \(!color\) pocheMaterials\.push\(mat\);/.test(html)
+  && /xGroup\.userData\.outline = xOutline;/.test(html)
+  && /yGroup\.userData\.outline = yOutline;/.test(html)
+  && /zGroup\.userData\.outline = zOutline;/.test(html)
+);
+check(
+  'refreshCapFillCoverage() sets the quad/outline geometry and visibility split directly on the two children (quad.visible/outline.visible), leaving each group\'s own .visible (set by refreshCapFillVisibility()) untouched -- the two toggles are independent and compose correctly (three.js requires every ancestor visible to render), and it\'s called from both buildCapFillGroups() (a fresh compute) and syncCapFillPlanes() (every threshold change, so the split stays live as sliders move)',
+  /function refreshCapFillCoverage\(groups, colorOverride\)\{/.test(html)
+  && /const large = ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;\s*\n\s*quad\.visible = !large;\s*\n\s*outline\.visible = large;/.test(html)
+  && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: set the correct fill-vs-outline split for this district's real \(freshly rebuilt\) site bounds before the first paint/.test(html)
+  && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: re-check fill-vs-outline for negative space's own caps every time a threshold that could change their real exposed area moves/.test(html)
 );
 
 /* ===================================================================
