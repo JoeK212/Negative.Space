@@ -365,21 +365,23 @@ if (neighborhoodsMatch){
    rendered through the nav panel's own bottom edge. Cheap structural
    check: the two elements' CSS bottom offsets must differ by a real
    margin, not just be non-identical.
+   v3.4.92: footVersion moved out of the bottom-right corner entirely
+   (into header.top, alongside the tagline) -- the original overlap this
+   guarded against can no longer happen, so this now confirms the new
+   state directly instead: #footVersion has no bottom-fixed position
+   left at all, and is genuinely inside the header.
    =================================================================== */
-sectionHeader('v3.1.2 -- nav panel does not overlap the footer credit line');
+sectionHeader('v3.1.2 / v3.4.92 -- footVersion lives in the header now, not anchored near #navPanel\'s bottom-right corner');
 
-const navBottomMatch = html.match(/#navPanel\{[\s\S]*?bottom:calc\((\d+)px/);
-const footBottomMatch = html.match(/#footVersion\{[\s\S]*?bottom:calc\((\d+)px/);
-check('#navPanel bottom offset found', !!navBottomMatch);
-check('#footVersion bottom offset found', !!footBottomMatch);
-if (navBottomMatch && footBottomMatch){
-  const gap = parseInt(navBottomMatch[1], 10) - parseInt(footBottomMatch[1], 10);
-  check(
-    '#navPanel sits at least 24px above #footVersion\'s own offset',
-    gap >= 24,
-    'Gap is only ' + gap + 'px -- the nav panel card (with real height/padding) can visually overlap the footer text again below that.'
-  );
-}
+check(
+  '#footVersion\'s CSS has no bottom/right fixed-position offset left (moved out of the bottom-right corner in v3.4.92) -- just an in-flow style matching the tagline',
+  /#footVersion\{\s*\n\s*font-family:var\(--font-ui\); font-size:10px; letter-spacing:0\.06em;\s*\n\s*color:var\(--ink-soft\); opacity:0\.7; margin:2px 0 0;\s*\n\s*\}/.test(html)
+  && !/#footVersion\{[^}]{0,150}position:fixed/.test(html)
+);
+check(
+  '<p id="footVersion"> sits inside header.top\'s own left-side div, right after the tagline <p> -- not a separate top-level element',
+  /<p class="tagline">Carved from real building volumes · Hudson Yards<\/p>\s*\n\s*<p id="footVersion"><\/p>/.test(html)
+);
 
 /* ===================================================================
    v3.1.3 -- help modal must actually be reachable and closeable, not
@@ -497,7 +499,7 @@ check(
 );
 check(
   'v3.4.37 reversal: the Z (Height Cut) cap-fill quad always uses the plain fallback clippingPlanes now, no isPlanViewActive branch -- Plan\'s poché fill is never box-scoped either',
-  /const zQuadMat = capFillGroups\.z\.userData\.quad\.material;\s*\n\s*zQuadMat\.clippingPlanes = \[xClipPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\];/.test(html)
+  /const zQuadMat = capFillGroups\.z\.userData\.quad\.material;\s*\n\s*zQuadMat\.clippingPlanes = \[\.\.\.SITE_BOUND_PLANES\];/.test(html)
 );
 check(
   'syncSectionSkyUniforms(axis) is called AFTER the second renderer.compile() (post quad clippingPlanes/visibility change), not the first -- v3.4.30: calling it too early meant its uSkyDiscardOn write landed on a uniforms object the second compile then discarded, leaving the master discard switch stuck off (the actual "solid block" bug)',
@@ -523,9 +525,9 @@ check(
   && /activeBtn\.classList\.add\('active'\); activeBtn\.classList\.remove\('secondary'\);/.test(html)
 );
 check(
-  'updateCurrentViewIndicator() is actually called from both setOrthogonalView() and resetToDefaultView() -- covers N/S/E/W/Plan and Home/perspective, the two places the view can change',
+  'updateCurrentViewIndicator() is actually called from both setOrthogonalView() and resetSharedViewState() -- covers N/S/E/W/Plan and Home/perspective/Manhattan-context, the places the view can change (v3.4.90: resetToDefaultView() and zoomToBoroughContext() both call resetSharedViewState() for this now, instead of each calling it separately)',
   /updateCurrentViewIndicator\(direction\); \/\/ v3\.4\.33/.test(html)
-  && /updateCurrentViewIndicator\('home'\); \/\/ v3\.4\.33/.test(html)
+  && /updateCurrentViewIndicator\('home'\);/.test(html)
 );
 
 /* ===================================================================
@@ -727,7 +729,7 @@ sectionHeader('v3.4.44 -- capFillGroups.z visibility gated on sectionModeAxis (s
 
 check(
   'capFillGroups.z.visible requires sectionModeAxis === null -- a horizontal Height-Cut cap plane, viewed edge-on from a locked elevation, is a thin unclipped band across the whole site otherwise (v3.4.56 added a further !activeSectionBox clause -- this check only confirms the sectionModeAxis part is still intact)',
-  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox;/.test(html)
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
 );
 
 /* ===================================================================
@@ -973,7 +975,7 @@ sectionHeader("v3.4.56 -- capFillGroups.z.visible adds !activeSectionBox, same g
 
 check(
   'capFillGroups.z.visible now requires !activeSectionBox in addition to on && sectionModeAxis === null',
-  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox;/.test(html)
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
 );
 check(
   'the unconditional compute-time reset (capFillGroups.z.visible = false, v3.4.44) is untouched -- only the live refreshCapFillVisibility() assignment changed',
@@ -1312,21 +1314,9 @@ check(
 sectionHeader("v3.4.69 -- zoomToBoroughContext() sets controls.enableRotate = true right alongside its existing camera switch");
 
 check(
-  'zoomToBoroughContext() resets controls.enableRotate to true immediately after switching activeCamera back to the perspective camera -- so an N/S/E/W/Plan elevation\'s v3.2.34 rotate lock can\'t silently carry into Manhattan context',
-  // anchored on the function's own opening AND its unique trailing line
-  // (camera.near = BOROUGH_CAMERA_NEAR) rather than just "activeCamera =
-  // camera; controls.object = camera;" alone -- resetToDefaultView() has
-  // that identical pair of lines too, so a looser anchor risks silently
-  // matching the WRONG function's already-correct enableRotate reset.
-  // {0,1000} covers this function's own comment blocks between
-  // activeCamera/controls.object and enableRotate; the final {0,1050}
-  // (widened from {0,50}) covers the v3.4.70 updateCurrentViewIndicator()
-  // addition and its own comment block, now sitting between enableRotate
-  // and camera.near.
-  // {0,1100} widened at v3.4.74 -- that version's boxDrawMode/
-  // cancelPlanBox() guard added another comment block between this
-  // function's opening and activeCamera = camera;.
-  /function zoomToBoroughContext\(\)\{[\s\S]{0,1100}activeCamera = camera;\s*controls\.object = camera;[\s\S]{0,1000}controls\.enableRotate = true;[\s\S]{0,1050}camera\.near = BOROUGH_CAMERA_NEAR;/.test(html)
+  'controls.enableRotate = true lives in resetSharedViewState(), and zoomToBoroughContext() calls it -- so an N/S/E/W/Plan elevation\'s v3.2.34 rotate lock still can\'t silently carry into Manhattan context. v3.4.90: this used to be inline in zoomToBoroughContext() itself; extracted into the function both it and resetToDefaultView() share, see that function\'s own comment',
+  /function resetSharedViewState\(\)\{[\s\S]{0,200}controls\.enableRotate = true;/.test(html)
+  && /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;\s*resetSharedViewState\(\);/.test(html)
 );
 
 /* ===================================================================
@@ -1337,12 +1327,9 @@ check(
 sectionHeader("v3.4.70 -- zoomToBoroughContext() calls updateCurrentViewIndicator('home')");
 
 check(
-  'zoomToBoroughContext() calls updateCurrentViewIndicator(\'home\') -- anchored on its unique trailing BOROUGH_CAMERA_NEAR line (same disambiguation reasoning as the v3.4.69 check above) so this can\'t accidentally match resetToDefaultView()\'s own updateCurrentViewIndicator(\'home\') call',
-  // {0,1700} widened at v3.4.74 -- that version's own new comment block
-  // (the boxDrawMode/cancelPlanBox() guard) landed between this
-  // function's opening and controls.enableRotate, same class of window
-  // breakage as v3.4.70's own note above about the enableRotate check.
-  /function zoomToBoroughContext\(\)\{[\s\S]{0,1700}controls\.enableRotate = true;[\s\S]{0,1050}updateCurrentViewIndicator\('home'\);[\s\S]{0,50}camera\.near = BOROUGH_CAMERA_NEAR;/.test(html)
+  'updateCurrentViewIndicator(\'home\') lives in resetSharedViewState(), and zoomToBoroughContext() calls it -- so entering Manhattan context still syncs the View compass (was stuck on the prior elevation\'s N/S/E/W button/label before v3.4.70). v3.4.90: extracted into the shared function, see resetSharedViewState()\'s own comment',
+  /function resetSharedViewState\(\)\{[\s\S]{0,300}updateCurrentViewIndicator\('home'\);/.test(html)
+  && /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;\s*resetSharedViewState\(\);/.test(html)
 );
 check(
   'zoomToBoroughContext() does NOT call applySectionMode(null) -- fixing the indicator must not revert the box-scoped elevation cutaway clipping v3.2.23 deliberately preserves through Manhattan context',
@@ -1435,8 +1422,9 @@ check(
 sectionHeader("v3.4.73 -- resetToDefaultView() calls cancelPlanBox() when boxDrawMode is true");
 
 check(
-  'resetToDefaultView() calls cancelPlanBox() when boxDrawMode is true, as its own first real statement -- before the camera switch, so nothing box-draw-related survives a Home/reset',
-  /function resetToDefaultView\(\)\{[\s\S]{0,1500}if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;/.test(html)
+  'cancelPlanBox() when boxDrawMode is true lives in resetSharedViewState(), as its own first real statement, and resetToDefaultView() calls that function early (right after v3.4.94\'s own clearActiveSectionBox() call, before applySectionMode()) -- so nothing box-draw-related survives a Home/reset. v3.4.90: extracted into the shared function, see resetSharedViewState()\'s own comment',
+  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);/.test(html)
+  && /function resetToDefaultView\(\)\{[\s\S]{0,2000}clearActiveSectionBox\(\);[\s\S]{0,200}resetSharedViewState\(\);/.test(html)
 );
 
 /* ===================================================================
@@ -1447,8 +1435,8 @@ check(
 sectionHeader("v3.4.74 -- zoomToBoroughContext() and goToDirection() both call cancelPlanBox() when boxDrawMode is true");
 
 check(
-  'zoomToBoroughContext() calls cancelPlanBox() when boxDrawMode is true, before its own camera switch (anchored on its own opening AND the pre-existing v3.0.42 comment right after, so this can\'t drift onto the wrong function)',
-  /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;[\s\S]{0,700}if \(boxDrawMode\) cancelPlanBox\(\);[\s\S]{0,50}\/\/ v3\.0\.42: Manhattan context always uses the perspective camera/.test(html)
+  'zoomToBoroughContext() calls resetSharedViewState() as its first real statement (right after the boroughsGroup guard) -- which is what now calls cancelPlanBox() when boxDrawMode is true, before this function\'s own camera framing. v3.4.90: was inline here, extracted into the function resetToDefaultView() also uses',
+  /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;\s*resetSharedViewState\(\); \/\/ v3\.4\.90/.test(html)
 );
 check(
   'goToDirection() calls cancelPlanBox() when boxDrawMode is true (and pendingPlanBox is not already set -- that case is handled separately by applyPlanBoxDirection() above it) before falling through to setOrthogonalView()',
@@ -1584,14 +1572,20 @@ check(
   && /if \(color\) pocheMaterials\.pop\(\);/.test(html)
 );
 check(
-  'buildBuildingCapFillGroups() builds all 3 axes (z/x/y) via the unchanged createPlaneStencilGroup()/makeCapQuad() helpers against mergedBuildingsGeometry, and is called from computeNegativeSpace() right alongside buildCapFillGroups(cleanedGeo) -- both need siteMinX/Y/capHeight, which only exist post-compute',
+  'buildBuildingCapFillGroups() builds all 3 axes (z/x/y) and is called from computeNegativeSpace() right alongside buildCapFillGroups(cleanedGeo) -- both need siteMinX/Y/capHeight, which only exist post-compute. v3.4.93: all 3 axes now use real per-building geometry (buildBuildingZCapGeometry()/buildBuildingXYCapGeometry()) -- the stencil technique (createPlaneStencilGroup()/makeCapQuad() against mergedBuildingsGeometry) was found to silently fail, unpredictably and without a confirmed root cause, on both Z (some districts) and Y (Chelsea, 100% of its range) after ~200 iterations chasing it',
   /function buildBuildingCapFillGroups\(\)\{/.test(html)
   && /buildCapFillGroups\(cleanedGeo\);[\s\S]{0,800}buildBuildingCapFillGroups\(\);/.test(html)
 );
 check(
-  'syncCapFillPlanes() and refreshCapFillVisibility() both extend to buildingCapFillGroups (position sync and showBuildings-gated visibility) rather than only touching capFillGroups -- otherwise the cutaway sliders would move negative space\'s cap but leave buildings\' cap stranded at its last position',
-  /if \(!buildingCapFillGroups\) return; \/\/ v3\.4\.82[\s\S]{0,300}buildingCapFillGroups\.z\.userData\.quad\.position\.set\(cx, cy, sectionPlane\.constant\);/.test(html)
-  && /const onBuildings = showBuildings && capFillToggleEl\.checked;/.test(html)
+  'refreshCapFillVisibility() extends to buildingCapFillGroups (showBuildings-gated visibility for all 3 axes) rather than only touching capFillGroups -- otherwise the cutaway sliders would move negative space\'s cap but leave buildings\' cap stranded',
+  /const onBuildings = showBuildings && capFillToggleEl\.checked;/.test(html)
+  && /buildingCapFillGroups\.x\.visible = onBuildings/.test(html)
+  && /buildingCapFillGroups\.y\.visible = onBuildings/.test(html)
+);
+check(
+  'syncCapFillPlanes() no longer has any buildingCapFillGroups position-sync lines for X/Y (v3.4.93: rebuildBuildingXYCap() bakes real world coordinates directly into its geometry instead, same pattern v3.4.91 already established for Z)',
+  !/buildingCapFillGroups\.x\.userData\.quad\.position\.set/.test(html)
+  && !/buildingCapFillGroups\.y\.userData\.quad\.position\.set/.test(html)
 );
 check(
   'refreshCutawayRowActiveState()\'s capInert is now axis===null && !!activeSectionBox (only the genuine nothing-can-show case), not the old bare axis===null which disabled the Section-fill checkbox in exactly the Perspective+Height-Cut scenario this whole feature is for',
@@ -1612,8 +1606,8 @@ check(
   && /baseMat\.transparent = !opaqueWritePass;/.test(html)
 );
 check(
-  'all 3 of buildBuildingCapFillGroups()\'s createPlaneStencilGroup() calls pass true for opaqueWritePass, and all 3 of buildCapFillGroups()\'s (negative space) calls still pass only 3 arguments',
-  (html.match(/createPlaneStencilGroup\(mergedBuildingsGeometry, \w+, \d, true\)/g) || []).length === 3
+  'buildBuildingCapFillGroups() no longer calls createPlaneStencilGroup() for X/Y at all (v3.4.93 replaced the technique -- see that version\'s own note), and all 3 of buildCapFillGroups()\'s (negative space) calls still pass only 3 arguments, unaffected',
+  (html.match(/createPlaneStencilGroup\(mergedBuildingsGeometry, \w+, \d, true\)/g) || []) .length === 0
   && (html.match(/createPlaneStencilGroup\(geometry, \w+, \d\)/g) || []).length === 3
 );
 
@@ -1630,11 +1624,11 @@ check(
   && /opacity: opacity != null \? opacity : 0\.4,/.test(html)
 );
 check(
-  'all 3 of buildBuildingCapFillGroups()\'s makeCapQuad() calls pass 0.85 for opacity, and negative space\'s 3 makeCapQuad() calls still pass no opacity argument at all',
-  (html.match(/makeCapQuad\(quadSize, \[[^\]]+\], \d\.1, null, BUILDING_POCHE_COLOR, 0\.85\)/g) || []).length === 3
+  'buildBuildingCapFillGroups() no longer calls makeCapQuad() for X/Y at all (v3.4.93 replaced the technique), and negative space\'s 3 makeCapQuad() calls are unaffected',
+  (html.match(/makeCapQuad\(quadSize, \[[^\]]+\], \d\.1, null, BUILDING_POCHE_COLOR, 0\.85\)/g) || []).length === 0
   && /makeCapQuad\(quadSize, \[sectionPlaneNeg, yClipPlaneNeg, localCeilingPlane, \.\.\.SITE_BOUND_PLANES\], 1\.1, 'y'\);/.test(html)
   && /makeCapQuad\(quadSize, \[sectionPlaneNeg, xClipPlaneNeg, localCeilingPlane, \.\.\.SITE_BOUND_PLANES\], 2\.1, 'x'\);/.test(html)
-  && /makeCapQuad\(quadSize, \[xClipPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\], 3\.1\);/.test(html)
+  && /makeCapQuad\(quadSize, \[\.\.\.SITE_BOUND_PLANES\], 3\.1\);/.test(html)
 );
 
 /* ===================================================================
@@ -1690,6 +1684,199 @@ check(
   '#planBoxOverlay\'s CSS background matches planBoxFillMesh\'s material exactly (255,107,87 = 0xff6b57, both at 0.35) -- the actively-drawing state and the restored/committed state read as the same indicator',
   /background:rgba\(255,107,87,0\.35\); z-index:14;/.test(html)
   && /color: 0xff6b57, depthTest: false, transparent: true, opacity: 0\.35/.test(html)
+);
+
+/* ===================================================================
+   v3.4.88 -- Z-cap poché fix: dropped the mismatched xClipPlaneNeg/
+   yClipPlaneNeg pair from restrictPlanes (both layers, both construction
+   sites, plus the dynamic resync), and gated Z-cap visibility on
+   sectionPlane.constant > 0 (both layers) so it doesn't show at Height
+   Cut's own neutral/reset value
+   =================================================================== */
+sectionHeader("v3.4.88 -- Z-cap restrictPlanes no longer include the mismatched octant pair; Z-cap visibility requires sectionPlane.constant > 0");
+
+check(
+  'negative space\'s Z quad construction and its dynamic resync both pass SITE_BOUND_PLANES alone (no mismatched xClipPlaneNeg/yClipPlaneNeg pair) -- buildings\' own Z cap no longer uses makeCapQuad()/restrictPlanes at all as of v3.4.91, replaced with real footprint geometry, so this check now covers only negative space\'s 2 remaining sites',
+  (html.match(/makeCapQuad\(quadSize, \[\.\.\.SITE_BOUND_PLANES\]/g) || []).length === 1
+  && /zQuadMat\.clippingPlanes = \[\.\.\.SITE_BOUND_PLANES\];/.test(html)
+);
+check(
+  'capFillGroups.z.visible requires sectionPlane.constant > 0 in addition to the existing view-mode/box guards -- Height Cut sitting at its own neutral value (0) no longer shows the cap',
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+);
+check(
+  'buildingCapFillGroups.z.visible has the identical sectionPlane.constant > 0 guard as capFillGroups.z -- both layers needed the same fix, not just the one Joe happened to screenshot',
+  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.89 -- setHeightCut() now calls refreshCapFillVisibility(), so the
+   Z-cap's visibility (dependent on sectionPlane.constant since v3.4.88)
+   actually updates when Height Cut changes, not just on the next
+   unrelated camera-orbit or checkbox event
+   =================================================================== */
+sectionHeader("v3.4.89 -- setHeightCut() calls refreshCapFillVisibility()");
+
+check(
+  'setHeightCut() calls refreshCapFillVisibility() after its existing syncCapFillPlanes()/updateCutLinePlanes()/syncHandlePositions() calls -- the Z-cap\'s visibility depends on sectionPlane.constant (v3.4.88), which this function is what actually changes. v3.4.91: also calls rebuildBuildingZCap() right after, since buildings\' Z cap now needs its actual geometry rebuilt on every height change, not just a visibility recheck',
+  /function setHeightCut\(value\)\{[\s\S]{0,1700}refreshCapFillVisibility\(\);\s*\n\s*rebuildBuildingZCap\(\); \/\/ v3\.4\.91[^\n]*\n\}/.test(html)
+);
+
+/* ===================================================================
+   v3.4.90 -- resetSharedViewState() extracted: box-draw cleanup, camera
+   switch, rotate unlock, light reset, indicator update, shared between
+   resetToDefaultView() (Home) and zoomToBoroughContext() (Manhattan
+   context) instead of each hand-duplicating it. Fixes a 5th, live
+   instance of the same "Manhattan context forgot to reset X" pattern as
+   v3.4.69/70/73/74: entering Manhattan context from a locked elevation
+   left the lighting stuck on orthoLight, confirmed live (visibly flat
+   and washed out vs. a normal borough view)
+   =================================================================== */
+sectionHeader("v3.4.90 -- resetSharedViewState() extracted; resetToDefaultView() and zoomToBoroughContext() both call it, layering their own camera framing on top");
+
+check(
+  'resetSharedViewState() exists and contains all 5 pieces both callers need: box-draw cleanup, camera switch, rotate unlock, light reset (the actual v3.4.90 fix -- this line didn\'t exist in zoomToBoroughContext() before), and indicator update',
+  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;\s*controls\.object = camera;\s*controls\.enableRotate = true;\s*sun\.visible = true;\s*orthoLight\.visible = false;\s*updateCurrentViewIndicator\('home'\);\s*\}/.test(html)
+);
+check(
+  'resetToDefaultView() calls resetSharedViewState() (after v3.4.94\'s own clearActiveSectionBox() call), then applySectionMode(null) -- v3.4.90 deliberately did NOT move the cutaway-mode reset into the shared function, since zoomToBoroughContext() relies on it NOT running (v3.2.23: a box-scoped elevation\'s cutaway state persists into Manhattan context)',
+  /function resetToDefaultView\(\)\{[\s\S]{0,2000}clearActiveSectionBox\(\);\s*\n\s*resetSharedViewState\(\); \/\/ v3\.4\.90[^\n]*\n\s*applySectionMode\(null\);/.test(html)
+);
+check(
+  'zoomToBoroughContext() calls resetSharedViewState() right after its boroughsGroup guard, and its own body still does not call applySectionMode -- the shared function must not have reintroduced the cutaway-reset call this function has always deliberately avoided',
+  /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;\s*resetSharedViewState\(\); \/\/ v3\.4\.90/.test(html)
+  && (() => { const m = html.match(/function zoomToBoroughContext\(\)\{[\s\S]*?\n\}/); return m && !/applySectionMode\(null\);/.test(m[0]); })()
+);
+
+/* ===================================================================
+   v3.4.91 -- buildings' Z-axis (Height Cut) poché cap replaced with real
+   footprint geometry instead of the stencil technique, after the stencil
+   test was found to silently fail for buildings in some districts
+   (isolated live: a 50-building merge reproduced it, bypassing the
+   stencil check with AlwaysStencilFunc showed the cap fine, switching
+   back to the real NotEqualStencilFunc check showed nothing, in the same
+   frame -- every input checked, from triangle winding to stencil buffer
+   availability to interference from other stencil users, came back
+   correct, and no root cause was found despite that)
+   =================================================================== */
+sectionHeader("v3.4.91 -- buildingFootprints captured per building/part; buildBuildingZCapGeometry() builds the Z cap from real footprint shapes; rebuildBuildingZCap() called from setHeightCut()");
+
+check(
+  'buildingFootprints is declared alongside solidMeshes/solidsByBuilding, reset in the same place, and populated ({shape, minH, maxH}) at both building-loading sites (the parts loop and the flat-fallback branch) right where extrudedMesh() already consumes the same shape',
+  /let buildingFootprints = \[\]; \/\/ v3\.4\.91/.test(html)
+  && /buildingFootprints = \[\]; \/\/ v3\.4\.91/.test(html)
+  && /buildingFootprints\.push\(\{ shape, minH, maxH \}\); \/\/ v3\.4\.91/.test(html)
+  && /buildingFootprints\.push\(\{ shape, minH: 0, maxH: h \}\); \/\/ v3\.4\.91/.test(html)
+);
+check(
+  'buildBuildingZCapGeometry(height) filters buildingFootprints to entries whose own [minH,maxH] range actually contains the given height (a horizontal slice through a vertical extrusion is always that building\'s own footprint, unchanged at every height within its own range), builds a flat ShapeGeometry per qualifying building translated to that height, and merges them -- returning null (not an empty geometry) when nothing qualifies',
+  /function buildBuildingZCapGeometry\(height\)\{/.test(html)
+  && /if \(height >= fp\.minH && height <= fp\.maxH\)\{/.test(html)
+  && /const g = new THREE\.ShapeGeometry\(fp\.shape\);/.test(html)
+  && /g\.translate\(0, 0, height\);/.test(html)
+  && /if \(!geoms\.length\) return null;/.test(html)
+);
+check(
+  'rebuildBuildingZCap() disposes the previous mesh\'s geometry before replacing it (not leaking one per height-slider drag), reuses the same buildingZCapMaterial object across every rebuild rather than creating a new material each time, and is called from both buildBuildingCapFillGroups() (initial build) and setHeightCut() (every height change)',
+  /function rebuildBuildingZCap\(\)\{/.test(html)
+  && /if \(oldMesh\)\{ zGroup\.remove\(oldMesh\); oldMesh\.geometry\.dispose\(\); \}/.test(html)
+  && /const mesh = new THREE\.Mesh\(geo, buildingZCapMaterial\);/.test(html)
+  && /rebuildBuildingZCap\(\); \/\/ v3\.4\.91: builds the actual Z-cap mesh straight from real footprint geometry/.test(html)
+  && /rebuildBuildingZCap\(\); \/\/ v3\.4\.91: the Z cap's actual SHAPE depends on height now/.test(html)
+);
+check(
+  'buildingCapFillGroups.z.visible\'s formula (view-mode/box/height guards) is completely untouched by this rework -- only HOW the cap\'s geometry gets built changed, not when it shows',
+  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+);
+
+/* ===================================================================
+   v3.4.93 -- buildings' X/Y caps replaced the stencil technique with real
+   per-building slice geometry (sliceFootprintAtLine/buildBuildingXYCapGeometry),
+   same reasoning as v3.4.91's Z-axis fix, after the stencil approach was
+   found to fail unpredictably (100% of Y's range in Chelsea) with no
+   confirmed root cause across two separate investigation sessions
+   =================================================================== */
+sectionHeader("v3.4.93 -- buildings' X/Y caps rebuilt from real per-building slice geometry, stencil technique retired for buildings entirely");
+
+check(
+  'sliceFootprintAtLine(shape, axis, value) walks every edge of the real footprint polygon, finds crossings of the slicing line via the standard even-odd scanline rule, sorts them, and pairs them into intervals -- skipping edges parallel to the slicing axis (degenerate, contribute no crossing) and any t outside [0,1]',
+  /function sliceFootprintAtLine\(shape, axis, value\)\{/.test(html)
+  && /if \(a1 === a2\) continue;/.test(html)
+  && /if \(\(a1 - value\) \* \(a2 - value\) > 0\) continue;/.test(html)
+  && /crossings\.sort\(\(p, q\) => p - q\);/.test(html)
+);
+check(
+  'buildBuildingXYCapGeometry(axis, value) builds one real flat rectangle per qualifying interval per building, sized and oriented to match negative space\'s own established xQuad/yQuad rotation convention (rotateY(PI/2) for X, rotateX(-PI/2) for Y), skips degenerate sub-1e-6 intervals, and returns null (not an empty geometry) when nothing qualifies -- same null-means-nothing-to-show convention as buildBuildingZCapGeometry()',
+  /function buildBuildingXYCapGeometry\(axis, value\)\{/.test(html)
+  && /if \(hi - lo < 1e-6\) continue;/.test(html)
+  && /g\.rotateY\(Math\.PI \/ 2\);/.test(html)
+  && /g\.rotateX\(-Math\.PI \/ 2\);/.test(html)
+  && /if \(!geoms\.length\) return null;/.test(html)
+);
+check(
+  'rebuildBuildingXYCap(axis) disposes the previous mesh\'s geometry before replacing it, reuses the shared buildingXCapMaterial/buildingYCapMaterial object rather than creating one per rebuild, and is called from buildBuildingCapFillGroups() (initial build) plus setXCutaway()/setYCutaway() (every threshold change) for the matching axis',
+  /function rebuildBuildingXYCap\(axis\)\{/.test(html)
+  && /if \(oldMesh\)\{ group\.remove\(oldMesh\); oldMesh\.geometry\.dispose\(\); \}/.test(html)
+  && /rebuildBuildingXYCap\('x'\); \/\/ v3\.4\.93: buildings' X cap's actual SHAPE depends on the threshold now/.test(html)
+  && /rebuildBuildingXYCap\('y'\); \/\/ v3\.4\.93: see setXCutaway\(\)'s matching comment above/.test(html)
+);
+check(
+  'buildingXCapMaterial/buildingYCapMaterial each carry the same octant-restriction clippingPlanes the old quads used (sectionPlaneNeg + the OTHER axis\'s negated clip plane + SITE_BOUND_PLANES) -- the technique changed, not which region is allowed to show',
+  /clippingPlanes: \[sectionPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\]/.test(html)
+  && /clippingPlanes: \[sectionPlaneNeg, xClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\]/.test(html)
+);
+check(
+  'buildingCapFillGroups.x/y.visible formulas (view-mode/box/grazing-angle guards) are completely untouched by this rework -- only HOW each cap\'s geometry gets built changed, not when it shows',
+  /buildingCapFillGroups\.x\.visible = onBuildings && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html)
+  && /buildingCapFillGroups\.y\.visible = onBuildings && \(sectionModeAxis === 'y' \|\| yFreePerspective\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.94 -- resetToDefaultView() (Home) now clears activeSectionBox via
+   the already-existing clearActiveSectionBox(), instead of leaving it
+   set after a box-draw and permanently disabling poché/handles
+   =================================================================== */
+sectionHeader("v3.4.94 -- Home clears activeSectionBox instead of leaving poché/handles permanently disabled after a box-draw");
+
+check(
+  'resetToDefaultView() calls clearActiveSectionBox() (not a bare assignment, so the stale Plan-view box outline overlay gets cleared too) before resetSharedViewState()/applySectionMode(null), so a box drawn earlier does not leave Home in a dead-end inert state',
+  /function resetToDefaultView\(\)\{[\s\S]{0,2000}clearActiveSectionBox\(\);[\s\S]{0,200}resetSharedViewState\(\);[\s\S]{0,200}applySectionMode\(null\);/.test(html)
+);
+check(
+  'zoomToBoroughContext() (Manhattan context) still does NOT call clearActiveSectionBox() -- the v3.2.23 intent of preserving an active box there is unaffected by this fix, which only touches resetToDefaultView()',
+  (() => {
+    const start = html.indexOf('function zoomToBoroughContext(){');
+    if (start === -1) return false;
+    const end = html.indexOf('\nfunction ', start + 30); // next top-level function declaration marks the end of this one
+    const body = html.slice(start, end === -1 ? start + 4000 : end);
+    return !/clearActiveSectionBox\(\)/.test(body);
+  })()
+);
+
+check(
+  'refreshCutawayRowActiveState() self-checks capInert instead of trusting every reset-like function to remember activeSectionBox by hand -- fires console.error + a toast the moment the app lands in free Perspective/Home with a stale box (capInert true, isPlanViewActive false), the one combination that is never legitimate. Prevention against a repeat of this exact bug class (v3.4.69/70/73/74 were all "X forgot to reset what Home already resets"), not just a fix for this one instance',
+  /if \(capInert && !isPlanViewActive\)\{\s*console\.error\(/.test(html)
+);
+
+/* ===================================================================
+   v3.4.95 -- site-scale camera far-plane/zoom-out budget computed per
+   district instead of a fixed ORIGINAL_CAMERA_FAR/ORIGINAL_MAX_DISTANCE
+   tuned once against whichever district happened to be tested first
+   =================================================================== */
+sectionHeader("v3.4.95/96 -- camera far plane/max zoom-out distance scale with each district's real size instead of a fixed constant");
+
+check(
+  'siteAwareCameraFar/siteAwareMaxDistance are declared once, default to the ORIGINAL_* constants (correct for the pre-compute state), and are the ones exitBoroughContext() now restores instead of the fixed constants',
+  /let siteAwareCameraFar = ORIGINAL_CAMERA_FAR;/.test(html)
+  && /let siteAwareMaxDistance = ORIGINAL_MAX_DISTANCE;/.test(html)
+  && /function exitBoroughContext\(\)\{[\s\S]{0,300}camera\.far = siteAwareCameraFar;[\s\S]{0,300}controls\.maxDistance = siteAwareMaxDistance;/.test(html)
+);
+check(
+  'computeNegativeSpace() recomputes siteAwareMaxDistance/siteAwareCameraFar from the real site diagonal (dx/dy/dz via Pythagoras, including height) right after siteMinX/MaxX/MinY/MaxY/siteCapHeight are set, and only applies it live when not currently in Manhattan context (which has its own BOROUGH_CAMERA_FAR budget active). v3.4.96: far is maxDistance\'s own worst case (a full siteDiagonal beyond the orbit target, not half -- the target isn\'t guaranteed centered) plus the same ~500m margin v3.0.23 established, not a flat multiple of the diagonal (v3.4.95\'s first version of this formula only covered the one camera angle it was tested from, not the real worst case -- caught live on the v3.4.95 code itself)',
+  /const siteDiagonal = Math\.sqrt\(\(siteMaxX - siteMinX\) \*\* 2 \+ \(siteMaxY - siteMinY\) \*\* 2 \+ siteCapHeight \*\* 2\);/.test(html)
+  && /siteAwareMaxDistance = Math\.max\(ORIGINAL_MAX_DISTANCE, siteDiagonal \* 1\.2\);/.test(html)
+  && /siteAwareCameraFar = siteAwareMaxDistance \+ siteDiagonal \+ 500;/.test(html)
+  && /if \(!showBoroughs\)\{\s*camera\.far = siteAwareCameraFar;/.test(html)
 );
 
 /* ===================================================================

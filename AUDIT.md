@@ -1517,6 +1517,66 @@ same way for both cameras.
 
 ## Open / not yet started
 
+- **Zoomed-out clipping, resolved v3.4.95, formula corrected v3.4.96** —
+  `camera.far`/`controls.maxDistance` for the site-scale (non-Manhattan-
+  context) view were fixed constants (`ORIGINAL_CAMERA_FAR = 4000`,
+  `ORIGINAL_MAX_DISTANCE = 3500`) applied to every district regardless of
+  real size. Chelsea/Clinton/Hudson Yards' real site diagonal (~4191m
+  including height) left almost no safety margin, and real geometry
+  corners ended up well past `far` from the camera at normal zoomed-out
+  angles — live-confirmed at 5335 units, 1335 past the far plane. v3.4.95
+  fixed this with `far = siteDiagonal * 1.5`, `maxDistance = far - 500`,
+  but that only accounted for the one camera angle it was tested from —
+  re-verifying v3.4.95 live (per Joe's "local host live") at a corner-
+  opposite angle found real clipping again (7640 units from camera vs.
+  `far` of 6294.6). v3.4.96 corrected the formula to the real worst case:
+  `controls.maxDistance` bounds distance from the orbit target, but the
+  farthest site point can sit up to another full diagonal beyond that
+  target on the opposite side, so `siteAwareMaxDistance` now scales with
+  the site directly (`Math.max(ORIGINAL_MAX_DISTANCE, siteDiagonal *
+  1.2)`) and `siteAwareCameraFar` is built from ITS worst case
+  (`maxDistance + siteDiagonal + 500`), not a flat multiple of `far`.
+  Re-ran the exact position that clipped under v3.4.95 against the new
+  formula (far=9720.2) — confirmed clean with real margin.
+  `exitBoroughContext()` restores these same recomputed values instead
+  of the fixed constants.
+
+- **Home view after a box-draw left poché/handles permanently disabled,
+  resolved v3.4.94** — `resetToDefaultView()` (the real Home/⌂ button
+  handler) never cleared `activeSectionBox` after drawing a section box
+  and picking a direction, despite an existing v3.2.23 comment claiming
+  it did. So Plan → draw box → pick direction → Home landed in a state
+  every poché/handle visibility formula in the file reads as "nothing
+  can show" (a guard written for mid-draw, not-yet-committed states, not
+  a permanent dead end) — `capFillToggle` disabled, no handles, correct
+  behavior everywhere else (toggling Negative space directly, with no
+  box drawn) untouched. Fixed by calling the already-existing
+  `clearActiveSectionBox()` (same function "Full width" already used)
+  at the start of `resetToDefaultView()`, rather than a bare
+  `activeSectionBox = null` — it also clears any stale Plan-view box
+  outline overlay. `zoomToBoroughContext()` (Manhattan context) still
+  deliberately preserves the box per the original v3.2.23 intent,
+  unaffected since the new call lives in `resetToDefaultView()` itself,
+  not the shared `resetSharedViewState()` both call.
+
+- **Buildings' X/Y cutaway poché, resolved v3.4.93** — the stencil-buffer
+  technique (`createPlaneStencilGroup()`/`makeCapQuad()`, shared with
+  negative space's own poché) was found to fail unpredictably for
+  buildings specifically: 100% reproducible on Y across Chelsea's full
+  range (real content confirmed via `AlwaysStencilFunc` bypass, but the
+  real `NotEqualStencilFunc` test showed almost nothing, at every value
+  tested), while X was inconsistent (worked at some values, not others).
+  No root cause was ever confirmed after two separate live-diagnosis
+  sessions — cross-axis `clearStencil()` interference, scene
+  interference, and a plane-sync bug were each ruled out directly. Fixed
+  by retiring the stencil technique for buildings' X/Y caps entirely,
+  same move already made for Z in v3.4.91: `sliceFootprintAtLine()` +
+  `buildBuildingXYCapGeometry()` compute the real cross-section directly
+  from each building's own footprint polygon (standard even-odd
+  scanline edge-crossing), no GPU state involved. Negative space's own
+  poché (all 3 axes) is untouched — this only ever affected buildings'
+  cap.
+
 - **All 12 Manhattan Community Districts are now shipped** (as of v3.2.20) **and all have been live-verified** in Joe's actual running browser as of a follow-up session with his local dev server up (Districts 1-6 were already live-verified during their original shipping sessions; Districts 7-12 were checked in this follow-up pass, split across two sessions). Every district's real `Compute negative space` run in-browser matched its Node-harness triangle count almost exactly (D7: 161,900 vs 161,894; D9: 94,730 vs 94,740; D10: 137,854 vs 137,854 exact; D11: 100,548 vs 100,546; D12: 139,702 vs 139,682), and District 8/11's multi-part boundaries (Roosevelt Island, Wards/Randalls Island) were confirmed rendering as real separate landmasses in Manhattan-context view. No artifacts, missing geometry, or misplacement found anywhere. This item is now closed.
 - **Districts 1-6's grid-tilt R re-check under the corrected mod-90 method — resolved, closed** (see "Grid-tilt circular mean must fold to mod-90" above): re-ran the real corrected method against Districts 1-6's actual data. Districts 2-6's shipped R values were already correct (within ~0.01-0.015 of independent re-measurement). District 1's R, never recorded at ship time, is now measured at R=0.528. No shipped data changed.
 - **Multi-part district boundaries**: confirmed for District 8 (UES mainland + Roosevelt Island) and District 11 (East Harlem mainland + joined Wards/Randalls Island). Districts 9, 10, and 12 confirmed single-part. All 12 districts now checked — closed.

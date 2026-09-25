@@ -378,7 +378,7 @@
   #controls .accordion[open] summary::after{ content:'\2013'; }
   #controls .accordion-body{ padding:2px 2px 10px; display:flex; flex-direction:column; gap:8px; }
   #stats{
-    right:16px; top:calc(70px + env(safe-area-inset-top));
+    right:16px; top:calc(86px + env(safe-area-inset-top)); /* v3.4.91: was 70px -- header.top grew by one more line (footVersion moved here from the canvas corner), so this needed the same bump or it'd sit under/overlapping the now-taller header */
     padding:10px 14px;
     font-family:var(--font-ui); font-size:11px; color:var(--ink-soft); line-height:1.6;
     max-width:200px;
@@ -483,9 +483,8 @@
   #helpBody a{color:var(--accent);}
 
   #footVersion{
-    position:fixed; z-index:15; right:16px; bottom:calc(10px + env(safe-area-inset-bottom));
     font-family:var(--font-ui); font-size:10px; letter-spacing:0.06em;
-    color:var(--ink-soft); opacity:0.7;
+    color:var(--ink-soft); opacity:0.7; margin:2px 0 0;
   }
 
   #smallScreenGate{
@@ -506,6 +505,7 @@
   <div>
     <h1>Negative Space</h1>
     <p class="tagline">Carved from real building volumes · Hudson Yards</p>
+    <p id="footVersion"></p>
   </div>
   <div style="display:flex; gap:8px;">
     <button class="theme-toggle" id="helpToggle" aria-label="Help">?</button>
@@ -855,10 +855,9 @@
   <p style="font-family:var(--font-ui); font-size:12px; letter-spacing:0.06em;">Joe.K · axisbim.io</p>
 </div>
 
-<div id="footVersion"></div>
 <div class="toast" id="toast"></div>
 
-<div id="boxDrawBanner" style="display:none; position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:16; background:var(--panel-bg, #0e2a45); color:#fff; padding:10px 18px; border-radius:8px; font-family:var(--font-ui); font-size:13px; box-shadow:0 4px 16px rgba(0,0,0,0.35); align-items:center; gap:10px; white-space:nowrap;">
+<div id="boxDrawBanner" style="display:none; position:fixed; top:86px; left:50%; transform:translateX(-50%); z-index:16; background:var(--panel-bg, #0e2a45); color:#fff; padding:10px 18px; border-radius:8px; font-family:var(--font-ui); font-size:13px; box-shadow:0 4px 16px rgba(0,0,0,0.35); align-items:center; gap:10px; white-space:nowrap;">
   Drag a box to draw a section — scroll to zoom, right-drag to pan
   <button class="btn secondary" id="boxDrawBannerCancel" style="padding:4px 10px; font-size:12px;">Cancel</button>
 </div>
@@ -882,7 +881,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.87'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.96'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2193,7 +2192,31 @@ function buildCapFillGroups(geometry){
 
   const zGroup = new THREE.Group();
   zGroup.add(createPlaneStencilGroup(geometry, sectionPlaneStencil, 3));
-  const zQuad = makeCapQuad(quadSize, [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 3.1);
+  // v3.4.88: Joe's screenshot -- an entire quadrant of the site rendering
+  // as a solid dark poché over Buildings in the plain default Plan view,
+  // no box, no locked section, nothing else active. Traced live (raycast
+  // at the exact dark pixel, filtered to actually-visible hits): this
+  // quad, at 0.85 opacity, genuinely rendering there -- not a lighting
+  // artifact, not a different mesh, this exact charcoal cap. Root cause:
+  // xClipPlaneNeg/yClipPlaneNeg (the OTHER two axes' octant-cutaway
+  // planes) were in this quad's own restrictPlanes, combined with
+  // SITE_BOUND_PLANES using this material's default clipIntersection
+  // (false = AND/intersection -- keep only where EVERY plane agrees).
+  // buildingMat/negMat themselves use clipIntersection=true (OR/union) for
+  // their own octant cutaway -- WebGL's single per-material
+  // clipIntersection flag can't express AND for the site-bound planes and
+  // OR for the octant planes at once, and this quad was combining both
+  // under one (the wrong one for the octant pair) flag. The practical
+  // effect: instead of matching buildingMat/negMat's own tiny corner
+  // exclusion, the quad showed across an entire, much larger quadrant --
+  // real material genuinely there, just constrained to a shape that never
+  // matched what the app's own convention actually clips away. Dropped
+  // the mismatched pair, kept the site bounds (the one relationship this
+  // material's own AND semantics were always correct for) -- the residual
+  // gap this leaves (the quad not excluding buildingMat's own tiny octant
+  // sliver) is a real but minor, rarely-visible discrepancy, not the
+  // wrong-quadrant-sized one this was.
+  const zQuad = makeCapQuad(quadSize, [...SITE_BOUND_PLANES], 3.1);
   // PlaneGeometry's default normal is already +Z (see ground-plane note
   // above) -- no rotation needed, just position it at the current cut height.
   zGroup.add(zQuad);
@@ -2232,6 +2255,158 @@ function buildCapFillGroups(geometry){
 // negative space uses 1-3.x) -- keeps each pair's write-then-read-then-
 // clear atomic and sequential in the shared stencil buffer, the same
 // ordering discipline v3.0.34/v3.0.38's own comments establish and rely on.
+// v3.4.91: Joe -- "still seeing bldg shells and no caps" in Chelsea/
+// Hudson Yards specifically, even after the shape+trigger fixes above.
+// Traced live: isolated a 50-building merge, bypassed the stencil test
+// (AlwaysStencilFunc) to confirm the quad/camera/pipeline itself was
+// fine in that exact frame, then switched back to the real stencil test
+// (NotEqualStencilFunc) and got nothing -- confirmed the stencil
+// technique itself was silently producing zero passing pixels for
+// buildings' merged geometry in this district specifically, for a
+// reason not found despite ruling out every input checked (triangle
+// winding on both caps and side walls, stencil buffer availability,
+// autoClearStencil, interference from other stencil users on the shared
+// buffer, duplicate/overlapping geometry).
+//
+// Rather than keep chasing why the stencil trick silently fails here,
+// replaced it for the Z-axis (Height Cut) case with a technique that
+// doesn't depend on a stencil buffer at all: a Z cut's cross-section
+// through a vertical extrusion is always exactly that building's own
+// footprint outline, unchanged at every height within its own range (a
+// horizontal slice through a prism never changes shape along the
+// prism's own axis) -- real geometry the app already builds each
+// building FROM (outerRingShape(), now also captured in
+// buildingFootprints alongside each building's own min/max height,
+// right where extrudedMesh() already consumes the same shape, see the
+// building-loading loop above). No stencil test needed: just union the
+// flat footprint shapes of whichever buildings' own [minH,maxH] range
+// actually contains the current cut height.
+//
+// v3.4.93: X/Y used to keep the stencil technique here, on the theory
+// that a vertical cut's cross-section width genuinely varies by how deep
+// into each building the slice falls (unlike Z's fixed footprint shape),
+// so it "needed" a real per-pixel test. That theory was true but beside
+// the point -- the width DOES vary, but it varies in a way that's cheap
+// to compute directly: slicing a building's own 2D footprint polygon by
+// the line X=value (or Y=value) gives the exact real Y-interval(s) (or
+// X-interval(s)) the cut passes through at that building, via ordinary
+// polygon/line intersection (the standard even-odd scanline rule -- walk
+// every edge, record where it crosses the line, sort the crossings,
+// pair them up). Combined with the building's own [minH,maxH] (already
+// captured in buildingFootprints for the Z case), that's a real
+// rectangle in the correct plane -- no stencil buffer, no GPU state that
+// can silently fail, same reasoning as the Z fix just above.
+//
+// Traced but never root-caused why the stencil approach kept failing
+// here: 100% reproducible on Y across its full range in Chelsea (every
+// value from min to max showed real content under AlwaysStencilFunc but
+// nothing under the real NotEqualStencilFunc test), yet the X axis --
+// structurally identical code, same merged geometry, same render-order
+// convention -- was fine at some values and not others. Ruled out cross-
+// axis clearStencil() interference (the other axis's group is hidden,
+// confirmed via the visibility chain, whenever only one locked elevation
+// is showing), ruled out scene interference (isolated the exact 2
+// write meshes + 1 quad that were actually live), ruled out a plane-sync
+// bug (xClipPlaneStencil/yClipPlaneStencil update symmetrically). Tried
+// reverting just Y's write pass off `opaqueWritePass` (back to the
+// original v3.0.38 transparent:true) -- worked at one test value, not at
+// four others tried right after, so not a real fix either, just as
+// unpredictable as the bug itself. Genuinely unresolved at the GPU-state
+// level. Replacing the technique entirely, rather than continuing to
+// chase an intermittent failure with no reproducible root cause, per
+// Joe's call after ~200 iterations on this poché mechanism alone.
+function sliceFootprintAtLine(shape, axis, value){
+  const pts = shape.getPoints();
+  const n = pts.length;
+  if (n < 3) return [];
+  const crossings = [];
+  for (let i = 0; i < n; i++){
+    const p1 = pts[i], p2 = pts[(i + 1) % n];
+    const a1 = axis === 'x' ? p1.x : p1.y, a2 = axis === 'x' ? p2.x : p2.y;
+    const b1 = axis === 'x' ? p1.y : p1.x, b2 = axis === 'x' ? p2.y : p2.x;
+    if (a1 === a2) continue; // edge runs parallel to the slicing line -- contributes no crossing; the two edges meeting it handle the real crossing
+    if ((a1 - value) * (a2 - value) > 0) continue; // both endpoints on the same side -- no crossing
+    const t = (value - a1) / (a2 - a1);
+    if (t < 0 || t > 1) continue;
+    crossings.push(b1 + t * (b2 - b1));
+  }
+  crossings.sort((p, q) => p - q);
+  const intervals = [];
+  for (let i = 0; i + 1 < crossings.length; i += 2) intervals.push([crossings[i], crossings[i + 1]]);
+  return intervals;
+}
+function buildBuildingXYCapGeometry(axis, value){
+  const geoms = [];
+  for (const fp of buildingFootprints){
+    const intervals = sliceFootprintAtLine(fp.shape, axis, value);
+    for (const [lo, hi] of intervals){
+      if (hi - lo < 1e-6) continue; // a slice landing exactly on a footprint edge/vertex -- genuinely zero width, not worth a degenerate quad
+      const mid = (lo + hi) / 2, midH = (fp.minH + fp.maxH) / 2;
+      let g;
+      if (axis === 'x'){
+        g = new THREE.PlaneGeometry(fp.maxH - fp.minH, hi - lo); // local X -> world Z (after rotateY), local Y -> world Y, matching negative space's own xQuad convention (rotation.y = PI/2)
+        g.rotateY(Math.PI / 2);
+        g.translate(value, mid, midH);
+      } else {
+        g = new THREE.PlaneGeometry(hi - lo, fp.maxH - fp.minH); // local X -> world X, local Y -> world Z (after rotateX), matching yQuad's convention (rotation.x = -PI/2)
+        g.rotateX(-Math.PI / 2);
+        g.translate(mid, value, midH);
+      }
+      geoms.push(g);
+    }
+  }
+  if (!geoms.length) return null;
+  const merged = mergeGeometries(geoms, false);
+  geoms.forEach(g => g.dispose());
+  return merged;
+}
+function rebuildBuildingXYCap(axis){
+  if (!buildingCapFillGroups) return;
+  const group = buildingCapFillGroups[axis];
+  const oldMesh = group.userData.quad;
+  const value = axis === 'x' ? xThreshold : yThreshold;
+  const geo = buildBuildingXYCapGeometry(axis, value);
+  if (oldMesh){ group.remove(oldMesh); oldMesh.geometry.dispose(); }
+  if (!geo){ group.userData.quad = null; return; } // no building crosses this exact plane -- genuinely nothing to show
+  const material = axis === 'x' ? buildingXCapMaterial : buildingYCapMaterial;
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.renderOrder = axis === 'x' ? 4.1 : 5.1;
+  group.add(mesh);
+  group.userData.quad = mesh;
+}
+let buildingXCapMaterial = null, buildingYCapMaterial = null; // created once in buildBuildingCapFillGroups(), reused across every rebuildBuildingXYCap() call -- clippingPlanes hold live references to the shared plane objects syncCapFillPlanes() already keeps current, so they never need touching here
+function buildBuildingZCapGeometry(height){
+  const geoms = [];
+  for (const fp of buildingFootprints){
+    if (height >= fp.minH && height <= fp.maxH){
+      const g = new THREE.ShapeGeometry(fp.shape);
+      g.translate(0, 0, height); // outerRingShape() already builds shapes in real world X/Y -- only Z needs baking in
+      geoms.push(g);
+    }
+  }
+  if (!geoms.length) return null;
+  const merged = mergeGeometries(geoms, false);
+  geoms.forEach(g => g.dispose());
+  return merged;
+}
+// Rebuilds just the Z cap's geometry for the current cut height -- called
+// from setHeightCut() (every drag of the slider) since, unlike the old
+// stencil-masked quad, this mesh's actual SHAPE changes with height, not
+// just its position. Reuses the same mesh/material, only swaps geometry.
+function rebuildBuildingZCap(){
+  if (!buildingCapFillGroups) return;
+  const zGroup = buildingCapFillGroups.z;
+  const oldMesh = zGroup.userData.quad;
+  const geo = buildBuildingZCapGeometry(sectionPlane.constant);
+  if (oldMesh){ zGroup.remove(oldMesh); oldMesh.geometry.dispose(); }
+  if (!geo){ zGroup.userData.quad = null; return; } // no buildings cross this exact height -- genuinely nothing to show, not an error
+  const mesh = new THREE.Mesh(geo, buildingZCapMaterial);
+  mesh.renderOrder = 6.1;
+  zGroup.add(mesh);
+  zGroup.userData.quad = mesh;
+}
+let buildingZCapMaterial = null; // created once in buildBuildingCapFillGroups(), reused across every rebuildBuildingZCap() call
+
 function buildBuildingCapFillGroups(){
   if (buildingCapFillGroups){
     scene.remove(buildingCapFillGroups.z, buildingCapFillGroups.x, buildingCapFillGroups.y);
@@ -2242,30 +2417,33 @@ function buildBuildingCapFillGroups(){
   mergedBuildingsGeometry = mergeGeometries(solidMeshes.map(m => m.geometry), false);
   if (!mergedBuildingsGeometry) return; // defensive -- mergeGeometries can return null on mismatched vertex attributes
 
-  const quadSize = Math.max(siteMaxX - siteMinX, siteMaxY - siteMinY, siteCapHeight) * 3; // same sizing convention as buildCapFillGroups() above
-
+  // v3.4.93: X/Y groups no longer hold a stencil-write subgroup + quad --
+  // just an empty group whose real-geometry mesh gets built by
+  // rebuildBuildingXYCap(), same pattern as Z below. clippingPlanes here
+  // are the same octant-restriction planes the old quads used
+  // (unchanged -- this is a technique swap, not a behavior change).
   const xGroup = new THREE.Group();
-  xGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, xClipPlaneStencil, 4, true));
-  const xQuad = makeCapQuad(quadSize, [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 4.1, null, BUILDING_POCHE_COLOR, 0.85);
-  xQuad.rotation.y = Math.PI / 2;
-  xGroup.add(xQuad);
-  xGroup.userData.quad = xQuad;
+  xGroup.userData.quad = null;
+  if (!buildingXCapMaterial){
+    buildingXCapMaterial = new THREE.MeshStandardMaterial({ color: BUILDING_POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, transparent: true, opacity: 0.85, depthTest: false, clippingPlanes: [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES] });
+  }
 
   const yGroup = new THREE.Group();
-  yGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, yClipPlaneStencil, 5, true));
-  const yQuad = makeCapQuad(quadSize, [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES], 5.1, null, BUILDING_POCHE_COLOR, 0.85);
-  yQuad.rotation.x = -Math.PI / 2;
-  yGroup.add(yQuad);
-  yGroup.userData.quad = yQuad;
+  yGroup.userData.quad = null;
+  if (!buildingYCapMaterial){
+    buildingYCapMaterial = new THREE.MeshStandardMaterial({ color: BUILDING_POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, transparent: true, opacity: 0.85, depthTest: false, clippingPlanes: [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES] });
+  }
 
   const zGroup = new THREE.Group();
-  zGroup.add(createPlaneStencilGroup(mergedBuildingsGeometry, sectionPlaneStencil, 6, true));
-  const zQuad = makeCapQuad(quadSize, [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES], 6.1, null, BUILDING_POCHE_COLOR, 0.85);
-  zGroup.add(zQuad);
-  zGroup.userData.quad = zQuad;
-
+  if (!buildingZCapMaterial){
+    buildingZCapMaterial = new THREE.MeshStandardMaterial({ color: BUILDING_POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, transparent: true, opacity: 0.85, depthTest: false });
+  }
+  zGroup.userData.quad = null; // set by rebuildBuildingZCap() below, once the group is actually in the scene
   scene.add(zGroup, xGroup, yGroup);
   buildingCapFillGroups = { z: zGroup, x: xGroup, y: yGroup };
+  rebuildBuildingZCap(); // v3.4.91: builds the actual Z-cap mesh straight from real footprint geometry -- see its own comment
+  rebuildBuildingXYCap('x'); // v3.4.93: same technique, X axis
+  rebuildBuildingXYCap('y'); // v3.4.93: same technique, Y axis
   syncCapFillPlanes();
   refreshCapFillVisibility();
 }
@@ -2338,10 +2516,12 @@ function syncCapFillPlanes(){
   capFillGroups.z.userData.quad.position.set(cx, cy, sectionPlane.constant);
   capFillGroups.x.userData.quad.position.set(xThreshold, cy, cz);
   capFillGroups.y.userData.quad.position.set(cx, yThreshold, cz);
-  if (!buildingCapFillGroups) return; // v3.4.82: same 3 positions, buildings' own cap quads -- share the exact same clip-plane state as negative space's (one physical cut position, whichever layer is actually showing), so nothing else in this function needed to change
-  buildingCapFillGroups.z.userData.quad.position.set(cx, cy, sectionPlane.constant);
-  buildingCapFillGroups.x.userData.quad.position.set(xThreshold, cy, cz);
-  buildingCapFillGroups.y.userData.quad.position.set(cx, yThreshold, cz);
+  // v3.4.91/93: buildings' Z, X and Y caps no longer have a position to
+  // sync here -- each rebuilds real world-baked geometry directly
+  // (rebuildBuildingZCap() / rebuildBuildingXYCap()), called from
+  // setHeightCut()/setXCutaway()/setYCutaway() whenever the relevant
+  // threshold actually changes, and can be null (no building crosses
+  // this exact plane) rather than always being a positionable quad.
 }
 
 function initScene(){
@@ -2682,6 +2862,7 @@ function extrudedMesh(shape, minH, maxH, material){
 let buildingsGeo = null, partsGeo = null;
 let solidMeshes = []; // flat list, for rendering the Buildings layer
 let solidsByBuilding = new Map(); // building id -> its own solid mesh(es), for the compute step (see computeNegativeSpace)
+let buildingFootprints = []; // v3.4.91: {shape, minH, maxH} per building/part
 
 async function loadData(neighborhoodId){
   // v3.1.0: data now lives in per-neighborhood files under ./data/<id>/,
@@ -2773,6 +2954,7 @@ async function loadData(neighborhoodId){
   solidGroup = new THREE.Group();
   solidMeshes = [];
   solidsByBuilding = new Map();
+  buildingFootprints = []; // v3.4.91: {shape, minH, maxH} per building/part -- real geometry the Z-cap now builds directly from, see buildBuildingZCapGeometry()'s own comment for why
 
   // v3.0.0: each building/part is now built TWICE per footprint -- once as
   // a THREE.ExtrudeGeometry mesh (unchanged, feeds only the "Buildings"
@@ -2798,6 +2980,7 @@ async function loadData(neighborhoodId){
         solidGroup.add(mesh);
         solidMeshes.push(mesh);
         group.push(mesh);
+        buildingFootprints.push({ shape, minH, maxH }); // v3.4.91
         usedParts++;
         try {
           const cs = new CrossSection([poly]);
@@ -2816,6 +2999,7 @@ async function loadData(neighborhoodId){
       solidGroup.add(mesh);
       solidMeshes.push(mesh);
       group.push(mesh);
+      buildingFootprints.push({ shape, minH: 0, maxH: h }); // v3.4.91
       usedFallback++;
       try {
         const cs = new CrossSection([poly]);
@@ -3199,6 +3383,40 @@ async function computeNegativeSpace(){
   refreshViewToggles();
 
   siteMinX = minX - boundaryMargin; siteMaxX = maxX + boundaryMargin; siteMinY = minY - boundaryMargin; siteMaxY = maxY + boundaryMargin; siteCapHeight = capHeight;
+  // v3.4.95: recompute this district's real camera far-plane/zoom-out
+  // budget now that its real size is known -- see siteAwareCameraFar's
+  // own comment (near ORIGINAL_CAMERA_FAR) for why a fixed constant
+  // wasn't safe. Only apply immediately if not currently in Manhattan
+  // context (that view has its own, much larger BOROUGH_CAMERA_FAR
+  // budget active right now, untouched by this); exitBoroughContext()
+  // uses these same recomputed values instead of the fixed ORIGINAL_*
+  // ones when returning to this view either way.
+  //
+  // v3.4.96: the first version of this formula (far = diagonal * 1.5,
+  // maxDistance = far - 500) only accounted for ONE specific camera
+  // angle -- it undercounted the real worst case, which is: the camera
+  // orbits around a target near the site center, so at maxDistance from
+  // that target, the FARTHEST point in the site can be up to another
+  // full siteDiagonal beyond the target on the opposite side. Live-
+  // caught this on the shipped v3.4.95 code itself (not just reasoning
+  // about it) -- pushed the camera out via controls' own dolly to
+  // confirm: at a corner-opposite angle, real geometry sat 7640 units
+  // from the camera while camera.far was only 6294, clipping despite
+  // the "fix". maxDistance now scales with the site instead of assuming
+  // ORIGINAL_MAX_DISTANCE's fixed feel still suits every size, and far
+  // is maxDistance's own worst case (+ a full siteDiagonal, not half --
+  // the target isn't guaranteed to sit exactly at the site's geometric
+  // center) plus the same margin.
+  {
+    const siteDiagonal = Math.sqrt((siteMaxX - siteMinX) ** 2 + (siteMaxY - siteMinY) ** 2 + siteCapHeight ** 2);
+    siteAwareMaxDistance = Math.max(ORIGINAL_MAX_DISTANCE, siteDiagonal * 1.2);
+    siteAwareCameraFar = siteAwareMaxDistance + siteDiagonal + 500; // worst case: camera at siteAwareMaxDistance from target, the farthest real point up to another siteDiagonal beyond the target on the opposite side, plus the same ~500m margin ORIGINAL_MAX_DISTANCE already established
+    if (!showBoroughs){
+      camera.far = siteAwareCameraFar;
+      camera.updateProjectionMatrix();
+      controls.maxDistance = siteAwareMaxDistance;
+    }
+  }
   // v3.2.25: keep the cap-fill quads' site-boundary clip planes (declared
   // above, near sectionPlaneNeg) in sync with the real site footprint --
   // .constant per plane's normal direction: siteBoundMinX keeps x >=
@@ -3882,7 +4100,7 @@ function applySectionMode(axis, isPlanView){
     // section view, exactly like before v3.4.28 ever existed.
     // v3.4.37: always the plain fallback now, same reasoning as negMat above.
     const zQuadMat = capFillGroups.z.userData.quad.material;
-    zQuadMat.clippingPlanes = [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
+    zQuadMat.clippingPlanes = [...SITE_BOUND_PLANES]; // v3.4.88: was [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES] -- must match the quad's own construction-time value (see that comment) or this resync would silently reintroduce the wrong-quadrant bug on every view switch
     zQuadMat.needsUpdate = true;
   } else {
     negMat.clippingPlanes = getCutAxisClipPlanes(axis); // v3.4.13: single one-sided plane by default, or a real two-sided depth slab bounded to the box when one's active -- see the function's own comment
@@ -4203,6 +4421,22 @@ function refreshCutawayRowActiveState(axis){
     const capInert = axis === null && !!activeSectionBox;
     capRow.style.opacity = capInert ? '0.4' : '';
     capRow.querySelectorAll('input').forEach(el => { el.disabled = capInert; });
+    // v3.4.94: self-check, not just a fix. capInert is only EVER
+    // legitimate as a brief mid-workflow state -- right after drawing a
+    // box in Plan, before a direction is picked (isPlanViewActive true).
+    // Genuinely landing here in free Perspective/Home (isPlanViewActive
+    // false) means some reset path left activeSectionBox stale -- exactly
+    // this version's own bug (resetToDefaultView() never clearing it).
+    // Rather than trust every future reset-like function to remember
+    // this by hand (the same class of oversight already caused v3.4.69,
+    // 70, 73, 74 -- each "X forgot to reset what Home already resets"),
+    // this fires loudly the moment it happens again, in ANY function,
+    // known today or added later -- no silent washed-out UI for Joe to
+    // notice and report before it's caught.
+    if (capInert && !isPlanViewActive){
+      console.error('[Negative Space] Stale activeSectionBox in free Perspective/Home -- poché/handles are incorrectly disabled. Some reset path (resetToDefaultView()? a new one?) needs to call clearActiveSectionBox().');
+      toast('Internal state error: cutaway box should have been cleared — see console');
+    }
   }
   let note = document.getElementById('sectionModeNote');
   if (axis !== null){
@@ -4483,30 +4717,73 @@ function fitCameraToBox(box){
 // camera, free rotate, no section mode, fit to whatever real geometry
 // currently exists -- called automatically any time a materially NEW view
 // should open (see call sites), not just from the Home button.
-function resetToDefaultView(){
-  // v3.4.73: Joe -- draw a box in Plan (the "Box drawn -- view it from:"
-  // panel showing, awaiting a direction pick), then press Home, and he's
-  // "completely lost." Root cause: this function switches to the free-
-  // orbit perspective camera and fits to the WHOLE site below, but never
-  // touched anything box-draw-related -- so `planBoxPanel` kept floating
-  // on screen, the top compass's N/S/E/W stayed hidden (v3.4.66 hides
-  // them the moment that panel shows), and the actual 3D view had jumped
-  // to a full-site perspective with no relationship to the box just
-  // drawn or any way to pick a direction from the now-hidden compass.
-  // cancelPlanBox() is exactly the existing cleanup for "the box-draw
-  // workflow is ending without a direction being picked" (already used
-  // by its own Cancel button) -- safe to call unconditionally here since
-  // it's a no-op beyond restoring state when boxDrawMode is already
-  // false, and every function it touches (setCompassDirectionsVisible,
-  // setBoxDrawMode, updatePlanBoxOutline) is itself safe to call from
-  // outside Plan view.
+// v3.4.90: shared by resetToDefaultView() and zoomToBoroughContext() --
+// extracted after 4 historical bugs (v3.4.69/70/73/74), each "Manhattan
+// context separately, incompletely re-implemented what Home already did
+// correctly, missing one piece" -- rotate-lock left stuck, the view
+// compass left stuck, the box-draw panel left stuck, fixed one at a time
+// as each was separately noticed. Investigating Joe's "why do we have
+// two modes, they don't mimic each other" question surfaced a 5th,
+// still-live instance of the exact same pattern: entering Manhattan
+// context from a locked N/S/E/W elevation left the lighting stuck on
+// orthoLight (built to face a flat elevation dead-on) instead of
+// switching back to the perspective-appropriate sun -- confirmed live,
+// visibly flat and washed out compared to a normal borough view, since
+// only resetToDefaultView() ever reset it. Rather than patch this 5th
+// case the same incomplete way the first 4 were, extracted the actual
+// shared baseline both callers need -- any in-progress box draw cleanly
+// cancelled, the perspective camera made active, rotation unlocked
+// (v3.2.34's lock only applies to locked N/S/E/W/Plan views), the
+// perspective-appropriate light restored, the view indicator synced --
+// so the next piece someone adds to "what a clean reset looks like"
+// only needs to be written once. Deliberately NOT here: applySectionMode
+// (Home's own reset of the cutaway mode -- zoomToBoroughContext()
+// deliberately preserves an active box-scoped cutaway, v3.2.23) and any
+// camera positioning (each caller frames differently -- Home fits the
+// whole site, Manhattan context frames off the site with room for
+// borough context around it) -- callers add those themselves, right
+// after calling this.
+function resetSharedViewState(){
   if (boxDrawMode) cancelPlanBox();
   activeCamera = camera;
   controls.object = camera;
-  controls.enableRotate = true; // v3.2.34's rotation lock only applies to N/S/E/W/Plan -- undo it here same as recenterCamera() always has
-  applySectionMode(null);
-  sun.visible = true; // v3.4.24: undo setOrthogonalView()'s light swap -- perspective always uses the original fixed sun
+  controls.enableRotate = true;
+  sun.visible = true;
   orthoLight.visible = false;
+  updateCurrentViewIndicator('home');
+}
+function resetToDefaultView(){
+  // v3.4.94: Joe -- "select negative space > select negative space i get
+  // cut poché with shape handles. select neighborhood > negative space >
+  // draw a floor plan view > go to 3d view no poché and no shape
+  // handles." Root cause: this function is Home's real handler (via
+  // recenterCamera(), below), and a comment already sitting above
+  // resetSharedViewState() described "(Home's own reset of the cutaway
+  // mode -- zoomToBoroughContext() deliberately preserves an active
+  // box-scoped cutaway, v3.2.23)" as if it already happened -- it never
+  // did. activeSectionBox was never cleared anywhere in this function,
+  // only by clearActiveSectionBox() (the "Full width" button, elevation-
+  // view only) and cancelPlanBox() (an in-progress draw). So drawing a
+  // box, picking a direction, then hitting Home left activeSectionBox
+  // genuinely still set while sectionModeAxis went back to null --
+  // exactly the state every poché/handle visibility formula
+  // (buildingCapFillGroups.x/y.visible, capFillGroups' own,
+  // refreshCutawayRowActiveState()'s capInert) reads as "nothing can
+  // show" (their `!activeSectionBox` guard was built for mid-box-draw,
+  // box-not-yet-committed states, not a real dead end). Reusing
+  // clearActiveSectionBox() here rather than a bare assignment, since it
+  // also clears any stale Plan-view box outline overlay
+  // (updatePlanBoxOutline()) -- exactly the cleanup this situation needs,
+  // already written for the "Full width" button. Its own
+  // `if (sectionModeAxis) applySectionMode(sectionModeAxis)` is a no-op
+  // here (sectionModeAxis is whatever axis we're leaving, and the real
+  // switch to null happens via applySectionMode(null) below regardless).
+  // zoomToBoroughContext() is the one place preserving the box is
+  // genuinely wanted (v3.2.23) -- unaffected, since this call lives here,
+  // not in the shared resetSharedViewState().
+  clearActiveSectionBox();
+  resetSharedViewState(); // v3.4.90: box-draw cleanup, camera switch, rotate unlock, light reset, indicator update -- see its own comment; shared with zoomToBoroughContext()
+  applySectionMode(null); // reads the now-cleared activeSectionBox via refreshViewToggles()/refreshCutawayRowActiveState() inside, so poché + handles come back correctly scoped to the full site in the same call, no separate refresh needed
   if (siteCapHeight !== undefined){
     fitCameraToBox(new THREE.Box3(
       new THREE.Vector3(siteMinX, siteMinY, 0),
@@ -4519,7 +4796,6 @@ function resetToDefaultView(){
     controls.target.copy(DEFAULT_CAM_TARGET);
     controls.update();
   }
-  updateCurrentViewIndicator('home'); // v3.4.33
 }
 function recenterCamera(){ resetToDefaultView(); } // Home button -- kept as its own named function since it's referenced directly by the nav button listener below
 // v3.4.33: Joe -- "add a label in the framework or highlight the button
@@ -4628,7 +4904,7 @@ function updateCompass(){
 // around lands in its real, correct position relative to the island --
 // nothing about this layer has its own separate coordinate system to keep
 // in sync.
-const ORIGINAL_CAMERA_FAR = 4000; // matches the PerspectiveCamera(...) call in initScene()
+const ORIGINAL_CAMERA_FAR = 4000; // matches the PerspectiveCamera(...) call in initScene() -- the STARTING budget before any district has been computed; see siteAwareCameraFar below for why this alone isn't safe once a real district is loaded
 const BOROUGH_CAMERA_FAR = 20000; // v3.0.22 -- Manhattan-only extent is ~9km across (was ~35km combined with Queens+Brooklyn); tightened along with it, which also further improves the near:far depth-buffer precision from v3.0.21's fix
 const ORIGINAL_CAMERA_NEAR = 1; // matches the PerspectiveCamera(...) call in initScene()
 // v3.0.21 fix: at BOROUGH_CAMERA_FAR, a near plane of 1 gives a 60000:1
@@ -4639,8 +4915,32 @@ const ORIGINAL_CAMERA_NEAR = 1; // matches the PerspectiveCamera(...) call in in
 // anyway) brings the ratio back down to something the depth buffer can
 // actually resolve.
 const BOROUGH_CAMERA_NEAR = 30;
-const ORIGINAL_MAX_DISTANCE = 3500; // v3.0.23 -- a bit under ORIGINAL_CAMERA_FAR (4000), so normal zoom-out can never push the ground plane's far edge past the far clip plane
+const ORIGINAL_MAX_DISTANCE = 3500; // v3.0.23 -- a bit under ORIGINAL_CAMERA_FAR (4000), so normal zoom-out can never push the ground plane's far edge past the far clip plane. v3.4.95: this margin logic was correct but the 4000 it's under was tuned once, seemingly against a smaller district than every one the app now covers -- see siteAwareCameraFar below
 const BOROUGH_MAX_DISTANCE = 18000; // a bit under BOROUGH_CAMERA_FAR (20000), same margin logic for the city-scale view
+// v3.4.95: Joe -- "when zoomed out the model gets clipped but when zoomed
+// it it will display but i cannot see the full context." Root cause:
+// ORIGINAL_CAMERA_FAR (4000) is a single fixed constant used for every
+// district, but districts vary hugely in real size -- Chelsea/Clinton/
+// Hudson Yards alone is ~2100m x 2500m x 540m tall, a 3300m diagonal
+// that leaves only ~700m of the supposed 500m safety margin
+// ORIGINAL_MAX_DISTANCE was built around, and depending on where the
+// camera actually sits relative to the site (not just the site's own
+// size), real corners of the geometry end up well past 4000 units from
+// the camera and get silently far-plane-clipped -- live-confirmed via
+// window.__NS on Joe's own running session: at a typical zoomed-out
+// angle, the far corner of Chelsea's real geometry sat 5335 units from
+// the camera, 1335 past the 4000 far plane, and previously-invisible
+// geometry (a marker, ground plane detail) reappeared the instant far
+// was raised past that distance. Recomputed per district instead of
+// fixed: siteAwareCameraFar/siteAwareMaxDistance default to the
+// ORIGINAL_* values (correct for the empty, pre-compute state) and get
+// widened in computeNegativeSpace() once the real site diagonal is
+// known, keeping the same ~500m margin logic ORIGINAL_MAX_DISTANCE
+// already established, just against the real number instead of a
+// number tuned for whichever district happened to be tested first.
+let siteAwareCameraFar = ORIGINAL_CAMERA_FAR;
+let siteAwareMaxDistance = ORIGINAL_MAX_DISTANCE;
+
 // v3.0.21 fix: this reused the SITE's own default camera direction
 // (DEFAULT_CAM_POS - DEFAULT_CAM_TARGET), a low ~25 degree elevation
 // that's the right cinematic angle for a 1.2km site with tall buildings --
@@ -5100,45 +5400,11 @@ function refreshBoroughToggle(){
 }
 function zoomToBoroughContext(){
   if (!boroughsGroup) return;
-  // v3.4.74: same class of bug as v3.4.73's Home fix -- Manhattan context
-  // switches to the wide-framed perspective camera below regardless of
-  // what was active before it (deliberately, v3.0.42), but never checked
-  // boxDrawMode, so toggling it on mid-box-draw left the "Box drawn --
-  // view it from:" panel (or the "Drag a box... Cancel" banner, if no
-  // box was drawn yet) floating over an unrelated borough-scale view,
-  // with the top compass's N/S/E/W still hidden if a box panel was
-  // showing. Same fix, same safe existing cleanup.
-  if (boxDrawMode) cancelPlanBox();
+  resetSharedViewState(); // v3.4.90: box-draw cleanup, camera switch, rotate unlock, light reset, indicator update -- see its own comment above resetToDefaultView(). This call is also the fix for the 5th lighting bug that comment describes: previously this function never reset sun/orthoLight at all, so entering from a locked elevation left orthoLight (built to face that elevation dead-on) lighting this wide perspective view instead.
   // v3.0.42: Manhattan context always uses the perspective camera, even if
-  // an N/S/E/W flat elevation was active when toggled on -- this function
-  // repositions `camera` directly below, and without this the renderer
-  // would keep showing whatever orthoCamera was still active, silently not
-  // reflecting the new borough framing until Home was also pressed.
-  activeCamera = camera;
-  controls.object = camera;
-  // v3.4.69: an N/S/E/W/Plan elevation's v3.2.34 rotate lock
-  // (controls.enableRotate = false) otherwise silently carries into this
-  // view too -- Joe: "can't do anything but pan around" once here.
-  // resetToDefaultView() already resets it for the exact same reason
-  // (its own comment: "undo it here same as recenterCamera() always
-  // has") -- exitBoroughContext() routes through that, which is why this
-  // never showed up leaving context, only while staying inside it.
-  controls.enableRotate = true;
-  // v3.4.70: same family of bug as v3.4.69, caught in the same screenshot
-  // -- the View compass's W button and the "West Elevation" corner label
-  // stayed stuck active/showing after switching into Manhattan context,
-  // even though the camera above just switched back to perspective.
-  // updateCurrentViewIndicator() (v3.4.33) is the one function that syncs
-  // both of those; resetToDefaultView() already calls it for the exact
-  // same reason ("undo it here same as recenterCamera() always has," same
-  // comment as the enableRotate fix above) -- this function never did.
-  // Deliberately ONLY the indicator: does not touch sectionModeAxis or
-  // call applySectionMode(null), which would revert the actual cutaway
-  // clipping planes back to the full-site octant view -- v3.2.23's own
-  // comment right below explains why a box-scoped elevation's cutaway
-  // state is meant to persist into Manhattan context, not be silently
-  // reset by entering it.
-  updateCurrentViewIndicator('home');
+  // an N/S/E/W flat elevation was active when toggled on -- resetSharedViewState()
+  // above already switches activeCamera/controls.object to it; the rest of
+  // this function positions and frames that same camera for the borough view.
   camera.near = BOROUGH_CAMERA_NEAR;
   camera.far = BOROUGH_CAMERA_FAR;
   camera.updateProjectionMatrix();
@@ -5212,9 +5478,9 @@ function zoomToBoroughContext(){
 }
 function exitBoroughContext(){
   camera.near = ORIGINAL_CAMERA_NEAR;
-  camera.far = ORIGINAL_CAMERA_FAR;
+  camera.far = siteAwareCameraFar; // v3.4.95: was the fixed ORIGINAL_CAMERA_FAR -- see its own comment
   camera.updateProjectionMatrix();
-  controls.maxDistance = ORIGINAL_MAX_DISTANCE; // v3.0.23 -- restore the tighter zoom-out cap for the site-scale view; must happen before recenterCamera()'s own controls.update()
+  controls.maxDistance = siteAwareMaxDistance; // v3.4.95: was the fixed ORIGINAL_MAX_DISTANCE -- v3.0.23's original margin logic, now against the real per-district number
   recenterCamera();
   if (groundMesh) groundMesh.visible = true;
   refreshViewToggles(); // restores solidGroup/negativeMesh/cut-lines/handles/capFill exactly per the user's actual toggle state, not a guess
@@ -5404,7 +5670,22 @@ function refreshCapFillVisibility(){
   // self-contained and supersedes the old threshold-based Height-Cut-lid
   // preview for this case; hide it whenever a box is active, on (as
   // before) whenever one isn't.
-  capFillGroups.z.visible = on && sectionModeAxis === null && !activeSectionBox;
+  // v3.4.88: Joe's screenshot -- an entire quadrant rendering as solid
+  // dark poché in the plain default Plan view, Height Cut sitting at its
+  // own "reset"/neutral value (0), no box, no locked section. Traced
+  // live: the quad was genuinely rendering, correctly per its OWN
+  // stencil test -- but Height Cut=0 sits exactly at every building's
+  // own ground level, so the stencil test finds "material crosses here"
+  // at essentially every building on the site, not a meaningful cut
+  // location at all. buildingMat/negMat never visibly clip anything at
+  // Height Cut=0 (clipIntersection:true's OR semantics mean the OTHER
+  // two axes' planes rescue nearly every fragment from an inactive
+  // height plane) -- the poché quad had no equivalent "is this axis
+  // actually doing anything" check, so it showed a real cut face at a
+  // cut position that, for every practical purpose, isn't active yet.
+  // Added the same check explicitly: only show once Height Cut has
+  // actually moved off its own neutral floor.
+  capFillGroups.z.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0;
   // v3.2.40: Joe's screenshot -- a large diagonal maroon band dominating a
   // free-perspective octant-cutaway view, annotated "cut / poche??!!??" --
   // confirmed LIVE by isolating each mesh in turn (not guessed): hiding
@@ -5472,7 +5753,7 @@ function refreshCapFillVisibility(){
   // color from POCHE_COLOR, not a bug to guard against here.
   if (buildingCapFillGroups){
     const onBuildings = showBuildings && capFillToggleEl.checked;
-    buildingCapFillGroups.z.visible = onBuildings && sectionModeAxis === null && !activeSectionBox;
+    buildingCapFillGroups.z.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0; // v3.4.88: same "Height Cut actually engaged" guard as capFillGroups.z just above -- see that line's own comment
     buildingCapFillGroups.x.visible = onBuildings && (sectionModeAxis === 'x' || xFreePerspective);
     buildingCapFillGroups.y.visible = onBuildings && (sectionModeAxis === 'y' || yFreePerspective);
   }
@@ -5761,6 +6042,24 @@ function setHeightCut(value){
   syncCapFillPlanes(); // v3.0.37: must run BEFORE updateCutLinePlanes() now -- the new cross-section cut lines read the epsilon-biased stencil planes that this call keeps current, so syncing first ensures they reflect this frame, not the previous one
   updateCutLinePlanes();
   syncHandlePositions();
+  // v3.4.89: Joe -- "building cut height poche... is not showing." Traced
+  // live: the Z-cap's own stencil/quad was correctly built and positioned
+  // (syncCapFillPlanes() above already handled that), but its VISIBLE flag
+  // stayed stuck at whatever it was before this call -- v3.4.88 made
+  // capFillGroups.z/buildingCapFillGroups.z.visible depend on
+  // sectionPlane.constant (only show once Height Cut is genuinely
+  // engaged), but nothing here re-ran that check when sectionPlane.constant
+  // is exactly the value that just changed. Confirmed directly: toggling
+  // the Section-fill checkbox off and back on (which DOES call
+  // refreshCapFillVisibility(), via its own wiring) immediately fixed it
+  // with nothing else touched -- proving the cap was ready and correctly
+  // positioned the whole time, just not told to re-check whether it
+  // should now be visible. Dragging the Height Cut slider is the most
+  // common way this value changes, so this needed its own direct call,
+  // not just a lazy catch-up on the next unrelated camera-orbit or
+  // checkbox event.
+  refreshCapFillVisibility();
+  rebuildBuildingZCap(); // v3.4.91: the Z cap's actual SHAPE depends on height now (real footprint geometry, not a repositioned quad) -- must rebuild on every Height Cut change, not just resync a position
 }
 function setXCutaway(value){
   const slider = document.getElementById('xClipSlider');
@@ -5776,6 +6075,7 @@ function setXCutaway(value){
   // no-op in perspective/octant/N-S views (refreshActiveSectionProfile()
   // returns immediately when sectionModeAxis isn't 'x').
   if (sectionModeAxis === 'x') refreshActiveSectionProfile();
+  rebuildBuildingXYCap('x'); // v3.4.93: buildings' X cap's actual SHAPE depends on the threshold now (real per-building slice geometry, not a repositioned quad) -- must rebuild on every X cutaway change, not just resync a position
 }
 function setYCutaway(value){
   const slider = document.getElementById('yClipSlider');
@@ -5789,6 +6089,7 @@ function setYCutaway(value){
   // v3.3.0: Y is the ACTIVE cut axis in an N/S (sectionModeAxis==='y') view --
   // see setXCutaway()'s matching comment above.
   if (sectionModeAxis === 'y') refreshActiveSectionProfile();
+  rebuildBuildingXYCap('y'); // v3.4.93: see setXCutaway()'s matching comment above
 }
 document.getElementById('sectionSlider').addEventListener('input', (e) => setHeightCut(Number(e.target.value)));
 document.getElementById('xClipSlider').addEventListener('input', (e) => setXCutaway(Number(e.target.value)));
