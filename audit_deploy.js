@@ -626,8 +626,13 @@ check(
   /showPostComputeUI\(\);\s*\n\s*resetCutaway\(\);/.test(html)
 );
 check(
-  'Buildings/Negative-space toggle, Display, and Export all moved inside #exploreExtras alongside Units -- nothing in the full panel is reachable before the one decision resolves',
-  (() => { const m = html.match(/id="exploreExtras"[\s\S]*?<\/details>\s*\n  <\/div>/); return m && /id="viewSolid"/.test(m[0]) && /id="viewBoroughs"/.test(m[0]) && /id="exportStlBtn"/.test(m[0]); })()
+  'Buildings/Negative-space toggle and Display moved inside #exploreExtras alongside Units -- nothing in the full panel is reachable before the one decision resolves. v3.4.101: Export moved further down, out of #exploreExtras into #sectionRow (still gated behind the same #decisionStage resolve either way -- just relocated within the gated area, per Joe\'s call that Export is secondary to the tool\'s actual point)',
+  (() => {
+    const exploreMatch = html.match(/id="exploreExtras"[\s\S]*?<\/details>\s*\n  <\/div>/);
+    const sectionMatch = html.match(/id="sectionRow"[\s\S]*?<\/details>\s*\n  <\/div>\s*\n<\/div>/);
+    return exploreMatch && /id="viewSolid"/.test(exploreMatch[0]) && /id="viewBoroughs"/.test(exploreMatch[0]) && !/id="exportStlBtn"/.test(exploreMatch[0])
+      && sectionMatch && /id="exportStlBtn"/.test(sectionMatch[0]);
+  })()
 );
 check(
   'Step 1 (Neighborhood, Compute) stays OUTSIDE both #decisionStage and #exploreExtras -- always visible, no gating',
@@ -1362,8 +1367,8 @@ check(
   (html.match(/title="Mirror which side of this cut gets carved away, without moving the cut position itself"/g) || []).length === 2
 );
 check(
-  'Reset cutaway\'s title reflects the v3.4.63 box-aware behavior (site center, or the active box\'s own center), not the old always-0 description',
-  /id="resetCutawayBtn" style="margin-top:2px;" title="Resets Height\/X\/Y to the site's center — or, if a box is active, to that box's own center"/.test(html)
+  'resetCutawayBtn\'s title reflects the v3.4.63 box-aware behavior (site center, or the active box\'s own center) plus v3.4.103\'s cross-reference to Full width, not the old always-0 description',
+  /id="resetCutawayBtn" style="margin-top:2px;" title="Moves Height\/X\/Y back to the center — of the whole site, or of your drawn box if one's active\. Doesn't clear the box itself; see Full width for that\."/.test(html)
 );
 check(
   'Manhattan context/Major streets share one info-badge in their row, same pattern as the existing Buildings/Negative-space badge',
@@ -1390,9 +1395,9 @@ check(
   /<h3>Drawing a section<\/h3>\s*<p>The main way to see inside the mold: click <b>Draw section box<\/b>/.test(html)
 );
 check(
-  'the help modal\'s cutaway section is retitled for the Advanced tab and folds in Units (matching its v3.4.67 relocation) and Reset cutaway (v3.4.63\'s box-aware behavior)',
+  'the help modal\'s cutaway section is retitled for the Advanced tab and folds in Units (matching its v3.4.67 relocation) and Recenter cutaway (v3.4.63\'s box-aware behavior, renamed from "Reset cutaway" in v3.4.103)',
   /<h3>Fine-tuning a cut \(Advanced tab\)<\/h3>/.test(html)
-  && /<dt>Reset cutaway<\/dt>\s*<dd>Back to the site's own center — or, if a box is active, that box's own center\.<\/dd>/.test(html)
+  && /<dt>Recenter cutaway<\/dt>\s*<dd>Back to the site's own center — or, if a box is active, that box's own center\./.test(html)
   && /<dt>Units<\/dt>\s*<dd>Metric \(m\) \/ Imperial \(ft\) — only affects these slider labels/.test(html)
 );
 check(
@@ -1956,6 +1961,100 @@ check(
   && /const large = ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;\s*\n\s*quad\.visible = !large;\s*\n\s*outline\.visible = large;/.test(html)
   && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: set the correct fill-vs-outline split for this district's real \(freshly rebuilt\) site bounds before the first paint/.test(html)
   && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: re-check fill-vs-outline for negative space's own caps every time a threshold that could change their real exposed area moves/.test(html)
+);
+
+/* ===================================================================
+   v3.4.100 -- firstRunHint no longer permanently dismissed via
+   localStorage across all future sessions -- only hidden for the
+   current session once Compute succeeds, so every fresh page load shows
+   it again regardless of history
+   =================================================================== */
+sectionHeader("v3.4.100 -- firstRunHint shows on every fresh page load instead of being permanently dismissed once, forever, via localStorage");
+
+check(
+  'ns_computedOnce is completely gone -- no init-time check hiding firstRunHint based on past-session history, and no write setting the flag either',
+  !/ns_computedOnce/.test(html)
+);
+check(
+  'computeNegativeSpace() still hides firstRunHint once a compute succeeds (so it doesn\'t linger once the user has clearly found the button), just without persisting that to localStorage -- a fresh page load always starts with the hint visible again (the HTML itself has no hidden/display:none on firstRunHint by default)',
+  /async function computeNegativeSpace\(\)\{[\s\S]{0,1100}const hintEl = document\.getElementById\('firstRunHint'\);\s*\n\s*if \(hintEl\) hintEl\.style\.display = 'none';/.test(html)
+  && !/<p id="firstRunHint" style="display:\s*none/.test(html)
+);
+
+/* ===================================================================
+   Summary
+   =================================================================== */
+/* ===================================================================
+   v3.4.101 -- Export moved to the bottom of the panel, after Height/X/Y
+   Cutaway and Section fill (poché), instead of sitting right after
+   Display near the top of the gated/post-compute section
+   =================================================================== */
+sectionHeader("v3.4.101 -- Export relocated to the bottom of the panel, below the cutaway controls");
+
+check(
+  'the Export accordion now sits after capFillRow (Section fill / poché, the last row #sectionRow had before), not between Display and the Simple/Advanced tabs -- genuinely the last real content in #controls before the panel closes',
+  (() => {
+    const capFillIdx = html.indexOf('id="capFillRow"');
+    const exportIdx = html.indexOf('<summary>Export</summary>');
+    const displayIdx = html.indexOf('<summary>Display</summary>');
+    return capFillIdx > -1 && exportIdx > -1 && displayIdx > -1 && exportIdx > capFillIdx && exportIdx > displayIdx;
+  })()
+);
+
+/* ===================================================================
+   v3.4.102 -- tooltips and help documentation updated to match recent
+   real behavior changes (v3.4.93-101): buildings' caps are real
+   geometry not stencil, negative space's poché can be an outline not
+   just a fill, Home clears an active box, Negative-space-on exposes
+   Advanced+Display, the first-run hint isn't localStorage-permanent
+   anymore, Export moved to the panel bottom
+   =================================================================== */
+sectionHeader("v3.4.102 -- tooltips/help docs updated for v3.4.93-101's real behavior changes");
+
+check(
+  'both the help modal\'s Section fill dd and capFillRow\'s own inline tooltip no longer claim the fill happens "instead of leaving a hollow outline" as an absolute -- v3.4.99 made negative space\'s own fill switch to an outline once the exposed area is large, so the old wording was directly contradicted by real current behavior',
+  !/instead of leaving a hollow outline/.test(html)
+  && /so it reads as solid material instead of a hollow outline\. Negative space's own fill switches to a thin outline/.test(html)
+);
+check(
+  'EXTENDED.md documents the v3.4.99 fill-vs-outline coverage switch and the v3.4.93 buildings-caps-are-real-geometry change, and no longer claims stencil-buffer issues (render-list ordering, clear timing) as live possibilities for buildings\' own caps specifically',
+  /Fill vs\. outline \(v3\.4\.99\)/.test(extended)
+  && /Buildings' caps are real geometry, not a stencil test \(v3\.4\.93\)/.test(extended)
+  && /For buildings' own caps \(X\/Y\/Z\), this shouldn't recur/.test(extended)
+);
+
+/* ===================================================================
+   v3.4.103 -- first UI/UX audit pass: min/max endpoint labels under each
+   cutaway slider (real gap -- a bare "150m" told you nothing about
+   where that sits in the site), Reset cutaway renamed to Recenter
+   cutaway to stop reading like a synonym for Full width (real
+   redundancy -- both sat in Advanced with a box active and both sounded
+   like "undo")
+   =================================================================== */
+sectionHeader("v3.4.103 -- UI/UX pass: cutaway slider min/max labels, Reset->Recenter cutaway rename");
+
+check(
+  'each of the 3 cutaway sliders has its own min/max label span pair (sectionMinLabel/sectionMaxLabel, xClipMinLabel/xClipMaxLabel, yClipMinLabel/yClipMaxLabel), placed immediately after the slider itself',
+  /<input type="range" id="sectionSlider"[^>]*>\s*\n\s*<div style="display:flex; justify-content:space-between; margin-top:1px;">\s*\n\s*<span id="sectionMinLabel"/.test(html)
+  && /<input type="range" id="xClipSlider"[^>]*>\s*\n\s*<div style="display:flex; justify-content:space-between; margin-top:1px;">\s*\n\s*<span id="xClipMinLabel"/.test(html)
+  && /<input type="range" id="yClipSlider"[^>]*>\s*\n\s*<div style="display:flex; justify-content:space-between; margin-top:1px;">\s*\n\s*<span id="yClipMinLabel"/.test(html)
+);
+check(
+  'refreshUnitLabels() populates all 3 min/max label pairs by reading each slider\'s own min/max attribute directly (already set correctly per district in computeNegativeSpace()) rather than tracking a second copy of the site bounds, and computeNegativeSpace() calls refreshUnitLabels() right after setting those attributes -- not just the unit-toggle click handlers, which was refreshUnitLabels()\'s only call site before',
+  /const rangeLabel = \(sliderId, minEl, maxEl\) => \{/.test(html)
+  && /rangeLabel\('sectionSlider', 'sectionMinLabel', 'sectionMaxLabel'\);/.test(html)
+  && /rangeLabel\('xClipSlider', 'xClipMinLabel', 'xClipMaxLabel'\);/.test(html)
+  && /rangeLabel\('yClipSlider', 'yClipMinLabel', 'yClipMaxLabel'\);/.test(html)
+  && /document\.getElementById\('yClipSlider'\)\.min = minY; document\.getElementById\('yClipSlider'\)\.max = maxY;\s*\n\s*refreshUnitLabels\(\);/.test(html)
+);
+check(
+  'resetCutawayBtn\'s visible label is "Recenter cutaway", not "Reset cutaway" -- renamed since it sat right next to Full width (which clears the box) and both read as a generic "undo" action; id/click handler/internal function name (resetCutaway()) are unchanged, this only touched the visible text and tooltips',
+  />Recenter cutaway<\/button>/.test(html)
+  && !/>Reset cutaway<\/button>/.test(html)
+);
+check(
+  'the help modal\'s dt for this control also reads "Recenter cutaway", matching the real button label, and its dd cross-references Full width the same way the button\'s own title now does',
+  /<dt>Recenter cutaway<\/dt>\s*<dd>Back to the site's own center — or, if a box is active, that box's own center\. Doesn't clear the box itself; that's Full width/.test(html)
 );
 
 /* ===================================================================

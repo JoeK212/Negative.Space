@@ -530,7 +530,7 @@
         <dt>Compute negative space</dt>
         <dd>Runs the boolean subtraction. Needed once per neighborhood before Negative space, drawing a section, or poché become available.</dd>
         <dt>Buildings / Negative space</dt>
-        <dd>Independent toggles, not either/or — turn on Buildings, Negative space, or both together (useful for confirming the carve is accurate).</dd>
+        <dd>Independent toggles, not either/or — turn on Buildings, Negative space, or both together (useful for confirming the carve is accurate). Turning Negative space on also switches to the Advanced tab and opens Display below — a flat void shell doesn't show much on its own; cutting through it (Advanced) and seeing where it sits in context (Display) are the actual point.</dd>
       </dl>
 
       <h3>Drawing a section</h3>
@@ -541,10 +541,10 @@
       <dl>
         <dt>Height / X / Y cutaway</dt>
         <dd>Sliders carve away one octant of the mold, corner by corner, or fine-tune a box-drawn section's slab position. Flip X / Flip Y mirror which side gets carved, without moving the cut itself.</dd>
-        <dt>Reset cutaway</dt>
-        <dd>Back to the site's own center — or, if a box is active, that box's own center.</dd>
+        <dt>Recenter cutaway</dt>
+        <dd>Back to the site's own center — or, if a box is active, that box's own center. Doesn't clear the box itself; that's Full width, next to it once a box is active.</dd>
         <dt>Section fill (poché)</dt>
-        <dd>Shades the newly-exposed cut faces translucent — red for negative space (the void), charcoal for Buildings (cut solid mass) — instead of leaving a hollow outline. Works in a locked N/S/E/W section, and in free Perspective/Plan wherever the current viewing angle isn't too edge-on to the cut face.</dd>
+        <dd>Shades the newly-exposed cut faces translucent — red for negative space (the void), charcoal for Buildings (cut solid mass) — so a cut reads as solid material instead of a hollow outline. Negative space's own fill switches to a thin outline instead, on whichever cut face currently exposes more than about half the site — a full fill at that size reads as an overwhelming wash rather than useful shading, so the outline takes over automatically as the exposed area grows. Works in a locked N/S/E/W section, and in free Perspective/Plan wherever the current viewing angle isn't too edge-on to the cut face.</dd>
         <dt>3D drag handles</dt>
         <dd>Colored handles (blue = Height, orange = X, green = Y) sit at the center of each cut face and can be dragged directly in the viewport instead of using the sliders.</dd>
         <dt>Units</dt>
@@ -639,7 +639,7 @@
     <div class="row" style="align-items:center;">
       <button class="btn active" id="viewSolid">Buildings</button>
       <button class="btn secondary" id="viewNegative">Negative space</button>
-      <span class="info-badge" tabindex="0">?<span class="tip">Independent toggles — turn on Buildings, Negative space, or both together. Not either/or.</span></span>
+      <span class="info-badge" tabindex="0">?<span class="tip">Independent toggles — turn on Buildings, Negative space, or both together. Not either/or. Turning Negative space on also opens Advanced and Display below, since a flat void shell means little without cutting through it and seeing where it sits in context.</span></span>
     </div>
     <p class="label" style="margin-bottom:2px;">View</p>
     <!-- v3.4.38: Joe -- "a little house, P, N, S, E, W makes sense to me
@@ -687,9 +687,13 @@
       </div>
       <button class="btn secondary" id="boxCancelBtn" style="width:100%; font-size:12px;">Cancel</button>
     </div>
-    <!-- v3.4.38: Display and Export moved in here too, same reasoning that
-    led to moving Units out below -- neither means anything before there's
-    a real computed site to show context around or export. -->
+    <!-- v3.4.38: Display moved in here too, same reasoning that led to
+    moving Units out below -- it doesn't mean anything before there's a
+    real computed site to show context around. Export got the same
+    reasoning originally, then moved further down in v3.4.101 (see that
+    version's own comment, at Export's new spot near the bottom of this
+    panel) -- Joe's call that Export is secondary to what this tool is
+    actually for, not something that needed to sit right next to Display. -->
     <details class="accordion" id="displayAccordion">
       <summary>Display</summary>
       <div class="accordion-body">
@@ -698,28 +702,6 @@
           <button class="btn secondary" id="viewStreets">Major streets</button>
           <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays every real named street around the current site, not just avenues.</span></span>
         </div>
-      </div>
-    </details>
-    <details class="accordion">
-      <summary>Export</summary>
-      <div class="accordion-body">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-family:var(--font-ui); font-size:13px; color:var(--ink-soft); white-space:nowrap;">Model scale 1 :</span>
-          <input type="number" id="exportScale" value="500" min="1" step="1" style="width:70px; font-family:var(--font-ui); font-size:13px; padding:6px 8px; border-radius:6px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
-          <span class="info-badge" tabindex="0">?<span class="tip">Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL, converted from real-world meters to millimeters at this scale — 1:500 is a standard architectural-model size. Negative space must be computed first.</span></span>
-        </div>
-        <button class="btn secondary" id="exportStlBtn">Export STL</button>
-        <!-- v3.4.39: Joe -- "is [High detail] useful?" Genuinely marginal
-        for most people most of the time; the one real case is wanting a
-        crisp image (a screenshot, a portfolio shot) rather than anything
-        about the model/geometry itself, which is an EXPORT concern, not a
-        general viewing setting. Moved from the Simple tab (where it sat
-        with no connection to anything else nearby) to here, next to the
-        other actual export option. -->
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls — a real frame-time cost, so it's off by default">
-          <input type="checkbox" id="highDetailToggle">
-          High detail (slower)
-        </label>
       </div>
     </details>
   </div>
@@ -775,6 +757,10 @@
         </div>
       </div>
       <input type="range" id="sectionSlider" min="0" max="400" value="150" style="width:100%;">
+      <div style="display:flex; justify-content:space-between; margin-top:1px;">
+        <span id="sectionMinLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+        <span id="sectionMaxLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+      </div>
     </div>
     <div id="xCutRow" tabindex="0" style="border-left:3px solid transparent; padding-left:6px; margin-left:-9px; outline:none;">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -786,6 +772,10 @@
         </div>
       </div>
       <input type="range" id="xClipSlider" min="0" max="100" value="50" style="width:100%;">
+      <div style="display:flex; justify-content:space-between; margin-top:1px;">
+        <span id="xClipMinLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+        <span id="xClipMaxLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+      </div>
     </div>
     <div id="yCutRow" tabindex="0" style="border-left:3px solid transparent; padding-left:6px; margin-left:-9px; outline:none;">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -797,22 +787,57 @@
         </div>
       </div>
       <input type="range" id="yClipSlider" min="0" max="100" value="50" style="width:100%;">
+      <div style="display:flex; justify-content:space-between; margin-top:1px;">
+        <span id="yClipMinLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+        <span id="yClipMaxLabel" style="font-family:var(--font-ui); font-size:10px; color:var(--ink-soft);"></span>
+      </div>
     </div>
     <p id="cutawayKeyHint" style="font-family:var(--font-ui); font-size:11px; color:var(--ink-soft); margin:0;">Click a row above, or drag a handle, then use ↑↓ (or ←→) to nudge it — Shift for bigger steps</p>
     <label id="showHandlesRow" style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:2px;">
       <input type="checkbox" id="showHandlesToggle" checked>
       Show cutaway handles
     </label>
-    <button class="btn secondary" id="resetCutawayBtn" style="margin-top:2px;" title="Resets Height/X/Y to the site's center — or, if a box is active, to that box's own center">Reset cutaway</button>
+    <button class="btn secondary" id="resetCutawayBtn" style="margin-top:2px;" title="Moves Height/X/Y back to the center — of the whole site, or of your drawn box if one's active. Doesn't clear the box itself; see Full width for that.">Recenter cutaway</button>
     </div>
-    <button class="btn secondary" id="fullWidthBtn" style="margin-top:2px; display:none;" title="Clear the drawn box and go back to the full-width elevation">Full width</button>
+    <button class="btn secondary" id="fullWidthBtn" style="margin-top:2px; display:none;" title="Clears the drawn box and goes back to the full-width elevation. For moving the cut itself without clearing the box, see Recenter cutaway.">Full width</button>
     <div id="capFillRow" style="display:flex; align-items:center; gap:6px; margin-top:2px;">
       <label style="display:flex; align-items:center; gap:6px; font-size:12px;">
         <input type="checkbox" id="capFillToggle" checked>
         Section fill (poché)
       </label>
-      <span class="info-badge" tabindex="0">?<span class="tip">Fills whichever layer's actually cut -- red for negative space (the void), charcoal for Buildings (real cut mass) -- so it reads as solid material instead of a hollow outline. Works in a locked section, and in free Perspective/Plan too as long as the current angle isn't too edge-on to the cut face.</span></span>
+      <span class="info-badge" tabindex="0">?<span class="tip">Fills whichever layer's actually cut -- red for negative space (the void), charcoal for Buildings (real cut mass) -- so it reads as solid material instead of a hollow outline. Negative space's own fill switches to a thin outline once the exposed cut face covers more than about half the site, so it doesn't wash out the whole view. Works in a locked section, and in free Perspective/Plan too as long as the current angle isn't too edge-on to the cut face.</span></span>
     </div>
+    <!-- v3.4.101: Joe -- "Export is a nice feature but its really not the
+    main idea behind this project. Perhaps we move this on the lower
+    potions of the left hand control panel?" Was sitting between Display
+    and the Simple/Advanced tabs (v3.4.38's placement, reasoned about
+    purely as "needs a compute first," not about how central it is to
+    the actual point of the tool) -- moved to the literal bottom of the
+    panel, after everything else #sectionRow contains, still inside the
+    same #exploreExtras/#sectionRow gating (a compute) it already had.
+    Nothing about ITS OWN markup changed, only where it sits in the DOM. -->
+    <details class="accordion">
+      <summary>Export</summary>
+      <div class="accordion-body">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-family:var(--font-ui); font-size:13px; color:var(--ink-soft); white-space:nowrap;">Model scale 1 :</span>
+          <input type="number" id="exportScale" value="500" min="1" step="1" style="width:70px; font-family:var(--font-ui); font-size:13px; padding:6px 8px; border-radius:6px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
+          <span class="info-badge" tabindex="0">?<span class="tip">Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL, converted from real-world meters to millimeters at this scale — 1:500 is a standard architectural-model size. Negative space must be computed first.</span></span>
+        </div>
+        <button class="btn secondary" id="exportStlBtn">Export STL</button>
+        <!-- v3.4.39: Joe -- "is [High detail] useful?" Genuinely marginal
+        for most people most of the time; the one real case is wanting a
+        crisp image (a screenshot, a portfolio shot) rather than anything
+        about the model/geometry itself, which is an EXPORT concern, not a
+        general viewing setting. Moved from the Simple tab (where it sat
+        with no connection to anything else nearby) to here, next to the
+        other actual export option. -->
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls — a real frame-time cost, so it's off by default">
+          <input type="checkbox" id="highDetailToggle">
+          High detail (slower)
+        </label>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -881,7 +906,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.99'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.103'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -975,13 +1000,11 @@ document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 // new dark default now, same three-state pattern (unset / explicit light /
 // explicit dark), just with the unset case flipped.
 if (localStorage.getItem('theme') !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
-// v3.4.22: hint dismissed for good once Compute has ever been clicked, in
-// any past session, not just this page load -- see the localStorage
-// write in computeNegativeSpace() itself.
-if (localStorage.getItem('ns_computedOnce') === '1'){
-  const hintEl = document.getElementById('firstRunHint');
-  if (hintEl) hintEl.style.display = 'none';
-}
+// v3.4.100: the init-time firstRunHint permanent-dismissal check (v3.4.22,
+// localStorage-based, forever once Compute was ever clicked) is gone --
+// see computeNegativeSpace()'s own comment. Nothing to do here now:
+// firstRunHint starts visible in the HTML already, and every fresh page
+// load should show it regardless of past sessions.
 // v3.4.38: the init-time exploreHint/suggested cleanup (v3.4.35) is gone
 // -- neither element exists anymore, both replaced by #decisionStage.
 // No init-time work needed here either way: showPostComputeUI() (below)
@@ -3261,13 +3284,18 @@ function buildCoplanarPatchNormals(positions){
 // edge-sharing check, not just trusting Manifold's own claim.
 async function computeNegativeSpace(){
   if (!solidMeshes.length) { toast('Load data first'); return; }
-  // v3.4.22: once Compute has been clicked at all, Joe's own confusion
-  // about "what do I do first" is resolved -- dismiss the empty-state
-  // hint for good, not just this session. `try/catch` since localStorage
-  // can throw in some contexts (private browsing, storage disabled) --
-  // the hint just staying visible one extra load isn't worth erroring
-  // over.
-  try { localStorage.setItem('ns_computedOnce', '1'); } catch(e){}
+  // v3.4.100: Joe -- "when the page open there are no instructions on
+  // what do - can you check?" Traced to v3.4.22's fix here: clicking
+  // Compute once permanently dismissed firstRunHint via localStorage,
+  // for every future session on that browser, forever -- reasonable for
+  // someone who's used the tool before, but it meant a RETURNING user
+  // (Joe himself, after a day of testing) opens the page to a fully
+  // rendered site with the "what do I do" hint already silently gone,
+  // nothing left to explain the Compute button at all. Now hides only
+  // for the rest of THIS session (still makes sense not to keep nagging
+  // once you've clearly already found it) -- the localStorage flag
+  // itself is gone too, so every fresh page load shows it again
+  // regardless of history.
   const hintEl = document.getElementById('firstRunHint');
   if (hintEl) hintEl.style.display = 'none';
   const btn = document.getElementById('computeBtn');
@@ -3571,6 +3599,7 @@ async function computeNegativeSpace(){
   document.getElementById('sectionSlider').max = capHeight;
   document.getElementById('xClipSlider').min = minX; document.getElementById('xClipSlider').max = maxX;
   document.getElementById('yClipSlider').min = minY; document.getElementById('yClipSlider').max = maxY;
+  refreshUnitLabels(); // v3.4.103: the min/max endpoint labels read straight from these sliders' own attributes, so they need a refresh the moment a fresh compute changes them -- not just on the unit toggle, which is refreshUnitLabels()'s only other call site
   document.getElementById('sectionRow').style.display = 'flex';
   // v3.4.38: was an unconditional 'flex' for exploreExtras here -- now
   // decided by showPostComputeUI(), which picks between #decisionStage
@@ -5907,6 +5936,24 @@ function refreshUnitLabels(){
   document.getElementById('sectionUnitLabel').textContent = unitText;
   document.getElementById('xClipUnitLabel').textContent = unitText;
   document.getElementById('yClipUnitLabel').textContent = unitText;
+  // v3.4.103: Joe's UI/UX pass -- "no sense of where a cutaway value sits
+  // within the site" was a real gap: a bare "150m" told you nothing about
+  // whether that's near the middle or near the edge. Rather than build a
+  // custom filled-track slider (real cross-browser styling work: native
+  // range inputs don't expose a percentage-fill hook without overriding
+  // -webkit/-moz pseudo-elements and re-implementing the thumb), the real
+  // range is already sitting right there on each slider's own min/max
+  // attributes (set per-district in computeNegativeSpace()) -- just
+  // never displayed. Read those directly rather than tracking a second
+  // copy of the site bounds in these labels' own state.
+  const rangeLabel = (sliderId, minEl, maxEl) => {
+    const slider = document.getElementById(sliderId);
+    document.getElementById(minEl).textContent = metersToDisplayNumber(Number(slider.min)) + unitText;
+    document.getElementById(maxEl).textContent = metersToDisplayNumber(Number(slider.max)) + unitText;
+  };
+  rangeLabel('sectionSlider', 'sectionMinLabel', 'sectionMaxLabel');
+  rangeLabel('xClipSlider', 'xClipMinLabel', 'xClipMaxLabel');
+  rangeLabel('yClipSlider', 'yClipMinLabel', 'yClipMaxLabel');
 }
 unitsMetricBtn.addEventListener('click', () => {
   unitsImperial = false;

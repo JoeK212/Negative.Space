@@ -1517,6 +1517,45 @@ same way for both cameras.
 
 ## Open / not yet started
 
+- **First UI/UX audit pass, v3.4.103** — Joe asked for a gaps/redundancies
+  review of the actual shipped panel. Fixed the two lowest-risk items:
+  min/max endpoint labels under each cutaway slider (read directly from
+  each slider's own attributes, no second copy of site bounds), and
+  renamed "Reset cutaway" to "Recenter cutaway" since it sat next to
+  "Full width" and both read as a generic undo. Two bigger findings not
+  yet started: full navigation (View compass, Draw section box, Display)
+  is gated behind a Compute a Buildings-only user doesn't need, since
+  buildings already render pre-compute; no configuration (neighborhood,
+  cutaway, view) lives in the URL, so nothing can be shared or returned
+  to directly.
+
+- **Docs/tooltips updated for v3.4.93-101, v3.4.102** — audited every
+  tooltip, the help modal, and EXTENDED.md against real shipped behavior.
+  Fixed a genuinely stale claim ("fill instead of hollow outline" as an
+  absolute — contradicted by v3.4.99's coverage-based outline switch) and
+  an outdated technical explanation (stencil-buffer troubleshooting notes
+  that no longer apply to buildings' own caps, real geometry since
+  v3.4.93). Documented three previously-undocumented behaviors:
+  Negative-space-on auto-exposing Advanced+Display (v3.4.97), Home
+  clearing an active box (v3.4.94), the first-run hint no longer being
+  localStorage-permanent (v3.4.100).
+
+- **Export relocated to panel bottom, v3.4.101** — Joe's call that Export
+  is secondary to the tool's actual point. Moved from right after Display
+  (v3.4.38's placement) to genuinely last in `#controls`, after Height/X/Y
+  Cutaway, Flip X/Y, Reset cutaway, and Section fill (poché). Still gated
+  behind the same `#decisionStage` resolve, just relocated within the
+  gated area. Pure DOM move — no ids/listeners touched.
+
+- **First-run hint disappeared for returning users, resolved v3.4.100** —
+  v3.4.22 permanently dismissed `firstRunHint` via `localStorage` the
+  first time Compute was ever clicked, for every future session on that
+  browser. Meant a returning user opened the page with no explanation of
+  the Compute button left at all. `ns_computedOnce` removed entirely —
+  `computeNegativeSpace()` still hides the hint for the rest of the
+  current session once it succeeds, but every fresh page load now shows
+  it again regardless of history.
+
 - **Large poché caps read as overwhelming, resolved v3.4.99** — Z's own
   cap (Height Cut) is unconditionally the full site rectangle whenever
   shown (its restrictPlanes dropped the other two axes in v3.4.88), so
