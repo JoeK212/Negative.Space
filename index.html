@@ -572,7 +572,7 @@
       </dl>
 
       <h3>Export</h3>
-      <p>Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL. Set "Model scale 1:N" first (default 1:500) — the app's geometry is real-world meters, converted to millimeters at that scale. Negative space must be computed first.</p>
+      <p>Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL. Set "Model scale 1:N" first (default 1:500) — the app's geometry is real-world meters, converted to millimeters at that scale. Negative space must be computed first. Copy link grabs a URL to this exact district, cutaway position, and layer(s) shown — anyone who opens it lands in the same configuration. Camera view/orientation and a drawn box aren't included yet.</p>
 
       <p style="margin-top:16px; color:var(--ink-soft); font-size:13px;">Full write-up: <a href="README.md">README.md</a> · deeper technical notes: <a href="EXTENDED.md">EXTENDED.md</a></p>
     </div>
@@ -825,6 +825,12 @@
           <span class="info-badge" tabindex="0">?<span class="tip">Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL, converted from real-world meters to millimeters at this scale — 1:500 is a standard architectural-model size. Negative space must be computed first.</span></span>
         </div>
         <button class="btn secondary" id="exportStlBtn">Export STL</button>
+        <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
+        specific configuration." The URL itself already updates live as
+        district/cutaway/layer state changes (syncUrlFromState()); this is
+        just the discoverability piece -- without a visible way to grab
+        it, a user has to already know to look at their own address bar. -->
+        <button class="btn secondary" id="copyLinkBtn" style="margin-top:2px;" title="Copies a link to this exact district, cutaway position, and layer(s) shown. Camera view/orientation and any drawn box aren't included yet.">Copy link</button>
         <!-- v3.4.39: Joe -- "is [High detail] useful?" Genuinely marginal
         for most people most of the time; the one real case is wanting a
         crisp image (a screenshot, a portfolio shot) rather than anything
@@ -906,7 +912,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.103'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.110'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2210,7 +2216,31 @@ function capQuadBounds(axis){
     };
   }
   if (axis === 'x'){
-    const yLo = flipYCutaway ? siteMinY : yThreshold, yHi = flipYCutaway ? yThreshold : siteMaxY;
+    // v3.4.107: Joe's live repro -- draw a box in Buildings-only Plan,
+    // pick E or W, get a near-empty view: a giant red outline spanning
+    // almost the whole screen, with a tiny sliver of real content in one
+    // corner. Root cause: this function has computed yLo/yHi from the
+    // FULL SITE span (siteMinY/siteMaxY) and the raw yThreshold/
+    // flipYCutaway ever since v3.4.99 -- it was written entirely in terms
+    // of the classic single-threshold octant-cutaway model and never
+    // updated when box-scoped sections (v3.4.0, getSectionRanges()/
+    // activeSectionBox) were added. getSectionRanges() itself already
+    // substitutes the box's own yMin/yMax when a box is active -- this
+    // just never got the same treatment, so the coverage ratio badly
+    // overestimated real coverage (comparing the box's tiny cut against
+    // the WHOLE site's Y span), tripping the >0.5 outline threshold, and
+    // the outline itself was drawn using site-wide corners -- a rectangle
+    // many times larger than what the box-fitted camera could frame,
+    // which is what actually produced the "empty" look: only one edge of
+    // that oversized rectangle happened to cross the visible frustum.
+    // Live-verified directly against Joe's real repro (Chelsea/Clinton/
+    // Hudson Yards, a small drawn box, E view) before writing this: the
+    // corrected ratio came out to 0.23 (vs. whatever the old site-wide
+    // math produced to trip the threshold), correctly picking the filled
+    // quad, and the box-scoped outline geometry lines up with the box's
+    // own real corners.
+    const yLo = activeSectionBox ? activeSectionBox.yMin : (flipYCutaway ? siteMinY : yThreshold);
+    const yHi = activeSectionBox ? activeSectionBox.yMax : (flipYCutaway ? yThreshold : siteMaxY);
     const ySpan = (siteMaxY - siteMinY) || 1;
     const yCoverage = Math.min(1, Math.max(0, (yHi - yLo) / ySpan));
     return {
@@ -2218,8 +2248,9 @@ function capQuadBounds(axis){
       ratio: yCoverage * heightCoverage,
     };
   }
-  // axis === 'y'
-  const xLo = flipXCutaway ? siteMinX : xThreshold, xHi = flipXCutaway ? xThreshold : siteMaxX;
+  // axis === 'y' -- v3.4.107: same box-awareness as the 'x' branch above, same reasoning
+  const xLo = activeSectionBox ? activeSectionBox.xMin : (flipXCutaway ? siteMinX : xThreshold);
+  const xHi = activeSectionBox ? activeSectionBox.xMax : (flipXCutaway ? xThreshold : siteMaxX);
   const xSpan = (siteMaxX - siteMinX) || 1;
   const xCoverage = Math.min(1, Math.max(0, (xHi - xLo) / xSpan));
   return {
@@ -2582,6 +2613,61 @@ function yPlaneConstant(threshold){ return flipYCutaway ? -threshold : threshold
 // Called alongside updateCutLinePlanes() everywhere a cutaway slider or
 // resetCutaway() changes one of the 3 live plane constants -- keeps the
 // negated planes and the 3 quads' positions in lockstep with the sliders.
+// v3.4.104: Joe's UI/UX audit -- "no way to share or return to a specific
+// configuration... nothing about neighborhood/cutaway/view lives in the
+// URL." Scoped deliberately to the values that define WHAT a cut shows
+// (district, Height/X/Y cutaway, flips, which layer(s)) rather than HOW
+// it's being looked at (camera view/orientation, an active drawn box) --
+// restoring an exact camera angle needs also reconciling
+// pendingPlanBox/box-drawn state and framing logic (setOrthogonalView's
+// target-span math), real additional surface area this first version
+// doesn't take on. h/x/y are stored as real meters regardless of the
+// current display unit, so the URL itself is unambiguous no matter who
+// opens it or which unit they're in.
+function syncUrlFromState(){
+  if (siteCapHeight === undefined || !currentNeighborhoodId) return; // nothing meaningful to encode before a real compute has run
+  const params = new URLSearchParams();
+  params.set('d', currentNeighborhoodId);
+  params.set('h', Math.round(sectionPlane.constant));
+  params.set('x', Math.round(xThreshold));
+  params.set('y', Math.round(yThreshold));
+  if (flipXCutaway) params.set('fx', '1');
+  if (flipYCutaway) params.set('fy', '1');
+  params.set('l', showBuildings && showNegative ? 'both' : showNegative ? 'n' : 'b');
+  history.replaceState(null, '', location.pathname + '?' + params.toString());
+}
+// Applies URL state on load -- the inverse of syncUrlFromState() above.
+// Called once from boot(), in place of the old unconditional
+// loadData(NEIGHBORHOODS[0].id). Falls back to the default district
+// whenever `d` is missing or doesn't match a real neighborhood id, same
+// as if no URL state were present at all.
+async function applyUrlState(){
+  const params = new URLSearchParams(location.search);
+  const d = params.get('d');
+  const targetId = (d && NEIGHBORHOODS.some(n => n.id === d)) ? d : NEIGHBORHOODS[0].id;
+  await loadData(targetId);
+  const hasCutState = params.has('h') || params.has('x') || params.has('y') || params.has('l');
+  if (!hasCutState) return; // just a district link -- loadData() already showed its buildings, nothing further to restore
+  await computeNegativeSpace();
+  if (params.has('h')) setHeightCut(Number(params.get('h')));
+  if (params.has('x')) setXCutaway(Number(params.get('x')));
+  if (params.has('y')) setYCutaway(Number(params.get('y')));
+  if (params.get('fx') === '1') document.getElementById('flipXBtn').click();
+  if (params.get('fy') === '1') document.getElementById('flipYBtn').click();
+  const l = params.get('l');
+  // Defaults right after a fresh compute are showBuildings=true,
+  // showNegative=false -- only click whichever toggle actually needs to
+  // change from that, not every toggle unconditionally (clicking
+  // viewSolid when 'l' already wants Buildings on would just turn it
+  // back off).
+  if (l === 'n'){
+    document.getElementById('viewSolid').click();
+    document.getElementById('viewNegative').click();
+  } else if (l === 'both'){
+    document.getElementById('viewNegative').click();
+  }
+  // l === 'b' needs no clicks at all -- matches the post-compute default already
+}
 function syncCapFillPlanes(){
   xClipPlane.normal.x = flipXCutaway ? 1 : -1;
   xClipPlane.constant = xPlaneConstant(xThreshold);
@@ -2635,6 +2721,7 @@ function syncCapFillPlanes(){
   // setHeightCut()/setXCutaway()/setYCutaway() whenever the relevant
   // threshold actually changes, and can be null (no building crosses
   // this exact plane) rather than always being a positionable quad.
+  syncUrlFromState(); // v3.4.104: covers every Height/X/Y/flip change -- all of them call syncCapFillPlanes(), directly or via setHeightCut()/setXCutaway()/setYCutaway()
 }
 
 function initScene(){
@@ -3792,6 +3879,16 @@ function exportSTL(){
     : `Exported ${triCount.toLocaleString()} triangles at 1:${scaleDenominator}`);
 }
 document.getElementById('exportStlBtn').addEventListener('click', exportSTL);
+document.getElementById('copyLinkBtn').addEventListener('click', async () => {
+  if (siteCapHeight === undefined) { toast('Compute negative space first'); return; }
+  try {
+    await navigator.clipboard.writeText(location.href);
+    toast('Link copied');
+  } catch (e) {
+    toast('Could not copy — your browser may be blocking clipboard access');
+    console.error(e);
+  }
+});
 
 // v3.0.13: basic 3D nav controls (N/S/E/W orthogonal views, recenter, north
 // compass) -- same pattern already established in Joe's PLUTO Massing tool
@@ -4167,66 +4264,83 @@ function getCutAxisClipPlanes(axis){
 function applySectionMode(axis, isPlanView){
   sectionModeAxis = axis;
   isPlanViewActive = !!isPlanView; // v3.4.28
-  if (!negativeMesh) return; // nothing computed yet -- setOrthogonalView() may run before a first compute
-  // v3.2.31 fix: `negMat` is a `const` LOCAL to computeNegativeSpace() --
-  // referencing it directly here (a separate top-level function) threw
-  // "negMat is not defined" every time applySectionMode() ran, which
-  // aborted computeNegativeSpace() mid-function on every single compute
-  // (it's called at the end of that function too, see below) -- silently
-  // skipping everything after that point, including the line that reveals
-  // #sectionRow. Symptom: "control handles are missing" -- they were never
-  // hidden by anything handle-specific, the WHOLE cutaway panel never
-  // appeared because compute() itself never finished. `negativeMesh.material`
-  // is the exact same object (`negativeMesh = new THREE.Mesh(cleanedGeo,
-  // negMat)`), and negativeMesh IS module-level, so that's the safe handle
-  // to use from outside computeNegativeSpace() -- this is a real,
-  // load-bearing distinction found live via read_console_messages, not a
-  // stylistic rename.
-  const negMat = negativeMesh.material;
-  if (axis === null){
-    // v3.4.37: Joe -- box-clipping Plan down to just the box (v3.4.28,
-    // his own earlier request) turned out to have a real downside: coming
-    // back to Plan after browsing an elevation left the WHOLE SITE
-    // invisible except that tiny box, with nothing explaining why --
-    // exactly the same "no idea what to do next" problem, just a new
-    // way into it. Plan now ALWAYS shows the full site (classic octant/
-    // corner-cutaway, same as perspective/Home) regardless of
-    // activeSectionBox -- the box itself is now drawn as a persistent
-    // world-space outline instead (see updatePlanBoxOutline() and its
-    // own comment), so you can see both "where's my box" and "what does
-    // the rest of the site look like" at once. Box-clipping is still
-    // exactly right for N/S/E/W below (a section genuinely only shows
-    // what's inside the box's depth) -- untouched.
-    negMat.clippingPlanes = [sectionPlane, xClipPlane, yClipPlane];
-    negMat.clipIntersection = true; // restores normal octant (dollhouse-corner) behavior
-    // v3.4.29: the Z (Height Cut) cap quad -- the actual visible poché fill
-    // in Plan view -- moved HERE, inside axis===null, after Joe reported
-    // fresh "z plane" artifacts on v3.4.28 that hadn't existed before.
-    // Root cause of v3.4.28's own regression: this rebuild used to live in
-    // the unconditional `if (capFillGroups){...}` block below, which runs
-    // on EVERY applySectionMode() call -- including every N/S/E/W switch,
-    // not just Plan. The box-scoped branch is 4 real planes +
-    // SITE_BOUND_PLANES (10 total); the fallback is 2 + SITE_BOUND_PLANES
-    // (8 total) -- so leaving Plan for a locked elevation (isPlanViewActive
-    // flips false, box unchanged) silently changed this quad's
-    // clippingPlanes COUNT on every single transition, the exact
-    // deferred-recompile-discards-uniforms trigger v3.4.26/27 already
-    // fixed twice for OTHER materials, just never guarded here. The z-quad
-    // has nothing to do with N/S/E/W at all (Height Cut is Plan/perspective
-    // territory, same as the negMat/buildingMat box-scoping right above) --
-    // now only touched here, so it's genuinely untouched (byte-for-byte
-    // v3.4.25's own clippingPlanes) for the entire duration of any locked
-    // section view, exactly like before v3.4.28 ever existed.
-    // v3.4.37: always the plain fallback now, same reasoning as negMat above.
-    const zQuadMat = capFillGroups.z.userData.quad.material;
-    zQuadMat.clippingPlanes = [...SITE_BOUND_PLANES]; // v3.4.88: was [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES] -- must match the quad's own construction-time value (see that comment) or this resync would silently reintroduce the wrong-quadrant bug on every view switch
-    zQuadMat.needsUpdate = true;
-  } else {
-    negMat.clippingPlanes = getCutAxisClipPlanes(axis); // v3.4.13: single one-sided plane by default, or a real two-sided depth slab bounded to the box when one's active -- see the function's own comment
-    negMat.clipIntersection = false; // AND semantics -- correct for either the single-plane case (irrelevant with one plane) or the two-plane box-slab case (must satisfy both)
+  // v3.4.105: this used to be `if (!negativeMesh) return;`, bailing out of
+  // the ENTIRE function pre-compute -- Joe's own ask ("buildings render
+  // pre-compute, why is nav gated behind Compute"). Live-checked against
+  // his real running site before narrowing this: solidGroup and its one
+  // shared material already exist immediately after loadData(), well
+  // before Compute, and every call below (syncBuildingClipping,
+  // updatePlanBoxOutline, the ground/street clipping, refreshViewToggles,
+  // syncSectionSkyUniforms, refreshActiveSectionProfile,
+  // refreshCutawayRowActiveState, refreshFullWidthBtn,
+  // updateStreetLabelVisibility) already self-guards against missing
+  // negativeMesh/capFillGroups/siteCapHeight internally -- none of them
+  // were actually written assuming THIS function's blanket early-return
+  // upstream. Only the block immediately below (negMat itself, plus the
+  // capFillGroups.z quad it touches inside axis===null, both of which
+  // only exist once a compute has actually run) genuinely needs the guard
+  // -- narrowed to just that.
+  if (negativeMesh){
+    // v3.2.31 fix: `negMat` is a `const` LOCAL to computeNegativeSpace() --
+    // referencing it directly here (a separate top-level function) threw
+    // "negMat is not defined" every time applySectionMode() ran, which
+    // aborted computeNegativeSpace() mid-function on every single compute
+    // (it's called at the end of that function too, see below) -- silently
+    // skipping everything after that point, including the line that reveals
+    // #sectionRow. Symptom: "control handles are missing" -- they were never
+    // hidden by anything handle-specific, the WHOLE cutaway panel never
+    // appeared because compute() itself never finished. `negativeMesh.material`
+    // is the exact same object (`negativeMesh = new THREE.Mesh(cleanedGeo,
+    // negMat)`), and negativeMesh IS module-level, so that's the safe handle
+    // to use from outside computeNegativeSpace() -- this is a real,
+    // load-bearing distinction found live via read_console_messages, not a
+    // stylistic rename.
+    const negMat = negativeMesh.material;
+    if (axis === null){
+      // v3.4.37: Joe -- box-clipping Plan down to just the box (v3.4.28,
+      // his own earlier request) turned out to have a real downside: coming
+      // back to Plan after browsing an elevation left the WHOLE SITE
+      // invisible except that tiny box, with nothing explaining why --
+      // exactly the same "no idea what to do next" problem, just a new
+      // way into it. Plan now ALWAYS shows the full site (classic octant/
+      // corner-cutaway, same as perspective/Home) regardless of
+      // activeSectionBox -- the box itself is now drawn as a persistent
+      // world-space outline instead (see updatePlanBoxOutline() and its
+      // own comment), so you can see both "where's my box" and "what does
+      // the rest of the site look like" at once. Box-clipping is still
+      // exactly right for N/S/E/W below (a section genuinely only shows
+      // what's inside the box's depth) -- untouched.
+      negMat.clippingPlanes = [sectionPlane, xClipPlane, yClipPlane];
+      negMat.clipIntersection = true; // restores normal octant (dollhouse-corner) behavior
+      // v3.4.29: the Z (Height Cut) cap quad -- the actual visible poché fill
+      // in Plan view -- moved HERE, inside axis===null, after Joe reported
+      // fresh "z plane" artifacts on v3.4.28 that hadn't existed before.
+      // Root cause of v3.4.28's own regression: this rebuild used to live in
+      // the unconditional `if (capFillGroups){...}` block below, which runs
+      // on EVERY applySectionMode() call -- including every N/S/E/W switch,
+      // not just Plan. The box-scoped branch is 4 real planes +
+      // SITE_BOUND_PLANES (10 total); the fallback is 2 + SITE_BOUND_PLANES
+      // (8 total) -- so leaving Plan for a locked elevation (isPlanViewActive
+      // flips false, box unchanged) silently changed this quad's
+      // clippingPlanes COUNT on every single transition, the exact
+      // deferred-recompile-discards-uniforms trigger v3.4.26/27 already
+      // fixed twice for OTHER materials, just never guarded here. The z-quad
+      // has nothing to do with N/S/E/W at all (Height Cut is Plan/perspective
+      // territory, same as the negMat/buildingMat box-scoping right above) --
+      // now only touched here, so it's genuinely untouched (byte-for-byte
+      // v3.4.25's own clippingPlanes) for the entire duration of any locked
+      // section view, exactly like before v3.4.28 ever existed.
+      // v3.4.37: always the plain fallback now, same reasoning as negMat above.
+      const zQuadMat = capFillGroups.z.userData.quad.material;
+      zQuadMat.clippingPlanes = [...SITE_BOUND_PLANES]; // v3.4.88: was [xClipPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES] -- must match the quad's own construction-time value (see that comment) or this resync would silently reintroduce the wrong-quadrant bug on every view switch
+      zQuadMat.needsUpdate = true;
+    } else {
+      negMat.clippingPlanes = getCutAxisClipPlanes(axis); // v3.4.13: single one-sided plane by default, or a real two-sided depth slab bounded to the box when one's active -- see the function's own comment
+      negMat.clipIntersection = false; // AND semantics -- correct for either the single-plane case (irrelevant with one plane) or the two-plane box-slab case (must satisfy both)
+    }
+    negMat.needsUpdate = true;
   }
-  negMat.needsUpdate = true;
-  syncBuildingClipping(axis, false); // v3.4.37: always false now -- see the axis===null branch's own comment just above; kept the isPlanView param on the function itself since the else-branch behavior it produces is still exactly correct, just always taken now for axis===null
+  syncBuildingClipping(axis, false); // v3.4.37: always false now -- see the axis===null branch's own comment just above; kept the isPlanView param on the function itself since the else-branch behavior it produces is still exactly correct, just always taken now for axis===null. v3.4.105: now runs regardless of compute state -- see this function's own top comment.
   updatePlanBoxOutline(); // v3.4.37: see its own comment
   // v3.4.32: Joe -- "why can't we have it so that nothing displays outside
   // of the section box... ground plane, artifacts etc." Real gap: the
@@ -4614,7 +4728,20 @@ function setOrthogonalView(direction, overrideTargetSpan){
   // function. Scoped to real elevations only -- Plan and the free
   // perspective/Home view (direction null or 'plan') are unaffected, so
   // Buildings-only stays the default look there, same as always.
-  if ((direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && !showNegative){
+  // v3.4.105: both auto-toggle blocks below (v3.4.31 auto-on, v3.4.48
+  // auto-off) fired unconditionally on entering an elevation -- fine
+  // post-compute (there's always a negativeMesh to switch TO), but
+  // pre-compute negativeMesh doesn't exist, so showNegative=true is a
+  // silent no-op while showBuildings=false still fires, leaving the view
+  // completely empty. Live-caught immediately after un-gating
+  // applySectionMode() (this session): clicking N pre-compute showed
+  // nothing but bare ground, Buildings toggle visibly off, Negative
+  // space toggle visibly on -- exactly this mechanism, not the
+  // clipping-plane fix itself (that part was already confirmed correct
+  // via window.__NS before this was caught). Gated both on `negativeMesh`
+  // existing -- pre-compute, entering an elevation now leaves Buildings
+  // as the only (and correct) thing to look at, untouched.
+  if (negativeMesh && (direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && !showNegative){
     showNegative = true;
   }
   // v3.4.48: Joe -- screenshots showing real 3D building solids (visible
@@ -4631,7 +4758,7 @@ function setOrthogonalView(direction, overrideTargetSpan){
   // real elevation is entered, mirroring showNegative's own auto-on.
   // Manual re-toggling afterward (the Buildings button itself) is
   // untouched -- this only fires on the transition into n/s/e/w.
-  if ((direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && showBuildings){
+  if (negativeMesh && (direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && showBuildings){
     showBuildings = false;
   }
   // v3.4.57: Joe -- "when transitioning back to plan i say its best to
@@ -5440,22 +5567,38 @@ function updateStreetLabelScale(){
   }
 }
 
-// v3.4.76: hides/shows street-name label sprites (never the street ribbons
-// themselves) based on whether a box is actually scoping the current view
-// -- same condition sectionModeNote already uses for its own "Cropped to
-// the box you drew" vs "Full elevation shown" text (axis !== null &&
-// activeSectionBox), extended to also cover a box-scoped Plan view
-// (isPlanViewActive && activeSectionBox), since that's a real box-scoped
-// state too even though it has no section axis. No box scoping the view
-// -> every label shows, same as always. `pad` is generous on purpose: a
-// label whose real street continues slightly past the box edge should
-// still show, not disappear right at the boundary.
+// v3.4.110: Joe -- "layers of i don't know what in elevation... this
+// project is about negative space between building. not layers of road,
+// sidewalk etc." Root cause, confirmed live via a full scene-graph dump
+// on his own broken session (his own console output, not a guess):
+// street RIBBON meshes (built in loadData(), one per real street segment
+// across the WHOLE district) were never gated by view mode at all --
+// only the text-label SPRITES got box-scoped (v3.4.76, this function's
+// own original job); ribbons stayed "always visible" by deliberate
+// original design (see the old version of this comment, superseded
+// here). That's exactly right in Plan/Perspective (streets everywhere is
+// the point there) -- but in a LOCKED N/S/E/W elevation, it means the
+// ENTIRE district's street network renders edge-on: hundreds of small
+// translucent ribbon segments at every real depth, not just whatever's
+// in a drawn box, stacking into exactly the flat gray-blue "layer" mess
+// in Joe's screenshots (confirmed: his own scene dump showed dozens of
+// 9fb8cc ribbon Mesh entries scattered ~1900m+ from his actual box).
+// This app's elevations are about the void between real buildings, not
+// ground infrastructure -- Joe's own framing, not a design call made up
+// here. Streets (ribbons AND labels) now hide entirely whenever a
+// section is actually locked, regardless of whether a box is scoping
+// it, restoring to exactly `showStreets`'s own current value the moment
+// you leave (Plan/Perspective's own display, box-scoped or not, is
+// completely untouched -- see the boxScoped condition below, now
+// Plan-view-only, same as it always meant for labels specifically).
 function updateStreetLabelVisibility(){
   if (!streetsGroup) return;
-  const boxScoped = !!activeSectionBox && (sectionModeAxis !== null || isPlanViewActive);
+  const inLockedElevation = sectionModeAxis !== null;
+  streetsGroup.visible = showStreets && !inLockedElevation;
+  const boxScoped = !!activeSectionBox && isPlanViewActive;
   const pad = 60;
   for (const child of streetsGroup.children){
-    if (!(child instanceof THREE.Sprite)) continue; // ribbons are Mesh, always stay visible
+    if (!(child instanceof THREE.Sprite)) continue; // ribbons are Mesh -- always follow the group's own visibility above, never individually scoped
     if (!boxScoped){ child.visible = true; continue; }
     const { x, y } = child.position;
     child.visible = x >= activeSectionBox.xMin - pad && x <= activeSectionBox.xMax + pad
@@ -5503,7 +5646,13 @@ function refreshStreetsToggle(){
   const btn = document.getElementById('viewStreets');
   btn.classList.toggle('active', showStreets);
   btn.classList.toggle('secondary', !showStreets);
-  if (streetsGroup) streetsGroup.visible = showStreets;
+  // v3.4.110: was `if (streetsGroup) streetsGroup.visible = showStreets;` --
+  // routed through updateStreetLabelVisibility() instead so clicking this
+  // toggle while already in a locked N/S/E/W elevation can't force streets
+  // back on and fight that function's own new "hidden in a locked
+  // elevation regardless of this toggle" rule; showStreets itself is still
+  // exactly what that function reads once you're back in Plan/Perspective.
+  updateStreetLabelVisibility();
 }
 document.getElementById('viewStreets').addEventListener('click', () => {
   showStreets = !showStreets;
@@ -5971,6 +6120,7 @@ unitsImperialBtn.addEventListener('click', () => {
 document.getElementById('viewSolid').addEventListener('click', () => {
   showBuildings = !showBuildings;
   refreshViewToggles();
+  syncUrlFromState(); // v3.4.104
 });
 document.getElementById('viewNegative').addEventListener('click', () => {
   if (!negativeMesh) { toast('Click "Compute negative space" first'); return; }
@@ -5991,6 +6141,7 @@ document.getElementById('viewNegative').addEventListener('click', () => {
     document.getElementById('displayAccordion').open = true;
   }
   refreshViewToggles();
+  syncUrlFromState(); // v3.4.104
 });
 document.getElementById('computeBtn').addEventListener('click', () => { computeNegativeSpace(); });
 // v3.4.38: #decisionStage's two choice cards. Each just triggers the SAME
@@ -6801,6 +6952,22 @@ function updatePlanBoxOverlayFromWorldBounds(b){
 function attachPlanBoxListeners(){
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (dragAxis) return; // don't fight the cutaway-handle drag listener above if a handle somehow already grabbed the pointer
+  // v3.4.108: Joe -- "when drawing section box i usually use right mouse
+  // button to pan and then zoom in. current behavior right mouse button
+  // draws a section box." Confirmed against the code: this whole handler
+  // (both the box-edge-resize grab just below and the new-box-draw start
+  // further down) never checked which button was actually pressed, so a
+  // right-click landing on the canvas during boxDrawMode started a box
+  // drag exactly like a left-click would -- OrbitControls never got the
+  // chance to treat it as its own default RIGHT = PAN gesture. The box
+  // draw banner has said "right-drag to pan" since v3.4.0 (see its own
+  // markup) -- that was always the intent, it just was never actually
+  // wired to only respond to the left button. e.button is 0 for the
+  // primary button (left click, and a touch contact's equivalent) --
+  // bailing out here for anything else leaves right (and middle) clicks
+  // completely unhandled by this listener, so OrbitControls' own
+  // pointerdown listener on the same element handles them normally.
+  if (e.button !== 0) return;
   const hit = screenToWorldGround(e.clientX, e.clientY);
   if (!hit) return;
   const side = hitTestBoxEdge(hit.x, hit.y); // v3.4.65: hitTestBoxEdge() now picks pendingPlanBox vs activeSectionBox itself based on boxDrawMode -- no longer wrapped in `if (!boxDrawMode)` here, since that wrapper was exactly what made an edge-grab on the just-drawn, awaiting-direction box fall through to starting a brand new draw instead
@@ -6923,21 +7090,80 @@ function positionPlanBoxPanel(){
   // deleting it and its one call site below, so this stays a one-line
   // diff if a floating variant is ever wanted again.
 }
+// v3.4.109: Joe -- "no north or south views for section box." Root cause:
+// applyPlanBoxDirection() (below) always centered the cut threshold on the
+// box's literal geometric midpoint -- but the real cut this app draws is
+// still just a thin SECTION_SLAB_HALF_WIDTH (2m) slab at that exact
+// position (unchanged since v3.4.50, deliberately left alone this round --
+// Joe's own call, it's the same constant at the center of the whole
+// Option A/B history). If nothing real actually crosses that specific 2m
+// line -- a street, a courtyard, a gap between buildings -- the whole
+// discard profile comes back empty and the result is one flat, holeless
+// block. Live-reproduced against Joe's own screenshot: for his drawn box,
+// the X-midpoint (E/W's own cut) happened to land through real buildings,
+// so E/W worked; the Y-midpoint (N/S's own cut), same box, landed in a
+// gap, so N/S came back blank. Pure luck either way.
+// Fix: instead of the literal midpoint, use the REAL building crossing
+// nearest to it. Same "thin true slice" semantics everywhere else in the
+// app (still a real 2m slab at wherever this lands, still moves the
+// slider/handle to match, still exactly what Joe would get by dragging
+// there by hand) -- just picked somewhere that actually shows something
+// instead of a coin-flip. Falls back to the plain midpoint (today's
+// behavior) if truly nothing in the box qualifies, so this can never make
+// a result worse than it already was.
+function findNearestBuildingCrossing(axis, box, target){
+  // axis 'x' -> E/W's own cut variable (xThreshold), tests each building's
+  //             X-bbox, restricted to buildings whose Y-bbox actually
+  //             falls inside the box (the plotted/screen axis for E/W).
+  // axis 'y' -> N/S's own cut variable (yThreshold), tests each building's
+  //             Y-bbox, restricted to buildings whose X-bbox falls inside
+  //             the box (the plotted/screen axis for N/S).
+  // A building nowhere near the box's own footprint on the plotted axis
+  // shouldn't be able to steal the cut line just for being the closest
+  // crossing in the abstract.
+  if (!buildingBBoxCache) return target;
+  const boxLo = axis === 'x' ? box.xMin : box.yMin, boxHi = axis === 'x' ? box.xMax : box.yMax;
+  const boxPlotLo = axis === 'x' ? box.yMin : box.xMin, boxPlotHi = axis === 'x' ? box.yMax : box.xMax;
+  let best = target, bestDist = Infinity;
+  for (const b of buildingBBoxCache){
+    const cMin = axis === 'x' ? b.xMin : b.yMin, cMax = axis === 'x' ? b.xMax : b.yMax;
+    const pMin = axis === 'x' ? b.yMin : b.xMin, pMax = axis === 'x' ? b.yMax : b.xMax;
+    if (pMax < boxPlotLo || pMin > boxPlotHi) continue; // outside the box's own footprint on the plotted axis
+    const lo = Math.max(cMin, boxLo), hi = Math.min(cMax, boxHi);
+    if (lo > hi) continue; // this building's cut-axis extent doesn't actually reach inside the box
+    const candidate = Math.min(hi, Math.max(lo, target)); // closest point on this building's real crossing to the box's own midpoint
+    const dist = Math.abs(candidate - target);
+    if (dist < bestDist){ bestDist = dist; best = candidate; }
+  }
+  return best;
+}
 function applyPlanBoxDirection(direction){
   const box = pendingPlanBox;
   if (!box) return;
   const axis = (direction === 'n' || direction === 's') ? 'y' : 'x';
-  // Center the existing slider/threshold on the box's own midpoint on the
-  // cut axis -- reuses setXCutaway()/setYCutaway() (v3.0.11's single source
-  // of truth for "a cut value changed") so the slider, number input, and 3D
+  // v3.4.107: activeSectionBox is now set BEFORE setXCutaway()/setYCutaway()
+  // runs, not after. Those two calls (via syncCapFillPlanes()) trigger
+  // refreshCapFillCoverage() -- capQuadBounds()'s own v3.4.107 box-aware
+  // fix only has an effect if activeSectionBox already reflects the box
+  // just drawn at that moment; the old order left it one step stale (the
+  // PREVIOUS box, or null on a first-ever draw) every single time,
+  // regardless of the capQuadBounds() fix itself.
+  activeSectionBox = box;
+  // v3.4.109: was the raw geometric midpoint -- see findNearestBuildingCrossing()'s
+  // own comment just above for why that could land on a real building or
+  // in an empty gap purely by chance, and why this is the fix.
+  const targetMid = axis === 'y' ? (box.yMin + box.yMax) / 2 : (box.xMin + box.xMax) / 2;
+  const cutValue = findNearestBuildingCrossing(axis, box, targetMid);
+  // Center the existing slider/threshold on the real crossing found above
+  // -- reuses setXCutaway()/setYCutaway() (v3.0.11's single source of
+  // truth for "a cut value changed") so the slider, number input, and 3D
   // drag handle all land in sync with what was just drawn, exactly as if
   // Joe had dragged the slider there by hand. sectionModeAxis isn't this
   // axis yet at this point (we're still in Plan view), so this doesn't
   // trigger a premature profile rebuild -- setOrthogonalView() below does
   // that once activeSectionBox is actually set.
-  if (axis === 'y') setYCutaway((box.yMin + box.yMax) / 2);
-  else setXCutaway((box.xMin + box.xMax) / 2);
-  activeSectionBox = box;
+  if (axis === 'y') setYCutaway(cutValue);
+  else setXCutaway(cutValue);
   setOrthogonalView(direction); // runs applySectionMode(axis) internally, which now reads activeSectionBox via getSectionRanges() for both the slab width and the plotted-axis crop -- see applySectionMode()'s own end-of-function comment for the v3.4.41 defensive re-sync that covers this call along with every other path into it
   cancelPlanBox();
 }
@@ -6971,6 +7197,7 @@ document.getElementById('boxDrawBannerCancel').addEventListener('click', cancelP
 function clearActiveSectionBox(){
   activeSectionBox = null;
   if (sectionModeAxis) applySectionMode(sectionModeAxis);
+  refreshCapFillCoverage(capFillGroups); // v3.4.107: same reasoning as capQuadBounds()'s own comment -- the coverage/outline decision is stale (box-scoped) until this runs again against the real, now-full-site exposed area
   updatePlanBoxOutline(); // v3.4.37: box was just cleared -- if Plan is open, its outline needs to go too
 }
 function refreshFullWidthBtn(){
@@ -7027,7 +7254,7 @@ document.getElementById('fullWidthBtn').addEventListener('click', clearActiveSec
     return;
   }
   try {
-    await loadData(NEIGHBORHOODS[0].id);
+    await applyUrlState(); // v3.4.104: was an unconditional loadData(NEIGHBORHOODS[0].id) -- now honors a shared link's district/cutaway/layer state if one is present in the URL, falling back to the same default otherwise
   } catch (e) {
     toast('Could not load geojson data — check the data/ folder is next to index.html');
     console.error(e);

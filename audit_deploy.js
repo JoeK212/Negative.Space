@@ -507,7 +507,7 @@ check(
 );
 check(
   'setOrthogonalView() turns Negative space on by default for a real N/S/E/W elevation -- v3.4.31: Joe\'s ask, since a fresh compute always leaves it off and every section view needed a manual extra click before showing anything',
-  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*\n\s*showNegative = true;/.test(html)
+  /if \((?:negativeMesh && )?\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*\n\s*showNegative = true;/.test(html)
 );
 check(
   'v3.4.37 reversal: groundMesh and streetMaterials only box-clip for a real locked elevation (axis !== null), never for Plan anymore -- Plan always shows the full site now, box drawn as an outline instead (updatePlanBoxOutline())',
@@ -787,7 +787,7 @@ sectionHeader("v3.4.48 -- showBuildings auto-off on entering n/s/e/w, mirroring 
 
 check(
   'setOrthogonalView() forces showBuildings false when direction is n/s/e/w (only if it was on), same shape as the existing showNegative auto-on',
-  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+  /if \((?:negativeMesh && )?\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
 );
 check(
   'the showBuildings auto-off runs BEFORE applySectionMode() (so refreshViewToggles(), called at the end of applySectionMode(), picks up the corrected value on the same view switch, not one frame late)',
@@ -1004,14 +1004,14 @@ check(
 check(
   'the plan force-on sits after the n/s/e/w force-off in source order, both part of the same setOrthogonalView() flow',
   (() => {
-    const offIdx = html.indexOf("if ((direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && showBuildings){");
+    const offIdx = html.indexOf("if (negativeMesh && (direction === 'n' || direction === 's' || direction === 'e' || direction === 'w') && showBuildings){");
     const onIdx = html.indexOf("if (direction === 'plan' && !showBuildings){");
     return offIdx > 0 && onIdx > offIdx;
   })()
 );
 check(
   'n/s/e/w force-off is untouched -- still forces Buildings off entering an elevation, this is additive not a replacement',
-  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+  /if \((?:negativeMesh && )?\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
 );
 
 /* ===================================================================
@@ -1038,8 +1038,8 @@ check(
 );
 check(
   'the n/s/e/w entry logic (v3.4.31 showNegative-on, v3.4.48 showBuildings-off) is untouched -- this only adds the Plan-entry counterpart, not a replacement',
-  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*showNegative = true;\s*\}/.test(html) &&
-  /if \(\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
+  /if \((?:negativeMesh && )?\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*showNegative = true;\s*\}/.test(html) &&
+  /if \((?:negativeMesh && )?\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*showBuildings = false;\s*\}/.test(html)
 );
 
 /* ===================================================================
@@ -1907,7 +1907,7 @@ check(
     return /if \(showNegative\)\{/.test(body)
       && /setUiMode\('advanced'\);/.test(body)
       && /document\.getElementById\('displayAccordion'\)\.open = true;/.test(body)
-      && /\n  refreshViewToggles\(\);\n\}\);/.test(body);
+      && /\n  refreshViewToggles\(\);\n  syncUrlFromState\(\); \/\/ v3\.4\.104\n\}\);/.test(body);
   })()
 );
 check(
@@ -2055,6 +2055,125 @@ check(
 check(
   'the help modal\'s dt for this control also reads "Recenter cutaway", matching the real button label, and its dd cross-references Full width the same way the button\'s own title now does',
   /<dt>Recenter cutaway<\/dt>\s*<dd>Back to the site's own center — or, if a box is active, that box's own center\. Doesn't clear the box itself; that's Full width/.test(html)
+);
+
+/* ===================================================================
+   v3.4.104 -- shareable URL state: district + Height/X/Y cutaway + flips
+   + which layer(s) are showing round-trip through the URL, plus a Copy
+   link button since a silently-updating URL has no discoverability on
+   its own. Camera view/orientation and a drawn box are deliberately not
+   included in this first version.
+   =================================================================== */
+sectionHeader("v3.4.104 -- shareable URL state (district/cutaway/layers) and a Copy link button");
+
+check(
+  'syncUrlFromState() bails out before a real compute has run (siteCapHeight === undefined) or with no district yet, encodes h/x/y in real meters regardless of the current display unit (unambiguous for whoever opens the link), and uses history.replaceState (never pushState -- moving a slider should not spam browser history)',
+  /function syncUrlFromState\(\)\{/.test(html)
+  && /if \(siteCapHeight === undefined \|\| !currentNeighborhoodId\) return;/.test(html)
+  && /params\.set\('h', Math\.round\(sectionPlane\.constant\)\);/.test(html)
+  && /history\.replaceState\(null, '', location\.pathname \+ '\?' \+ params\.toString\(\)\);/.test(html)
+);
+check(
+  'syncUrlFromState() is called from syncCapFillPlanes() (covers every Height/X/Y/flip change -- all of them call syncCapFillPlanes(), directly or via setHeightCut()/setXCutaway()/setYCutaway()) and from both the Buildings and Negative-space toggle click handlers -- not duplicated into each individual setter',
+  /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99[\s\S]{0,900}syncUrlFromState\(\); \/\/ v3\.4\.104/.test(html)
+  && (html.match(/syncUrlFromState\(\); \/\/ v3\.4\.104/g) || []).length === 3
+);
+check(
+  'applyUrlState() replaces the old unconditional loadData(NEIGHBORHOODS[0].id) in boot(), falls back to that same default district when `d` is missing or invalid, and only runs computeNegativeSpace() + applies h/x/y/fx/fy/l when at least one of those params is actually present -- a bare district link doesn\'t force a compute nobody asked for',
+  /async function applyUrlState\(\)\{/.test(html)
+  && /const targetId = \(d && NEIGHBORHOODS\.some\(n => n\.id === d\)\) \? d : NEIGHBORHOODS\[0\]\.id;/.test(html)
+  && /const hasCutState = params\.has\('h'\) \|\| params\.has\('x'\) \|\| params\.has\('y'\) \|\| params\.has\('l'\);/.test(html)
+  && /await applyUrlState\(\); \/\/ v3\.4\.104/.test(html)
+);
+check(
+  'applyUrlState()\'s layer-restore logic accounts for the real post-compute defaults (showBuildings=true, showNegative=false) instead of clicking every toggle unconditionally -- l===\'b\' needs zero clicks since it already matches the default, l===\'n\' clicks both, l===\'both\' clicks only viewNegative',
+  /if \(l === 'n'\)\{\s*\n\s*document\.getElementById\('viewSolid'\)\.click\(\);\s*\n\s*document\.getElementById\('viewNegative'\)\.click\(\);\s*\n\s*\} else if \(l === 'both'\)\{\s*\n\s*document\.getElementById\('viewNegative'\)\.click\(\);\s*\n\s*\}/.test(html)
+);
+check(
+  'copyLinkBtn exists, refuses before a compute has run (same guard syncUrlFromState() itself uses), and writes location.href -- the live-updated URL -- to the clipboard rather than constructing its own copy of the same params',
+  /<button class="btn secondary" id="copyLinkBtn"/.test(html)
+  && /document\.getElementById\('copyLinkBtn'\)\.addEventListener\('click', async \(\) => \{\s*\n\s*if \(siteCapHeight === undefined\) \{ toast\('Compute negative space first'\); return; \}\s*\n\s*try \{\s*\n\s*await navigator\.clipboard\.writeText\(location\.href\);/.test(html)
+);
+
+sectionHeader("v3.4.105 -- Buildings-only N/S/E/W/Plan nav no longer gated behind a full Compute");
+
+check(
+  'applySectionMode()\'s old blanket pre-compute guard (bailing out of the ENTIRE function, not just the negMat-specific part) is gone',
+  !/isPlanViewActive = !!isPlanView; \/\/ v3\.4\.28\s*\n\s*if \(!negativeMesh\) return;/.test(html)
+);
+check(
+  'applySectionMode() now narrows that guard to just the negMat/z-quad block -- everything else in the function (syncBuildingClipping, ground/street clipping, updatePlanBoxOutline, refreshViewToggles, etc.) runs unconditionally, matching how each of those already self-guards internally',
+  /isPlanViewActive = !!isPlanView; \/\/ v3\.4\.28[\s\S]{0,1200}if \(negativeMesh\)\{[\s\S]{0,2000}const negMat = negativeMesh\.material;/.test(html)
+);
+check(
+  'syncBuildingClipping(axis, false) -- the actual buildings-nav fix -- is called unconditionally (outside/after the negativeMesh-gated block), tagged v3.4.105',
+  /syncBuildingClipping\(axis, false\); \/\/ v3\.4\.37:[\s\S]{0,400}v3\.4\.105: now runs regardless of compute state/.test(html)
+);
+
+sectionHeader("v3.4.106 -- setOrthogonalView()'s auto-on-negative/auto-off-buildings transition no longer fires pre-compute");
+
+check(
+  'both halves of the v3.4.31/v3.4.48 auto-toggle transition (entering N/S/E/W turns Negative space on, Buildings off) are gated on negativeMesh actually existing -- pre-compute, entering an elevation no longer force-hides Buildings with nothing (no negativeMesh) to show instead',
+  /if \(negativeMesh && \(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && !showNegative\)\{\s*\n\s*showNegative = true;/.test(html)
+  && /if \(negativeMesh && \(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\) && showBuildings\)\{\s*\n\s*showBuildings = false;/.test(html)
+);
+
+sectionHeader("v3.4.107 -- capQuadBounds() (negative-space poche fill-vs-outline decision) is now box-aware, matching getSectionRanges()'s existing pattern");
+
+check(
+  'capQuadBounds()\'s x-axis branch uses activeSectionBox\'s real yMin/yMax when a box is active, instead of always the full site Y span',
+  /const yLo = activeSectionBox \? activeSectionBox\.yMin : \(flipYCutaway \? siteMinY : yThreshold\);\s*\n\s*const yHi = activeSectionBox \? activeSectionBox\.yMax : \(flipYCutaway \? yThreshold : siteMaxY\);/.test(html)
+);
+check(
+  'capQuadBounds()\'s y-axis branch uses activeSectionBox\'s real xMin/xMax when a box is active, instead of always the full site X span',
+  /const xLo = activeSectionBox \? activeSectionBox\.xMin : \(flipXCutaway \? siteMinX : xThreshold\);\s*\n\s*const xHi = activeSectionBox \? activeSectionBox\.xMax : \(flipXCutaway \? xThreshold : siteMaxX\);/.test(html)
+);
+check(
+  'applyPlanBoxDirection() sets activeSectionBox BEFORE calling setXCutaway()/setYCutaway() -- so the coverage/outline recompute those trigger (via syncCapFillPlanes -> refreshCapFillCoverage) actually sees the new box, not a stale prior value',
+  (() => {
+    const setBoxIdx = html.indexOf('activeSectionBox = box;\n  // v3.4.109: was the raw geometric midpoint');
+    const setXIdx = html.indexOf("if (axis === 'y') setYCutaway(cutValue);\n  else setXCutaway(cutValue);");
+    return setBoxIdx > 0 && setXIdx > setBoxIdx;
+  })()
+);
+check(
+  'clearActiveSectionBox() (Full width) re-runs refreshCapFillCoverage() after clearing the box, so the outline/fill decision reflects the real full-site exposed area again',
+  /activeSectionBox = null;\s*\n\s*if \(sectionModeAxis\) applySectionMode\(sectionModeAxis\);\s*\n\s*refreshCapFillCoverage\(capFillGroups\);/.test(html)
+);
+
+sectionHeader("v3.4.108 -- right-click during box-draw mode passes through to OrbitControls' own pan instead of starting a section box");
+
+check(
+  'the box-draw pointerdown handler bails immediately for any button other than the left/primary one (e.button !== 0), before any raycasting or edge-hit-test happens -- so right-click is never intercepted and falls through to OrbitControls\' own default RIGHT = PAN behavior on the same element',
+  /if \(dragAxis\) return;[\s\S]{0,2000}if \(e\.button !== 0\) return;[\s\S]{0,50}const hit = screenToWorldGround\(e\.clientX, e\.clientY\);/.test(html)
+);
+
+sectionHeader("v3.4.109 -- applyPlanBoxDirection() picks the nearest real building crossing instead of the box's raw geometric midpoint");
+
+check(
+  'findNearestBuildingCrossing() is defined, restricting candidates to buildings whose plotted-axis extent falls inside the drawn box',
+  /function findNearestBuildingCrossing\(axis, box, target\)\{/.test(html)
+  && /if \(pMax < boxPlotLo \|\| pMin > boxPlotHi\) continue;/.test(html)
+);
+check(
+  'applyPlanBoxDirection() calls findNearestBuildingCrossing() and feeds its result into setXCutaway()/setYCutaway(), not the raw box midpoint',
+  /const targetMid = axis === 'y' \? \(box\.yMin \+ box\.yMax\) \/ 2 : \(box\.xMin \+ box\.xMax\) \/ 2;\s*\n\s*const cutValue = findNearestBuildingCrossing\(axis, box, targetMid\);/.test(html)
+  && /if \(axis === 'y'\) setYCutaway\(cutValue\);\s*\n\s*else setXCutaway\(cutValue\);/.test(html)
+);
+
+sectionHeader("v3.4.110 -- street ribbons and labels now hide entirely in a locked N/S/E/W elevation, not just outside a drawn box");
+
+check(
+  'updateStreetLabelVisibility() hides the whole streetsGroup whenever sectionModeAxis is not null, regardless of showStreets or box scoping',
+  /const inLockedElevation = sectionModeAxis !== null;\s*\n\s*streetsGroup\.visible = showStreets && !inLockedElevation;/.test(html)
+);
+check(
+  'the box-scoped per-label visibility check is now Plan-view-only (isPlanViewActive alone), since the locked-elevation case is handled by the group-level hide above',
+  /const boxScoped = !!activeSectionBox && isPlanViewActive;/.test(html)
+);
+check(
+  'the streets toggle button routes through updateStreetLabelVisibility() instead of setting streetsGroup.visible directly, so it can\'t fight the locked-elevation hide',
+  /btn\.classList\.toggle\('secondary', !showStreets\);\s*\n[\s\S]{0,700}updateStreetLabelVisibility\(\);\s*\n\}/.test(html)
 );
 
 /* ===================================================================

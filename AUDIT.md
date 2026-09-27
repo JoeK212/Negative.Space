@@ -1517,17 +1517,58 @@ same way for both cameras.
 
 ## Open / not yet started
 
+- **Intermittent N/S/E/W rendering bug (no box drawn) — still unconfirmed
+  either way.** Long-standing item: solid unclipped block / flat-empty
+  skyline / stray band, last confirmed recurring by Joe on his own
+  machine as of v3.4.47, despite `enforceSectionRenderState()`'s per-frame
+  self-healing mitigation looking structurally sound on code review.
+  Investigating this (Joe's ask) surfaced a real, different bug in the
+  BOX-DRAWN case instead — `capQuadBounds()` wasn't box-aware, fixed
+  v3.4.107 (see condensed history below) — but that fix is scoped
+  specifically to `activeSectionBox` being set; the classic no-box
+  symptom's own code path (`flipYCutaway`/`yThreshold`/site-wide) is
+  untouched. Genuinely unknown whether v3.4.107 was actually the same
+  bug wearing a different hat, or two separate things that happen to
+  look similar (both are "N/S/E/W renders something clearly wrong").
+  Needs a live repro of the CLASSIC case — no box ever drawn, just
+  toggling N/S/E/W and/or dragging the cutaway sliders repeatedly — to
+  know if it's still real.
+
+- **Pre-compute cutaway thresholds aren't site-relative, v3.4.105.**
+  Buildings-only N/S/E/W/Plan nav now applies the same octant clip
+  Buildings gets everywhere else (see the condensed history below), but
+  `xThreshold`/`yThreshold` sit at their literal `0` init value until a
+  slider is touched or a real compute seeds them from site bounds (both
+  paths still gated behind Compute) — so the pre-compute octant cut isn't
+  necessarily centered on the site in any meaningful way. Cosmetic, not a
+  blocker. `minX`/`maxX`/`minY`/`maxY` are already computed straight from
+  `buildingsGeo.features`, independent of the CSG step (confirmed
+  live-checking this exact question) — a lightweight pre-compute
+  site-bounds pass could seed real thresholds if this needs fixing later.
+
+- **Shareable URL state, v3.4.104** — district + Height/X/Y cutaway +
+  flips + which layer(s) round-trip through the URL via
+  `syncUrlFromState()`/`applyUrlState()`, plus a Copy link button.
+  Camera view/orientation and a drawn box deliberately not included yet
+  (real additional scope — box-drawn state + `setOrthogonalView()`'s
+  framing math). Not yet live-tested end to end — needs an actual reload
+  + a real round-trip (change values, copy link, open fresh, confirm it
+  matches).
+
 - **First UI/UX audit pass, v3.4.103** — Joe asked for a gaps/redundancies
   review of the actual shipped panel. Fixed the two lowest-risk items:
   min/max endpoint labels under each cutaway slider (read directly from
   each slider's own attributes, no second copy of site bounds), and
   renamed "Reset cutaway" to "Recenter cutaway" since it sat next to
-  "Full width" and both read as a generic undo. Two bigger findings not
-  yet started: full navigation (View compass, Draw section box, Display)
-  is gated behind a Compute a Buildings-only user doesn't need, since
-  buildings already render pre-compute; no configuration (neighborhood,
-  cutaway, view) lives in the URL, so nothing can be shared or returned
-  to directly.
+  "Full width" and both read as a generic undo. Two bigger findings, at
+  the time not yet started: full navigation (View compass, Draw section
+  box, Display) gated behind a Compute a Buildings-only user doesn't
+  need, since buildings already render pre-compute (fixed v3.4.105 for
+  the View compass/N/S/E/W/Plan nav itself — Draw section box is
+  unaffected, still correctly requires real site bounds); no
+  configuration (neighborhood, cutaway, view) lives in the URL, so
+  nothing can be shared or returned to directly (fixed v3.4.104, minus
+  camera/box state).
 
 - **Docs/tooltips updated for v3.4.93-101, v3.4.102** — audited every
   tooltip, the help modal, and EXTENDED.md against real shipped behavior.
