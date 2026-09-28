@@ -912,7 +912,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.110'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.115'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -3741,8 +3741,12 @@ function resetCutaway(){
   // site-wide default that may have no relationship to what's on screen.
   setHeightCut(0);
   if (activeSectionBox){
-    setXCutaway((activeSectionBox.xMin + activeSectionBox.xMax) / 2);
-    setYCutaway((activeSectionBox.yMin + activeSectionBox.yMax) / 2);
+    // v3.4.112: was the raw box midpoint -- the third place (after the box
+    // picker, v3.4.109, and the compass, v3.4.112) that could park the cut in
+    // a street gap and leave an empty section. Same real-crossing snap.
+    const bx = activeSectionBox;
+    setXCutaway(findNearestBuildingCrossing('x', bx, (bx.xMin + bx.xMax) / 2));
+    setYCutaway(findNearestBuildingCrossing('y', bx, (bx.yMin + bx.yMax) / 2));
   } else {
     setXCutaway(0);
     setYCutaway(0);
@@ -3925,7 +3929,7 @@ document.getElementById('copyLinkBtn').addEventListener('click', async () => {
 const DEFAULT_CAM_POS = new THREE.Vector3(0, -848.53, 500);
 const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 0, 100);
 
-function currentTargetAndSpan(){
+function currentTargetAndSpan(forElevation){
   // Recenters on the model's real bounding box once one exists (post-
   // compute), otherwise falls back to a sane default -- avoids every
   // direction button pointing at an empty origin before Joe has run a
@@ -3939,7 +3943,10 @@ function currentTargetAndSpan(){
   // perspective-orbited to (the old v3.0.39 behavior) -- reasonable for a
   // true elevation view, which is normally about seeing the whole thing
   // flat, not a zoomed-in perspective crop.
-  if (showBoroughs && boroughsGroup){
+  // v3.4.114: an N/S/E/W elevation frames the SITE, not the island -- the
+  // context layer is hidden in a locked elevation now, so framing the ~20km
+  // island would shrink the section to a speck around nothing.
+  if (showBoroughs && boroughsGroup && !forElevation){
     // v3.2.24 fix: SPAN still comes from the borough's own box (so N/S/E/W/
     // Plan keep framing the whole island's real size), but TARGET used to
     // also come from the borough's box center -- wrong, for the same
@@ -4556,6 +4563,7 @@ function applySectionMode(axis, isPlanView){
   // all already final by this point in the function, nothing here needs
   // to wait a frame for.
   updateStreetLabelVisibility();
+  updateContextLayerVisibility(); // v3.4.114
   requestAnimationFrame(() => {
     if (axis !== null) syncSectionSkyUniforms(axis);
     if (sectionModeAxis === axis) refreshActiveSectionProfile(); // guards against a later view change already having moved on by the time this frame runs
@@ -4608,7 +4616,15 @@ function refreshCutawayRowActiveState(axis){
   const rows = { z: document.getElementById('sectionCutRow'), x: document.getElementById('xCutRow'), y: document.getElementById('yCutRow') };
   for (const key of ['z', 'x', 'y']){
     const row = rows[key];
-    const inert = axis !== null && (key !== axis || cutawayVisiblyInert);
+    // v3.4.112: the ACTIVE axis's slider stays live. v3.4.60 dimmed it on the
+    // premise that Option B made it inert, but that premise is false in the
+    // current code: the section profile is rebuilt from a +-2m slab at this
+    // threshold (v3.4.50), so moving it changes which buildings the section
+    // contains -- verified live (5 slider positions in a locked N view gave 5
+    // different skyline profiles). Dimming it also stranded Joe in an empty
+    // section with no way to move out of it. Height (z) and the other axis
+    // stay inert, as before.
+    const inert = axis !== null && key !== axis;
     row.style.opacity = inert ? '0.4' : '';
     row.querySelectorAll('input, button').forEach(el => { el.disabled = inert; });
   }
@@ -4821,10 +4837,21 @@ function setOrthogonalView(direction, overrideTargetSpan){
   // genuinely outside the box (so a manually-adjusted, still-valid
   // position from a previous visit to this same axis is left alone; E/W
   // flipping back and forth keeps whatever xThreshold you'd set).
-  if ((direction === 'n' || direction === 's') && activeSectionBox && (yThreshold < activeSectionBox.yMin || yThreshold > activeSectionBox.yMax)){
-    setYCutaway((activeSectionBox.yMin + activeSectionBox.yMax) / 2);
-  } else if ((direction === 'e' || direction === 'w') && activeSectionBox && (xThreshold < activeSectionBox.xMin || xThreshold > activeSectionBox.xMax)){
-    setXCutaway((activeSectionBox.xMin + activeSectionBox.xMax) / 2);
+  // v3.4.112: Joe's UES screenshots -- drew a box, picked W (fine), then
+  // clicked S on the compass: one flat, holeless gray block, and the Y
+  // slider was disabled so it couldn't be moved out of it. This is the
+  // v3.4.109 bug reached through the OTHER entry path. v3.4.109 taught only
+  // applyPlanBoxDirection() (the box picker) to snap the cut to a real
+  // building crossing; this compass path (v3.4.51) still recentered on the
+  // raw box midpoint, which for Joe's box sat in a street gap (reproduced
+  // live: yThreshold 96 inside a gap, skyline profile maxZ 0, zero non-zero
+  // points). Both paths now share snapBoxCutToBuildings(), which also
+  // catches a threshold that is INSIDE the box but stranded in a gap (the
+  // old check only looked for outside-the-box).
+  if ((direction === 'n' || direction === 's') && activeSectionBox){
+    snapBoxCutToBuildings('y');
+  } else if ((direction === 'e' || direction === 'w') && activeSectionBox){
+    snapBoxCutToBuildings('x');
   }
   // v3.0.42: real fix for Joe's "N/S/E/W are isometric, not flat 2D
   // views" report. These previously just repositioned the SAME
@@ -4855,7 +4882,7 @@ function setOrthogonalView(direction, overrideTargetSpan){
   // behavior as before this change, including the deliberate v3.0.42
   // "N/S/E/W/Plan always frame the full model" default for every case
   // that isn't this one specific entry point.
-  let { target, span } = overrideTargetSpan || currentTargetAndSpan();
+  let { target, span } = overrideTargetSpan || currentTargetAndSpan(direction === 'n' || direction === 's' || direction === 'e' || direction === 'w');
   if (activeSectionBox && siteCapHeight !== undefined && (direction === 'n' || direction === 's' || direction === 'e' || direction === 'w')){
     const cx = (activeSectionBox.xMin + activeSectionBox.xMax) / 2;
     const cy = (activeSectionBox.yMin + activeSectionBox.yMax) / 2;
@@ -5591,10 +5618,30 @@ function updateStreetLabelScale(){
 // you leave (Plan/Perspective's own display, box-scoped or not, is
 // completely untouched -- see the boxScoped condition below, now
 // Plan-view-only, same as it always meant for labels specifically).
+// v3.4.114: "locked elevation" = a section axis is set AND the orthographic
+// elevation camera is actually driving the view. sectionModeAxis alone is not
+// enough: turning Manhattan context ON while in an elevation goes through
+// resetSharedViewState(), which swaps back to the perspective camera but does
+// not clear sectionModeAxis -- so a bare `sectionModeAxis !== null` would keep
+// hiding the very context layer the user just asked for.
+function inLockedElevation(){
+  return sectionModeAxis !== null && activeCamera === orthoCamera;
+}
+// v3.4.114: Joe -- "also North South East West elevations are not correct"
+// (Inwood, Manhattan context on, screenshot of a gray island slab behind/around
+// the section). Same class as v3.4.110's streets: the Manhattan context layer
+// (an extruded, ~0.92-opacity plate of the whole island) was never gated by
+// view mode, so in a locked elevation it renders behind the section and the
+// building holes show gray slab instead of open background. It's a Plan/
+// Perspective orientation aid; elevations are about the void between
+// buildings. Hidden in a locked elevation regardless of the toggle, restored
+// to exactly showBoroughs the moment you leave.
+function updateContextLayerVisibility(){
+  if (boroughsGroup) boroughsGroup.visible = showBoroughs && !inLockedElevation();
+}
 function updateStreetLabelVisibility(){
   if (!streetsGroup) return;
-  const inLockedElevation = sectionModeAxis !== null;
-  streetsGroup.visible = showStreets && !inLockedElevation;
+  streetsGroup.visible = showStreets && !inLockedElevation();
   const boxScoped = !!activeSectionBox && isPlanViewActive;
   const pad = 60;
   for (const child of streetsGroup.children){
@@ -5664,7 +5711,7 @@ function refreshBoroughToggle(){
   const btn = document.getElementById('viewBoroughs');
   btn.classList.toggle('active', showBoroughs);
   btn.classList.toggle('secondary', !showBoroughs);
-  if (boroughsGroup) boroughsGroup.visible = showBoroughs;
+  updateContextLayerVisibility(); // v3.4.114: was a direct `boroughsGroup.visible = showBoroughs` -- see updateContextLayerVisibility()
 }
 function zoomToBoroughContext(){
   if (!boroughsGroup) return;
@@ -5766,6 +5813,7 @@ let showNegative = false;
 let showHandles = true; // v3.2.29 -- controls only the cone/guide-line GRAPHICS; cutaway values remain adjustable via slider/number input/keyboard either way
 
 function refreshViewToggles(){
+  updateContextLayerVisibility(); // v3.4.114: runs after camera/view changes (incl. zoomToBoroughContext/exitBoroughContext), when inLockedElevation() has its final value
   const bBtn = document.getElementById('viewSolid');
   const nBtn = document.getElementById('viewNegative');
   bBtn.classList.toggle('active', showBuildings);
@@ -6901,23 +6949,48 @@ function boxEdgeGrabTolerance(){
   // sensible minimum on a small site.
   if (siteCapHeight === undefined) return 6;
   const modelSpan = Math.max(siteMaxX - siteMinX, siteMaxY - siteMinY);
-  return Math.max(modelSpan * 0.015, 4);
+  let tol = Math.max(modelSpan * 0.015, 4);
+  // v3.4.113: also never wider than ~12 screen pixels. 1.5% of the span alone
+  // is ~60m in a 4km district -- fine zoomed out, but enormous once you zoom
+  // in to draw a box (Joe's normal workflow), where it swallows the box.
+  if (activeCamera && activeCamera.isOrthographicCamera){
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (rect.width > 0){
+      const metersPerPx = (activeCamera.right - activeCamera.left) / activeCamera.zoom / rect.width;
+      tol = Math.min(tol, Math.max(12 * metersPerPx, 1));
+    }
+  }
+  return tol;
 }
 function hitTestBoxEdge(wx, wy){
   const b = boxDrawMode ? pendingPlanBox : activeSectionBox;
   if (!b || !isPlanViewActive) return null;
+  // v3.4.113: Joe -- "cannot drag shape handle North & South edges." Two
+  // compounding causes, reproduced live on a 100m x 300m box in Inwood (grab
+  // the middle of the north edge, drag it 40m north: the WEST edge moved 50m
+  // and the north edge did not move at all):
+  //  1. the grab zone (1.5% of the district span, ~60m there) was wider than
+  //     half of a narrow box, so every point along the N/S edges also fell
+  //     within tolerance of the W or E edge;
+  //  2. the old code returned the FIRST edge within tolerance, testing W/E
+  //     before N/S, so W/E always won those ties -- N/S were unreachable on any
+  //     box narrower than twice the tolerance.
+  // Now: each axis's tolerance is capped at 30% of the box's own size on that
+  // axis (so a thin box keeps a real interior), and the NEAREST edge within
+  // tolerance wins, so corners and near-ties resolve to whichever edge you
+  // actually pointed at.
   const tol = boxEdgeGrabTolerance();
-  // Only counts as a hit on an edge if the point also falls within that
-  // edge's own span (plus a little slop) -- otherwise grabbing anywhere
-  // near the box's extended edge LINE, far past its actual corner, would
-  // register, which reads as arbitrary rather than "I grabbed this edge."
-  const withinX = wx > b.xMin - tol && wx < b.xMax + tol;
-  const withinY = wy > b.yMin - tol && wy < b.yMax + tol;
-  if (withinY && Math.abs(wx - b.xMin) <= tol) return 'xMin';
-  if (withinY && Math.abs(wx - b.xMax) <= tol) return 'xMax';
-  if (withinX && Math.abs(wy - b.yMin) <= tol) return 'yMin';
-  if (withinX && Math.abs(wy - b.yMax) <= tol) return 'yMax';
-  return null;
+  const tolX = Math.min(tol, (b.xMax - b.xMin) * 0.3), tolY = Math.min(tol, (b.yMax - b.yMin) * 0.3);
+  let best = null, bestD = Infinity;
+  const consider = (side, d, t) => { if (d <= t && d < bestD){ bestD = d; best = side; } };
+  // An edge only counts if the point also falls within that edge's own span
+  // (plus slop) -- grabbing near an edge's extended LINE past the corner
+  // shouldn't register.
+  const withinX = wx > b.xMin - tolX && wx < b.xMax + tolX;
+  const withinY = wy > b.yMin - tolY && wy < b.yMax + tolY;
+  if (withinY){ consider('xMin', Math.abs(wx - b.xMin), tolX); consider('xMax', Math.abs(wx - b.xMax), tolX); }
+  if (withinX){ consider('yMin', Math.abs(wy - b.yMin), tolY); consider('yMax', Math.abs(wy - b.yMax), tolY); }
+  return best;
 }
 // v3.4.65: worldToScreenXY() is the deliberate inverse of
 // screenToWorldGround() above -- same rect (renderer.domElement's own
@@ -7090,6 +7163,36 @@ function positionPlanBoxPanel(){
   // deleting it and its one call site below, so this stays a one-line
   // diff if a floating variant is ever wanted again.
 }
+// v3.4.112: does anything real cross the cut at threshold `t` within the
+// box's own plotted range? Same test buildSectionProfile() applies (slab of
+// +-SECTION_SLAB_HALF_WIDTH on the cut axis, overlap on the plotted axis),
+// so "true" here means the section will actually have content.
+function boxCutHasBuildings(axis, box, t){
+  if (!buildingBBoxCache) return true; // can't tell -- don't second-guess
+  const plotLo = axis === 'x' ? box.yMin : box.xMin, plotHi = axis === 'x' ? box.yMax : box.xMax;
+  for (const b of buildingBBoxCache){
+    const cMin = axis === 'x' ? b.xMin : b.yMin, cMax = axis === 'x' ? b.xMax : b.yMax;
+    const pMin = axis === 'x' ? b.yMin : b.xMin, pMax = axis === 'x' ? b.yMax : b.xMax;
+    if (cMax < t - SECTION_SLAB_HALF_WIDTH || cMin > t + SECTION_SLAB_HALF_WIDTH) continue;
+    if (pMax < plotLo || pMin > plotHi) continue;
+    return true;
+  }
+  return false;
+}
+// v3.4.112: one place that decides where the cut sits for an active box on
+// this axis -- used by BOTH the box picker and the compass buttons. Leaves a
+// threshold alone when it's inside the box AND has buildings (a
+// manually-placed valid position survives E<->W flips); otherwise moves it to
+// the real crossing nearest the box midpoint.
+function snapBoxCutToBuildings(axis){
+  const box = activeSectionBox;
+  if (!box || !buildingBBoxCache) return;
+  const lo = axis === 'x' ? box.xMin : box.yMin, hi = axis === 'x' ? box.xMax : box.yMax;
+  const cur = axis === 'x' ? xThreshold : yThreshold;
+  if (cur >= lo && cur <= hi && boxCutHasBuildings(axis, box, cur)) return;
+  const v = findNearestBuildingCrossing(axis, box, (lo + hi) / 2);
+  if (axis === 'x') setXCutaway(v); else setYCutaway(v);
+}
 // v3.4.109: Joe -- "no north or south views for section box." Root cause:
 // applyPlanBoxDirection() (below) always centered the cut threshold on the
 // box's literal geometric midpoint -- but the real cut this app draws is
@@ -7244,6 +7347,12 @@ document.getElementById('fullWidthBtn').addEventListener('click', clearActiveSec
     get SITE_BOUND_PLANES(){ return SITE_BOUND_PLANES; },
     get sectionModeAxis(){ return sectionModeAxis; },
     get activeSectionBox(){ return activeSectionBox; }, get boxDrawMode(){ return boxDrawMode; }, get pendingPlanBox(){ return pendingPlanBox; }, // v3.4.0
+    // v3.4.111: added while building the smoke-test script -- without these,
+    // finding streetsGroup from outside meant searching the whole scene
+    // graph for a Group whose children happen to be colored 9fb8cc, which
+    // is exactly the kind of brittle, guessy live-debugging this whole
+    // hook exists to avoid (see v3.0.2's own comment above).
+    get streetsGroup(){ return streetsGroup; }, get showStreets(){ return showStreets; },
   };
   try {
     toast('Loading geometry engine…');

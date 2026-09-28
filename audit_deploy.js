@@ -852,27 +852,31 @@ check(
    switching to a different axis than the one currently active (goToDirection's
    direct-compass path never did this; the box-direction picker always has)
    =================================================================== */
-sectionHeader("v3.4.51 -- N/S/E/W direction switch re-centers xThreshold/yThreshold on the box when it's outside the box's own range");
+sectionHeader("v3.4.51 (rewritten v3.4.112) -- N/S/E/W direction switch keeps an active box's cut inside the box and on real buildings");
 
 check(
-  'setOrthogonalView() checks yThreshold against activeSectionBox.yMin/yMax for n/s and re-centers via setYCutaway() when out of range',
-  /if \(\(direction === 'n' \|\| direction === 's'\) && activeSectionBox && \(yThreshold < activeSectionBox\.yMin \|\| yThreshold > activeSectionBox\.yMax\)\)\{\s*setYCutaway\(\(activeSectionBox\.yMin \+ activeSectionBox\.yMax\) \/ 2\);/.test(html)
+  'setOrthogonalView() sends compass n/s through snapBoxCutToBuildings("y") when a box is active',
+  /if \(\(direction === 'n' \|\| direction === 's'\) && activeSectionBox\)\{\s*\n\s*snapBoxCutToBuildings\('y'\);/.test(html)
 );
 check(
-  'setOrthogonalView() checks xThreshold against activeSectionBox.xMin/xMax for e/w and re-centers via setXCutaway() when out of range',
-  /\} else if \(\(direction === 'e' \|\| direction === 'w'\) && activeSectionBox && \(xThreshold < activeSectionBox\.xMin \|\| xThreshold > activeSectionBox\.xMax\)\)\{\s*setXCutaway\(\(activeSectionBox\.xMin \+ activeSectionBox\.xMax\) \/ 2\);/.test(html)
+  'setOrthogonalView() sends compass e/w through snapBoxCutToBuildings("x") when a box is active',
+  /\} else if \(\(direction === 'e' \|\| direction === 'w'\) && activeSectionBox\)\{\s*\n\s*snapBoxCutToBuildings\('x'\);/.test(html)
 );
 check(
-  'the re-centering runs BEFORE applySectionMode() so the newly-centered threshold is what the profile refresh actually reads, not one switch late',
+  'the snap runs BEFORE applySectionMode() so the profile refresh reads the corrected threshold, not one switch late',
   (() => {
-    const centerIdx = html.indexOf("if ((direction === 'n' || direction === 's') && activeSectionBox && (yThreshold");
+    const snapIdx = html.indexOf("snapBoxCutToBuildings('y');");
     const applyIdx = html.indexOf("applySectionMode(direction === 'n' || direction === 's' ? 'y'");
-    return centerIdx > 0 && applyIdx > centerIdx;
+    return snapIdx > 0 && applyIdx > snapIdx;
   })()
 );
 check(
-  'the fix is scoped to OUT-OF-RANGE thresholds only -- a manually-adjusted, still-valid threshold is left alone, so flipping E/W (same axis) never resets a slider position mid-inspection',
-  /yThreshold < activeSectionBox\.yMin \|\| yThreshold > activeSectionBox\.yMax/.test(html) && /xThreshold < activeSectionBox\.xMin \|\| xThreshold > activeSectionBox\.xMax/.test(html)
+  'a manually-placed threshold that is inside the box AND has buildings is left alone (E/W flips never reset a valid slider position)',
+  /if \(cur >= lo && cur <= hi && boxCutHasBuildings\(axis, box, cur\)\) return;/.test(html)
+);
+check(
+  'resetCutaway() with a box active uses findNearestBuildingCrossing() for both axes instead of the raw box midpoint',
+  /setXCutaway\(findNearestBuildingCrossing\('x', bx, \(bx\.xMin \+ bx\.xMax\) \/ 2\)\);\s*\n\s*setYCutaway\(findNearestBuildingCrossing\('y', bx, \(bx\.yMin \+ bx\.yMax\) \/ 2\)\);/.test(html)
 );
 
 /* ===================================================================
@@ -1089,7 +1093,7 @@ check(
 );
 check(
   'the active axis row (key === axis) is now ALSO inert when cutawayVisiblyInert, not just the other two -- the v3.3.0 "active row stays fully interactive" assumption no longer holds under Option B',
-  /const inert = axis !== null && \(key !== axis \|\| cutawayVisiblyInert\);/.test(html)
+  /const inert = axis !== null && key !== axis;/.test(html)  // v3.4.112: active axis re-enabled -- the v3.4.60 premise was false in current code
 );
 check(
   'showHandlesRow (added id, previously untargetable) dims/disables for either of its two real reasons -- activeSectionBox (v3.4.13, handles force-hidden) or cutawayVisiblyInert (new)',
@@ -1100,8 +1104,8 @@ check(
   /const resetBtn = document\.getElementById\('resetCutawayBtn'\);\s*if \(resetBtn\)\{\s*resetBtn\.style\.opacity = cutawayVisiblyInert \? '0\.4' : '';\s*resetBtn\.disabled = cutawayVisiblyInert;/.test(html)
 );
 check(
-  'the z (Height) row keeps its original, unrelated inert reason (true elevations show full height by design) -- cutawayVisiblyInert only changes behavior for x/y, key !== axis already covered z unconditionally before and still does',
-  /const inert = axis !== null && \(key !== axis \|\| cutawayVisiblyInert\);[\s\S]{0,400}row\.style\.opacity = inert \? '0\.4' : '';/.test(html)
+  'the z (Height) row keeps its original, unrelated inert reason (true elevations show full height by design); the active x/y axis row is now live (v3.4.112)',
+  /const inert = axis !== null && key !== axis;[\s\S]{0,400}row\.style\.opacity = inert \? '0\.4' : '';/.test(html)
 );
 
 /* ===================================================================
@@ -1170,8 +1174,8 @@ check(
   /function resetCutaway\(\)\{[\s\S]{0,1600}setHeightCut\(0\);/.test(html)
 );
 check(
-  'resetCutaway() calls setXCutaway()/setYCutaway() with the box\'s own center when activeSectionBox exists, not a flat 0',
-  /if \(activeSectionBox\)\{\s*setXCutaway\(\(activeSectionBox\.xMin \+ activeSectionBox\.xMax\) \/ 2\);\s*setYCutaway\(\(activeSectionBox\.yMin \+ activeSectionBox\.yMax\) \/ 2\);\s*\} else \{\s*setXCutaway\(0\);\s*setYCutaway\(0\);\s*\}/.test(html)
+  'resetCutaway() recenters on the box via the real-crossing snap (v3.4.112) when activeSectionBox exists, and uses a flat 0 only with no box',
+  /if \(activeSectionBox\)\{[\s\S]{0,700}setXCutaway\(findNearestBuildingCrossing\('x', bx[\s\S]{0,200}setYCutaway\(findNearestBuildingCrossing\('y', bx[\s\S]{0,60}\} else \{\s*setXCutaway\(0\);\s*setYCutaway\(0\);\s*\}/.test(html)
 );
 check(
   'the old duplicated logic (manual xThreshold/yThreshold assignment, bypassing the setters entirely) is gone from resetCutaway()',
@@ -1195,7 +1199,7 @@ check(
 );
 check(
   'target/span destructuring falls back to currentTargetAndSpan() only when overrideTargetSpan is not supplied -- every other existing caller (which passes nothing) is unaffected',
-  /let \{ target, span \} = overrideTargetSpan \|\| currentTargetAndSpan\(\);/.test(html)
+  /let \{ target, span \} = overrideTargetSpan \|\| currentTargetAndSpan\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\);/.test(html)  // v3.4.114: same fallback rule, now passing whether this is an elevation
 );
 check(
   'setBoxDrawMode(true) only captures an override when actually coming from the perspective camera (activeCamera === camera) -- no perspective FOV/distance to convert from otherwise, falls through to normal full-site framing',
@@ -1486,7 +1490,7 @@ check(
 );
 check(
   'applySectionMode() calls updateStreetLabelVisibility() synchronously (before the deferred rAF/setTimeout calls, since sectionModeAxis/activeSectionBox/isPlanViewActive are already final by then) and buildStreetsLayer() calls it once right after scene.add(streetsGroup)',
-  /updateStreetLabelVisibility\(\);\s*requestAnimationFrame\(\(\) => \{/.test(html)
+  /updateStreetLabelVisibility\(\);\s*updateContextLayerVisibility\(\); \/\/ v3\.4\.114\s*requestAnimationFrame\(\(\) => \{/.test(html)
   && /scene\.add\(streetsGroup\);\s*updateStreetLabelVisibility\(\);/.test(html)
 );
 
@@ -2165,7 +2169,7 @@ sectionHeader("v3.4.110 -- street ribbons and labels now hide entirely in a lock
 
 check(
   'updateStreetLabelVisibility() hides the whole streetsGroup whenever sectionModeAxis is not null, regardless of showStreets or box scoping',
-  /const inLockedElevation = sectionModeAxis !== null;\s*\n\s*streetsGroup\.visible = showStreets && !inLockedElevation;/.test(html)
+  /function inLockedElevation\(\)\{\s*\n\s*return sectionModeAxis !== null && activeCamera === orthoCamera;\s*\n\}/.test(html) && /streetsGroup\.visible = showStreets && !inLockedElevation\(\);/.test(html)
 );
 check(
   'the box-scoped per-label visibility check is now Plan-view-only (isPlanViewActive alone), since the locked-elevation case is handled by the group-level hide above',
@@ -2174,6 +2178,94 @@ check(
 check(
   'the streets toggle button routes through updateStreetLabelVisibility() instead of setting streetsGroup.visible directly, so it can\'t fight the locked-elevation hide',
   /btn\.classList\.toggle\('secondary', !showStreets\);\s*\n[\s\S]{0,700}updateStreetLabelVisibility\(\);\s*\n\}/.test(html)
+);
+
+sectionHeader("v3.4.111 -- live smoke test + debug hook additions");
+
+check(
+  'window.__NS exposes streetsGroup and showStreets, so smoke tests can check street visibility directly instead of color-matching the scene graph',
+  /get streetsGroup\(\)\{ return streetsGroup; \}, get showStreets\(\)\{ return showStreets; \}/.test(html)
+);
+check(
+  'smoke_test.js exists alongside audit_deploy.js and defines runSmokeTest()',
+  (() => { try { return /async function runSmokeTest\(label/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.112 -- compass-after-box path shares the snap-to-real-building logic; active axis slider re-enabled");
+
+check(
+  'boxCutHasBuildings() and snapBoxCutToBuildings() are defined, and snap only moves a threshold that is outside the box OR stranded where nothing crosses it',
+  /function boxCutHasBuildings\(axis, box, t\)\{/.test(html)
+  && /function snapBoxCutToBuildings\(axis\)\{/.test(html)
+  && /if \(cur >= lo && cur <= hi && boxCutHasBuildings\(axis, box, cur\)\) return;/.test(html)
+);
+check(
+  'setOrthogonalView() routes the compass N/S/E/W through snapBoxCutToBuildings(), and the old raw-midpoint recenter is gone',
+  /if \(\(direction === 'n' \|\| direction === 's'\) && activeSectionBox\)\{\s*\n\s*snapBoxCutToBuildings\('y'\);/.test(html)
+  && /snapBoxCutToBuildings\('x'\);/.test(html)
+);
+check(
+  'smoke_test.js includes the compass-after-box phase and the empty-section (skyline maxZ) check; soak_test.js exists',
+  (() => { try {
+    const t = fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8');
+    return /Phase 6 -- compass buttons after a gap-midpoint box/ && /function smokeFindGapBox/.test(t) && /function skylineMaxZ\(\)/.test(t)
+      && /async function runSoakTest/.test(fs.readFileSync(path.join(__dirname, 'soak_test.js'), 'utf8'));
+  } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.113 -- box edge handles: nearest edge wins, grab zone capped by box size and screen pixels");
+
+check(
+  'hitTestBoxEdge() picks the NEAREST edge within tolerance (not the first one tested), with per-axis tolerance capped at 30% of the box\'s own size',
+  /const tolX = Math\.min\(tol, \(b\.xMax - b\.xMin\) \* 0\.3\), tolY = Math\.min\(tol, \(b\.yMax - b\.yMin\) \* 0\.3\);/.test(html)
+  && /const consider = \(side, d, t\) => \{ if \(d <= t && d < bestD\)\{ bestD = d; best = side; \} \};/.test(html)
+);
+check(
+  'boxEdgeGrabTolerance() is also capped at ~12 screen pixels on the orthographic Plan camera',
+  /tol = Math\.min\(tol, Math\.max\(12 \* metersPerPx, 1\)\);/.test(html)
+);
+check(
+  'smoke_test.js has the edge-handle phase (both narrow and wide boxes, all four edges)',
+  (() => { try { const t = fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8'); return /Phase 7 -- box edge handles/.test(t) && /\['tall narrow', 50, 150\], \['wide short', 150, 50\]/.test(t); } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.114 -- Manhattan context layer hides in a locked elevation; elevations frame the site, not the island");
+
+check(
+  'updateContextLayerVisibility() hides boroughsGroup whenever inLockedElevation() (axis set AND ortho camera active), restoring to showBoroughs otherwise',
+  /function updateContextLayerVisibility\(\)\{\s*\n\s*if \(boroughsGroup\) boroughsGroup\.visible = showBoroughs && !inLockedElevation\(\);/.test(html)
+);
+check(
+  'the borough toggle refresh, applySectionMode(), and refreshViewToggles() all route through updateContextLayerVisibility() (no direct boroughsGroup.visible = showBoroughs left)',
+  /updateContextLayerVisibility\(\); \/\/ v3\.4\.114: was a direct/.test(html)
+  && /updateContextLayerVisibility\(\); \/\/ v3\.4\.114\n/.test(html)
+  && /function refreshViewToggles\(\)\{\s*\n\s*updateContextLayerVisibility\(\);/.test(html)
+  && !/boroughsGroup\.visible = showBoroughs;\s*\n/.test(html.replace(/showBoroughs && !inLockedElevation\(\)/g, ''))
+);
+check(
+  'currentTargetAndSpan() only uses the whole-island span when NOT framing an N/S/E/W elevation, and setOrthogonalView() passes that flag',
+  /function currentTargetAndSpan\(forElevation\)\{/.test(html)
+  && /if \(showBoroughs && boroughsGroup && !forElevation\)\{/.test(html)
+  && /currentTargetAndSpan\(direction === 'n' \|\| direction === 's' \|\| direction === 'e' \|\| direction === 'w'\)/.test(html)
+);
+check(
+  'smoke_test.js has the Manhattan-context phase',
+  (() => { try { return /Phase 8 -- Manhattan context/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.115 -- smoke test examines BOTH sides of the Manhattan-context toggle (Joe's standing rule)");
+
+check(
+  'smoke_test.js takes a context side (opts.context) and has runSmokeBothSides() running the full matrix with Manhattan context OFF and ON',
+  (() => { try {
+    const t = fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8');
+    return /async function runSmokeTest\(label, opts = \{\}\)/.test(t) && /const ctxOn = opts\.context === 'on';/.test(t)
+      && /async function runSmokeBothSides\(label\)/.test(t) && /context: 'off'/.test(t) && /context: 'on'/.test(t);
+  } catch (e) { return false; } })()
+);
+check(
+  'the context-ON side fits Plan to the site (a real user zooms in first) before drawing boxes, since Plan with context ON frames the ~20km island',
+  (() => { try { return /async function goPlan\(\)\{[\s\S]{0,700}oc\.zoom = \(oc\.top - oc\.bottom\) \/ \(Math\.max\(x1 - x0, y1 - y0\) \* 1\.4\);/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
 );
 
 /* ===================================================================
