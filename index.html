@@ -385,6 +385,21 @@
   }
   #stats b{color:var(--ink); font-weight:600;}
 
+  /* v3.4.119: Joe -- "is there we can get view controls in a 3d view top,
+     left, right etc? ... view cube." Distinct from #navPanel's N/S/E/W/Plan,
+     which lock into the orthographic section system -- this snaps the FREE
+     perspective camera to a standard angle and leaves it orbit-able,
+     exactly like a CAD ViewCube. Stacked directly above #navPanel (same
+     right edge) rather than under #stats, whose height grows with content
+     and isn't safe to stack under without measuring it live. */
+  #viewCubePanel{
+    right:16px; bottom:calc(142px + env(safe-area-inset-bottom)); /* v3.4.126: was 130px -- only ~8px above #navPanel; 12px more clearance */
+    padding:6px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #viewCubeCanvas{ width:84px; height:84px; display:block; cursor:grab; }
+  #viewCubeCanvas.dragging{ cursor:grabbing; }
+
   #navPanel{
     /* v3.4.34: the direction-button grid moved into #controls -- this
        panel is now just the compass rose + current-view label, so it can
@@ -853,6 +868,10 @@
   <div id="statCompute" style="margin-top:6px;"></div>
 </div>
 
+<div class="panel" id="viewCubePanel" title="Click a face to snap the 3D view -- stays perspective and orbit-able, unlike N/S/E/W/Plan">
+  <canvas id="viewCubeCanvas" width="84" height="84"></canvas>
+</div>
+
 <div class="panel" id="navPanel">
   <div id="currentViewLabel">Perspective</div>
   <div id="compassRose" title="North">
@@ -912,7 +931,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.115'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.125'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1634,14 +1653,31 @@ let activeSectionBox = null; // {xMin,xMax,yMin,yMax} world coords, or null
 function getSectionRanges(axis){
   // axis 'x' = E/W view (cuts along X via xThreshold, plots along Y).
   // axis 'y' = N/S view (cuts along Y via yThreshold, plots along X).
+  // v3.4.116: Joe -- "there are a lot more building/forms in plan view from
+  // what i see in elevation... it needs to read correctly." Root cause: the
+  // real building SOLID has always box-clipped to the box's FULL depth on the
+  // cut axis (getCutAxisClipPlanes(), using activeSectionBox.xMin/xMax or
+  // yMin/yMax directly, unchanged since v3.4.13) -- but this function fed
+  // buildSectionProfile() (the POCHE's own hole-punch profile) a thin +-2m
+  // slab at one line (xThreshold/yThreshold) regardless of the box, so
+  // Negative-space mode only showed holes for buildings crossing that one
+  // line, while Buildings mode showed everything the box's real depth
+  // contains. Verified live on a real box before changing this: 3 buildings
+  // inside the box footprint, only 2 crossed the old 2m slab. When a box is
+  // active, the slab now spans the box's own full depth on the cut axis --
+  // matching getCutAxisClipPlanes() exactly, so Buildings and Negative-space
+  // modes now agree, and Negative-space shows everything Plan's box outline
+  // actually contains. The free full-site case (no box) is untouched: a
+  // true single-line section is still exactly right there, since there's no
+  // box expressing how deep the user actually wants to look.
   if (axis === 'x'){
     if (activeSectionBox){
-      return { plotLo: activeSectionBox.yMin, plotHi: activeSectionBox.yMax, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold + SECTION_SLAB_HALF_WIDTH };
+      return { plotLo: activeSectionBox.yMin, plotHi: activeSectionBox.yMax, slabLo: activeSectionBox.xMin, slabHi: activeSectionBox.xMax };
     }
     return { plotLo: siteMinY, plotHi: siteMaxY, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold + SECTION_SLAB_HALF_WIDTH };
   }
   if (activeSectionBox){
-    return { plotLo: activeSectionBox.xMin, plotHi: activeSectionBox.xMax, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold + SECTION_SLAB_HALF_WIDTH };
+    return { plotLo: activeSectionBox.xMin, plotHi: activeSectionBox.xMax, slabLo: activeSectionBox.yMin, slabHi: activeSectionBox.yMax };
   }
   return { plotLo: siteMinX, plotHi: siteMaxX, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold + SECTION_SLAB_HALF_WIDTH };
 }
@@ -2280,7 +2316,8 @@ function refreshCapFillCoverage(groups, colorOverride){
     const pts = corners.map(([x, y, z]) => new THREE.Vector3(x, y, z));
     outline.geometry.setFromPoints(pts);
     outline.geometry.computeBoundingSphere();
-    const large = ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;
+    // v3.4.126: a drawn box crops the cap to the box and the elevation camera frames the box, so the "large area, ease off the fill" rationale (full-site caps in free perspective) does not apply -- a wide E-W box (easily >50% of the narrow site X span) flipped N/S elevations to outline-only with no fill. Box-scoped caps always fill.
+    const large = !activeSectionBox && ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;
     quad.visible = !large;
     outline.visible = large;
   }
@@ -2502,6 +2539,32 @@ function buildBuildingXYCapGeometry(axis, value){
   const merged = mergeGeometries(geoms, false);
   geoms.forEach(g => g.dispose());
   return merged;
+}
+// v3.4.118: Joe -- "keyboard arrow nudging seems to freeze the app."
+// Measured live on his own real district (Upper West Side, 4979 buildings):
+// a SINGLE setYCutaway() call -- one keystroke's worth of work -- took
+// 2642ms, almost all of it rebuildBuildingXYCap()/rebuildBuildingZCap()
+// re-slicing EVERY building footprint in the district and merging the
+// result, synchronously, on the main thread. These have run unconditionally
+// on every setXCutaway()/setYCutaway()/setHeightCut() call since v3.4.91/93,
+// with no debounce -- fine for a single mouse click, but holding an arrow
+// key fires OS key-repeat every ~30-50ms, and JS is single-threaded: each
+// repeat queues another 2.6s of work behind the last, so holding a key for
+// even two seconds backs up well over a minute of unresponsive freeze. The
+// cheap parts of these setters (plane constants, slider/number display,
+// handle positions, the skyline profile) stay exactly as synchronous as
+// before -- only the expensive per-building rebuild is now coalesced to at
+// most once per actually-rendered frame via requestAnimationFrame, reading
+// xThreshold/yThreshold/sectionPlane.constant fresh when it runs, so a
+// burst of events collapses to the LATEST value, not a queue of stale ones.
+let pendingBuildingCapRebuild = { x: false, y: false, z: false };
+function scheduleBuildingCapRebuild(axis){
+  if (pendingBuildingCapRebuild[axis]) return; // already scheduled for the next frame -- nothing more to do until it runs
+  pendingBuildingCapRebuild[axis] = true;
+  requestAnimationFrame(() => {
+    pendingBuildingCapRebuild[axis] = false;
+    if (axis === 'z') rebuildBuildingZCap(); else rebuildBuildingXYCap(axis);
+  });
 }
 function rebuildBuildingXYCap(axis){
   if (!buildingCapFillGroups) return;
@@ -2792,6 +2855,7 @@ function initScene(){
   controls.addEventListener('change', updateStreetLabelScale); // v3.4.77: same pattern as the compass listener right above -- keeps label size responsive to manual scroll-wheel zoom/pan within a view, not just discrete view switches (which already call it via updateStreetLabelVisibility())
   controls.addEventListener('change', refreshCapFillVisibility); // v3.4.85: X/Y poché's new free-Perspective visibility depends on the live camera angle, not just view mode -- same established pattern as the two listeners just above, re-evaluates on every orbit/pan/zoom, not only on discrete view switches. v3.4.86: MOVED here from right after refreshCapFillVisibility()'s own definition (much later in the file, at top-level module scope) -- that spot runs synchronously during initial script parse, before initScene() (and this very `controls = new OrbitControls(...)` assignment a few lines up) has ever executed, so `controls` was still undefined there -- crashed the entire app on load (TypeError: Cannot read properties of undefined (reading 'addEventListener')), confirmed via the real browser console, not guessed. function declarations hoist, so refreshCapFillVisibility() itself is safely callable from here regardless of where it's defined in the file; only the controls REFERENCE needed to wait until after this line.
   updateCompass();
+  initViewCube(); // v3.4.119
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3226, 1.1));
   sun = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -2865,6 +2929,7 @@ function animate(){
   updatePendingPlanBoxOverlay(); // v3.4.18 -- keeps the drawn-box outline anchored to its real world position while the direction picker is up; see the function's own comment
   enforceSectionRenderState(); // v3.4.45 -- see its own comment; closes the whole class of "a deferred write landed on a uniforms object that got replaced" bugs this file has chased since v3.4.11
   renderer.render(scene, activeCamera);
+  updateViewCube(); // v3.4.119
 }
 // v3.4.45: Joe, after v3.4.41/42's requestAnimationFrame/setTimeout
 // defensive re-syncs (themselves following v3.4.11/26/27/30/44's fixed-
@@ -4268,6 +4333,41 @@ function getCutAxisClipPlanes(axis){
   }
   return [axis === 'x' ? xClipPlane : yClipPlane]; // unchanged: single plane, true full elevation on this axis
 }
+// v3.4.117: Joe -- "elevation is showing artifacts" (both Buildings and
+// Negative space on at once, a box active, N view -- an isolated dark
+// rectangle far from the box). Root-caused live: buildingXCapMaterial/
+// buildingYCapMaterial (the solid cross-section FACE shown where a locked
+// axis cuts through a building's interior, Buildings mode only) are built
+// once in buildBuildingCapFillGroups() from clippingPlanes fixed to the
+// WHOLE SITE (...SITE_BOUND_PLANES) and never revisited -- unlike
+// syncBuildingClipping()/the poche/ground/streets, nothing ever box-scoped
+// these two materials when a box is drawn. buildBuildingXYCapGeometry()
+// itself also slices EVERY building footprint in the district at the
+// current threshold, not just ones in the box, so with no box-plotted-axis
+// clip the cap showed real cut faces for buildings anywhere in the
+// district that happened to cross that one line. Confirmed via the
+// project's own hide-one-thing-at-a-time technique: solidGroup,
+// capFillGroups (all 3 axes), and streetsGroup were each hidden in turn
+// with the artifact still present; hiding this exact mesh removed it.
+// Mirrors syncBuildingClipping()'s own existing box-plotted-crop exactly
+// -- same getSectionRanges(axis).plotLo/plotHi, same two extra planes,
+// added on top of each material's fixed site-wide base rather than
+// replacing it (the site-wide bound is still correct with no box active).
+function syncBuildingCapClipping(axis){
+  if (!buildingXCapMaterial || !buildingYCapMaterial) return; // pre-compute, or this district never built any caps
+  const baseX = [sectionPlaneNeg, yClipPlaneNeg, ...SITE_BOUND_PLANES];
+  const baseY = [sectionPlaneNeg, xClipPlaneNeg, ...SITE_BOUND_PLANES];
+  if (axis && activeSectionBox){
+    const { plotLo, plotHi } = getSectionRanges(axis);
+    if (axis === 'x'){
+      baseX.push(new THREE.Plane(new THREE.Vector3(0, 1, 0), -plotLo), new THREE.Plane(new THREE.Vector3(0, -1, 0), plotHi));
+    } else {
+      baseY.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -plotLo), new THREE.Plane(new THREE.Vector3(-1, 0, 0), plotHi));
+    }
+  }
+  buildingXCapMaterial.clippingPlanes = baseX; buildingXCapMaterial.needsUpdate = true;
+  buildingYCapMaterial.clippingPlanes = baseY; buildingYCapMaterial.needsUpdate = true;
+}
 function applySectionMode(axis, isPlanView){
   sectionModeAxis = axis;
   isPlanViewActive = !!isPlanView; // v3.4.28
@@ -4348,6 +4448,7 @@ function applySectionMode(axis, isPlanView){
     negMat.needsUpdate = true;
   }
   syncBuildingClipping(axis, false); // v3.4.37: always false now -- see the axis===null branch's own comment just above; kept the isPlanView param on the function itself since the else-branch behavior it produces is still exactly correct, just always taken now for axis===null. v3.4.105: now runs regardless of compute state -- see this function's own top comment.
+  syncBuildingCapClipping(axis); // v3.4.117: keeps the building-mode cut-face caps box-scoped the same way syncBuildingClipping() just did for the real solid
   updatePlanBoxOutline(); // v3.4.37: see its own comment
   // v3.4.32: Joe -- "why can't we have it so that nothing displays outside
   // of the section box... ground plane, artifacts etc." Real gap: the
@@ -5070,6 +5171,246 @@ function resetToDefaultView(){
     controls.update();
   }
 }
+
+// ===========================================================================
+// v3.4.119: View Cube. Joe -- "is there we can get view controls in a 3d
+// view top, left, right etc? ... view cube."
+//
+// Deliberately separate from setOrthogonalView()/N-S-E-W-Plan: those lock
+// the scene into the orthographic section system (true flat elevations,
+// clipping planes, box-scoping -- the whole machinery this file is mostly
+// about). A ViewCube is a different, much simpler idea: snap the FREE
+// PERSPECTIVE camera to a standard angle and leave it exactly as orbit-able
+// as it always was. So this only ever touches `camera` (never `orthoCamera`)
+// and never calls applySectionMode() -- it's a shortcut for "look from here,"
+// not a mode switch. Reuses the EXACT same direction vectors and "camera
+// stands opposite the label, facing toward it" convention setOrthogonalView()
+// already established (v3.0.18) -- clicking the cube's N face puts the
+// camera in the identical position N/S/E/W/Plan's own nav button would, the
+// only difference is which camera and whether section mode engages.
+//
+// Rendered with its own small WebGLRenderer into its own <canvas> (not the
+// main fullscreen one) -- a second tiny GL context is the simplest, lowest-
+// risk way to get an inset viewport; no scissor/viewport coordinate math
+// against the main canvas's on-screen position to get wrong.
+let viewCubeScene, viewCubeCamera, viewCubeRenderer, viewCubeGroup, viewCubeLight;
+const VIEW_CUBE_SIZE = 84;
+// label -> outward face normal. Derived from setOrthogonalView()'s own
+// dir table: when camera looks in +dir[key] (its "view key" convention),
+// the face actually facing that camera has normal -dir[key] -- so the face
+// labeled N (visible when you're IN the N view) carries dirS's vector, etc.
+// This is what makes the cube read correctly as you orbit: whichever label
+// is facing you names the view you're closest to right now.
+const VIEW_CUBE_DIRS = { n: [0, 1, 0], s: [0, -1, 0], e: [1, 0, 0], w: [-1, 0, 0] }; // same as setOrthogonalView()'s own `dir` table, top/bottom handled separately (pure +-Z, no horizontal dir)
+
+// v3.4.120: rotDeg compensates for THREE.BoxGeometry's own per-face UV
+// layout, which is NOT uniform across faces (confirmed by dumping the
+// actual geometry.attributes.uv data: e.g. the +X face maps U to Z
+// inverted while +Z maps U to X direct -- different faces relate their
+// canvas's natural "upright" reading differently to their own U/V axes).
+// Verified empirically, not derived: rendered each labeled face ALONE
+// (every other face plain black) straight-on from its own real-world
+// direction, each with a genuinely fresh canvas/renderer/scene. That last
+// part mattered: an earlier pass reusing one canvas across tests produced
+// corrupted, misleading reads (N appeared to need 90 and even looked like
+// "Z" -- both artifacts of stale state, not the real answer; redone fresh,
+// N needed no rotation at all). Only E and W actually need a quarter turn,
+// in opposite directions, matching their mirrored U-axis parity in the
+// underlying UV data. TOP, BOTTOM, N, and S all need none.
+function makeViewCubeFaceTexture(label, rotDeg){
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const cs = getComputedStyle(document.documentElement);
+  ctx.fillStyle = cs.getPropertyValue('--card').trim() || '#0E3D5E';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = cs.getPropertyValue('--line').trim() || '#2F5878';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 124, 124);
+  ctx.save();
+  ctx.translate(64, 64);
+  ctx.rotate((rotDeg || 0) * Math.PI / 180);
+  ctx.fillStyle = cs.getPropertyValue('--ink').trim() || '#EAF3FA';
+  ctx.font = '700 ' + (label.length > 1 ? 26 : 40) + 'px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 0, 2);
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function initViewCube(){
+  const canvas = document.getElementById('viewCubeCanvas');
+  if (!canvas) return;
+  viewCubeScene = new THREE.Scene();
+  viewCubeCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+  viewCubeCamera.up.set(0, 0, 1); // must match the main scene's Z-up convention, or the cube's rotation sync (which copies the main camera's quaternion directly) would read against a mismatched up-axis and tumble incorrectly
+  viewCubeRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  viewCubeRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  viewCubeRenderer.setSize(VIEW_CUBE_SIZE, VIEW_CUBE_SIZE, false);
+
+  viewCubeScene.add(new THREE.HemisphereLight(0xffffff, 0x3a3226, 1.3));
+  // v3.4.121: Joe -- "why is it so dark?" This light was fixed at a single
+  // world position while the mini-camera orbits every frame to match
+  // whatever direction the user is currently viewing from (updateViewCube()
+  // below) -- so whichever face the camera actually faces was frequently
+  // the one facing AWAY from this fixed light, rendering dark/near-black.
+  // Same root cause and same fix as orthoLight (v3.4.24), which exists for
+  // the identical reason on the MAIN scene's locked elevations: repositioned
+  // every frame to track the camera, so whatever's currently in view is
+  // always front-lit, not tied to how the target happens to be oriented.
+  viewCubeLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  viewCubeScene.add(viewCubeLight);
+
+  // v3.4.120: Joe -- two screenshots, then "not functioning as a view cube
+  // would, like any other 3d software solution" -- the flat-square-with-one-
+  // letter render (no visible depth, no adjacent faces even at a clear 3/4
+  // camera angle) confirmed the SIX-SEPARATE-PLANES approach was the wrong
+  // technique from the start, not just mis-tuned. Rebuilt as a single real
+  // THREE.BoxGeometry with 6 materials instead: BoxGeometry's face winding
+  // is fixed, well-documented Three.js library code (materialIndex 0..5 =
+  // +X,-X,+Y,-Y,+Z,-Z), so every face's normal is CORRECTLY outward by
+  // construction -- no lookAt(), no per-face up-vector special-casing, no
+  // 180 flip, none of v3.4.119's failure modes are even possible here. Also
+  // a real box VOLUME (not six potentially-coplanar-looking flat quads), so
+  // it actually shows depth/corners from an angle, the way a real ViewCube
+  // does elsewhere.
+  const size = 1.5;
+  // index order is BoxGeometry's own fixed convention: +X,-X,+Y,-Y,+Z,-Z.
+  // Labels use the direct mapping confirmed correct in v3.4.119 (N carries
+  // +Y, not -Y): E=+X, W=-X, N=+Y, S=-Y, TOP=+Z, BOTTOM=-Z.
+  // rotDeg per face -- see makeViewCubeFaceTexture()'s own comment for how
+  // these six numbers were determined.
+  const order = [
+    { label: 'E', dirKey: 'e', rotDeg: 270 }, { label: 'W', dirKey: 'w', rotDeg: 90 },
+    { label: 'N', dirKey: 'n', rotDeg: 0 }, { label: 'S', dirKey: 's', rotDeg: 0 },
+    { label: 'TOP', dirKey: 'top', rotDeg: 0 }, { label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 },
+  ];
+  const materials = order.map(f => new THREE.MeshStandardMaterial({ map: makeViewCubeFaceTexture(f.label, f.rotDeg), metalness: 0.05, roughness: 0.9 }));
+  // v3.4.122/123's live GRID_ROTATION_DEG correction (via Texture.rotation)
+  // is GONE as of v3.4.124 -- wrong sign in 122, still wrong per Joe's own
+  // report after 123's sign flip, and unverifiable from here either way
+  // (no live reference on the page to check it against -- see both of
+  // those versions' own changelog entries). The actual bug behind "top
+  // should be north facing" turned out to be unrelated: a ~45deg azimuth
+  // baked into the camera-snap math itself (see snapPerspectiveToDirection()
+  // below), fixed in v3.4.124. Joe's very next report, on the fix for
+  // THAT bug, was "still wrong needs to be rotated 180 degrees" -- see
+  // TOP's rotDeg in the `order` array above, now 180 instead of 0. A full
+  // 180 has no CW/CCW ambiguity to get backwards (unlike the last two
+  // attempts here), baked directly into the canvas the same proven way
+  // every other face's rotDeg already is, not through Texture.rotation.
+  
+  const cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), materials);
+  cubeMesh.userData.faceOrder = order; // materialIndex -> {label, dirKey}, read back on click below
+  viewCubeGroup = new THREE.Group();
+  viewCubeGroup.add(cubeMesh);
+  viewCubeScene.add(viewCubeGroup);
+
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function ndcFromEvent(e){
+    const rect = canvas.getBoundingClientRect();
+    ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    ndcFromEvent(e);
+    raycaster.setFromCamera(ndc, viewCubeCamera);
+    const hit = raycaster.intersectObject(cubeMesh, false)[0];
+    if (hit) snapPerspectiveToDirection(cubeMesh.userData.faceOrder[hit.face.materialIndex].dirKey);
+  });
+  canvas.addEventListener('pointerenter', () => { canvas.style.cursor = 'pointer'; });
+}
+
+// Snaps the FREE perspective camera to a standard direction, fitted to
+// whatever real geometry currently exists -- same site-bbox source
+// resetToDefaultView() already uses (post-compute bounds, or solidGroup's
+// own live bbox pre-compute), so this works at any stage. Never touches
+// orthoCamera, activeSectionBox, or sectionModeAxis -- purely a camera move
+// on top of whatever else is already going on in the free perspective view.
+function snapPerspectiveToDirection(dirKey){
+  if (activeCamera !== camera) return; // ViewCube only drives the free perspective view -- a locked N/S/E/W/Plan elevation has its own, different nav (the compass buttons) and its own reasons to stay axis-locked
+  let box;
+  if (siteCapHeight !== undefined){
+    box = new THREE.Box3(new THREE.Vector3(siteMinX, siteMinY, 0), new THREE.Vector3(siteMaxX, siteMaxY, siteCapHeight));
+  } else if (solidGroup){
+    box = new THREE.Box3().setFromObject(solidGroup);
+  } else return; // nothing loaded yet -- nothing to frame
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 1) * 0.9;
+  let dir3;
+  // v3.4.124: Joe's side-by-side screenshots -- clicking TOP landed on a
+  // top-down view rotated ~45 degrees from the clean, expected orientation
+  // (his own words: "top should be north facing"). Root cause, confirmed
+  // with real numbers on his live page, not guessed: OrbitControls derives
+  // its azimuth from the camera's offset-from-target via
+  // spherical.setFromVector3(), so this (0.0001, 0.0001, 1) offset --
+  // EQUAL, BOTH-POSITIVE X/Y components, chosen only to dodge the exact-
+  // pole singularity -- has its own azimuth of atan2(0.0001, 0.0001) = 45
+  // degrees. That 45 was landing directly in the rendered view: measured
+  // screenUp = (-0.71, -0.71, 0) after a real TOP click, an exact 45-degree
+  // diagonal, not damping or anything else. Fixed by moving the epsilon
+  // onto the Y axis only (0 azimuth = local north, matching the N/S/E/W
+  // faces' own convention) -- still off-pole by the same tiny amount, but
+  // with no diagonal component to leak into the resulting view.
+  if (dirKey === 'top') dir3 = new THREE.Vector3(0, -0.0001, 1); // v3.4.126: epsilon on -Y so screen-up = +Y (north-up); +Y epsilon gave south-up (verified numerically with lookAt, Z-up)
+  else if (dirKey === 'bottom') dir3 = new THREE.Vector3(0, 0.0001, -1);
+  else dir3 = new THREE.Vector3(...VIEW_CUBE_DIRS[dirKey]);
+  camera.position.copy(center).addScaledVector(dir3, span);
+  controls.target.copy(center);
+  // v3.4.124: Joe -- clicking TOP landed on a top-down view with an
+  // unwanted extra spin, not matching a clean top-down (his side-by-side
+  // screenshots showed it plainly: same "top view" but rotated). Root
+  // cause: controls.enableDamping = true (initScene()), so OrbitControls
+  // carries residual angular momentum (sphericalDelta) between frames.
+  // update() re-derives its base spherical angle from the position just
+  // set above, correctly -- but then ADDS whatever damping delta was still
+  // left over from before this click (a partially-decayed drag, or just
+  // this function's own single update() call not being enough to fully
+  // settle it), landing the camera near the right spot but rotated by
+  // that leftover amount. sphericalDelta isn't exposed on the controls
+  // object to clear directly, so this drains it the indirect way: calling
+  // update() repeatedly lets the damping factor shrink it toward zero
+  // (each call multiplies the remainder by (1 - dampingFactor)) before
+  // the camera is left in its final position.
+  for (let i = 0; i < 10; i++) controls.update();
+}
+
+// Keeps the cube's rotation matching the main camera's current orientation
+// every frame -- the standard ViewCube behavior (the cube represents the
+// model's fixed orientation in the world; as YOU orbit around the model, the
+// cube appears to counter-rotate in view). Only meaningful, and only shown,
+// in the free perspective view -- see the CSS/JS visibility toggle below.
+function updateViewCube(){
+  if (!viewCubeRenderer) return;
+  const panel = document.getElementById('viewCubePanel');
+  const show = activeCamera === camera;
+  panel.style.display = show ? '' : 'none';
+  if (!show) return;
+  const dist = 4.2;
+  const back = new THREE.Vector3(0, 0, dist).applyQuaternion(camera.quaternion);
+  viewCubeCamera.position.copy(back);
+  viewCubeCamera.quaternion.copy(camera.quaternion);
+  viewCubeLight.position.copy(back); // v3.4.121: headlight tracks the camera every frame -- see this light's own comment in initViewCube()
+  // v3.4.123: Joe -- "North is wrong" after v3.4.122 shipped. Root cause:
+  // THREE.Texture.rotation is documented counterclockwise-positive -- the
+  // OPPOSITE of the canvas/CSS clockwise-positive convention updateCompass()'s
+  // own -GRID_ROTATION_DEG was written in and that v3.4.122 copied the sign
+  // from without accounting for the different property's different
+  // convention. Applying a CSS-convention negative angle to a CCW-positive
+  // property flips the correction's direction entirely, not just its size --
+  // exactly the kind of mistake this same cube already made three times
+  // over during v3.4.119/120's face-label rotations, caught then only by
+  // rendering and looking, not by re-deriving the sign on paper again.
+  // Flipped to +GRID_ROTATION_RAD, matching Texture.rotation's own
+  // documented direction for the same GRID_ROTATION_DEG magnitude.
+  viewCubeRenderer.render(viewCubeScene, viewCubeCamera);
+}
+
 function recenterCamera(){ resetToDefaultView(); } // Home button -- kept as its own named function since it's referenced directly by the nav button listener below
 // v3.4.33: Joe -- "add a label in the framework or highlight the button
 // in the right control panel telling us the view we are in. i say both."
@@ -6409,7 +6750,7 @@ function setHeightCut(value){
   // not just a lazy catch-up on the next unrelated camera-orbit or
   // checkbox event.
   refreshCapFillVisibility();
-  rebuildBuildingZCap(); // v3.4.91: the Z cap's actual SHAPE depends on height now (real footprint geometry, not a repositioned quad) -- must rebuild on every Height Cut change, not just resync a position
+  scheduleBuildingCapRebuild('z'); // v3.4.118: was a direct rebuildBuildingZCap() call -- see that function's own new comment
 }
 function setXCutaway(value){
   const slider = document.getElementById('xClipSlider');
@@ -6425,7 +6766,7 @@ function setXCutaway(value){
   // no-op in perspective/octant/N-S views (refreshActiveSectionProfile()
   // returns immediately when sectionModeAxis isn't 'x').
   if (sectionModeAxis === 'x') refreshActiveSectionProfile();
-  rebuildBuildingXYCap('x'); // v3.4.93: buildings' X cap's actual SHAPE depends on the threshold now (real per-building slice geometry, not a repositioned quad) -- must rebuild on every X cutaway change, not just resync a position
+  scheduleBuildingCapRebuild('x'); // v3.4.118: was a direct rebuildBuildingXYCap('x') call -- see that function's own new comment
 }
 function setYCutaway(value){
   const slider = document.getElementById('yClipSlider');
@@ -6439,7 +6780,7 @@ function setYCutaway(value){
   // v3.3.0: Y is the ACTIVE cut axis in an N/S (sectionModeAxis==='y') view --
   // see setXCutaway()'s matching comment above.
   if (sectionModeAxis === 'y') refreshActiveSectionProfile();
-  rebuildBuildingXYCap('y'); // v3.4.93: see setXCutaway()'s matching comment above
+  scheduleBuildingCapRebuild('y'); // v3.4.118: was a direct rebuildBuildingXYCap('y') call -- see that function's own new comment
 }
 document.getElementById('sectionSlider').addEventListener('input', (e) => setHeightCut(Number(e.target.value)));
 document.getElementById('xClipSlider').addEventListener('input', (e) => setXCutaway(Number(e.target.value)));
@@ -7268,6 +7609,7 @@ function applyPlanBoxDirection(direction){
   if (axis === 'y') setYCutaway(cutValue);
   else setXCutaway(cutValue);
   setOrthogonalView(direction); // runs applySectionMode(axis) internally, which now reads activeSectionBox via getSectionRanges() for both the slab width and the plotted-axis crop -- see applySectionMode()'s own end-of-function comment for the v3.4.41 defensive re-sync that covers this call along with every other path into it
+  refreshCapFillCoverage(capFillGroups); // v3.4.126: applySectionMode() above can move thresholds/ranges after the last coverage check -- re-decide fill-vs-outline against the final box state
   cancelPlanBox();
 }
 function cancelPlanBox(){

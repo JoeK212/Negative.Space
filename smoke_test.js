@@ -234,6 +234,16 @@ async function runSmokeTest(label, opts = {}){
           check(L + ': section is not empty (skyline maxZ > 0)', skylineMaxZ() > 0, 'maxZ=' + Math.round(skylineMaxZ() * 10) / 10);
         }
         check(L + ': building overlaps box range', crossing(axis, box));
+        // v3.4.116: every building whose FOOTPRINT is in the box must now cross
+        // the section slab too (slab = the box's own full cut-axis depth) --
+        // this is what Joe's "more forms in plan than elevation" bug looked
+        // like: some were previously left out by the old 2m sliver.
+        if (!bActive){
+          const inFootprint = bboxes.filter(b => b.xMax >= box.xMin && b.xMin <= box.xMax && b.yMax >= box.yMin && b.yMin <= box.yMax);
+          const slabLo = axis === 'x' ? box.xMin : box.yMin, slabHi = axis === 'x' ? box.xMax : box.yMax;
+          const allCross = inFootprint.every(b => { const a = axis === 'x' ? b.xMin : b.yMin, z = axis === 'x' ? b.xMax : b.yMax; return z >= slabLo && a <= slabHi; });
+          check(L + ': every building in the box footprint crosses the section slab (v3.4.116)', allCross, inFootprint.length + ' in footprint');
+        }
         check(L + ': streets hidden', NS.streetsGroup?.visible === false);
         if (ctxOn) check(L + ': Manhattan context hidden', NS.boroughsGroup?.visible === false);
         await redraw();
@@ -337,6 +347,55 @@ async function runSmokeTest(label, opts = {}){
   check('context layer stays off when toggled off', NS.boroughsGroup?.visible === false);
   click('navPlan'); await wait(300);
   await setContext(ctxOn);
+
+  // v3.4.117: Joe -- "elevation is showing artifacts" -- Buildings AND
+  // Negative space BOTH switched on at once, a box active, N view. Every
+  // prior phase's setMode() deliberately keeps exactly one of these two
+  // toggles on; this is the one combination nothing had ever exercised,
+  // and it's where the bug lived (buildingXCapMaterial/buildingYCapMaterial
+  // never box-scoped). Draws its own box so it isn't dependent on
+  // whatever redraw() last left behind.
+  console.log('\nPhase 9 -- Buildings and Negative space both on at once, a box active (v3.4.117)');
+  await redraw();
+  if (!document.getElementById('viewSolid').classList.contains('active')) click('viewSolid');
+  if (!document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');
+  await wait(200);
+  if (NS.pendingPlanBox){
+    for (const [btn, dir] of [['boxViewN','N'],['boxViewS','S'],['boxViewE','E'],['boxViewW','W']]){
+      if (!document.getElementById(btn)) continue;
+      click(btn); await wait(200);
+      const axis = NS.sectionModeAxis;
+      const g = NS.capFillGroups[axis];
+      const L = 'both-on box->' + dir;
+      check(L + ': solidGroup visible', NS.solidGroup.visible === true);
+      check(L + ': ' + axis + ' fill shows', !!(g.userData.quad?.visible || g.userData.outline?.visible));
+      check(L + ': section is not empty (skyline maxZ > 0)', skylineMaxZ() > 0, 'maxZ=' + Math.round(skylineMaxZ() * 10) / 10);
+      // the actual v3.4.117 check: nothing visible in the scene should have
+      // real-world geometry outside the box's plotted range on this axis at
+      // the height band the box covers -- approximated by checking both
+      // building cap materials' clipping planes actually bound to the box
+      // whenever a box is active, the same way solidGroup's own do.
+      const capsBoxScoped = (mat) => {
+        if (!mat || !mat.clippingPlanes) return true;
+        const b = NS.activeSectionBox;
+        const plotLo = axis === 'x' ? b.yMin : b.xMin, plotHi = axis === 'x' ? b.yMax : b.xMax;
+        return mat.clippingPlanes.some(p => Math.abs(p.constant + plotLo) < 1 || Math.abs(p.constant - plotHi) < 1);
+      };
+      let xCapMat = null, yCapMat = null;
+      NS.scene.traverse(o => {
+        if (o.type !== 'Mesh' || !o.material?.clippingPlanes) return;
+        if (o.material.clippingPlanes.includes(NS.yClipPlaneNeg)) xCapMat = o.material;
+        if (o.material.clippingPlanes.includes(NS.xClipPlaneNeg)) yCapMat = o.material;
+      });
+      check(L + ': building cut-face caps are box-scoped', capsBoxScoped(xCapMat) && capsBoxScoped(yCapMat));
+      await redraw();
+      if (!document.getElementById('viewSolid').classList.contains('active')) click('viewSolid');
+      if (!document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');
+      await wait(200);
+    }
+  } else check('both-on box available for Phase 9', false);
+  if (document.getElementById('viewSolid').classList.contains('active') !== true) click('viewSolid');
+  if (document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');
 
   click('navE'); await wait(150); click('viewStreets'); await wait(100); click('viewStreets'); await wait(100);
   check('streets toggle inside a locked elevation stays hidden', NS.streetsGroup?.visible === false);

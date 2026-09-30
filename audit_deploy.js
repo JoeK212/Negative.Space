@@ -823,11 +823,14 @@ check(
 /* ===================================================================
    v3.4.50 -- Option A: getSectionRanges() always uses the fixed
    SECTION_SLAB_HALF_WIDTH slab, box or no box -- true section, not elevation
+   SUPERSEDED by v3.4.116 -- see that section below. Left here, corrected,
+   rather than deleted: this is real project history (the Option A/B saga),
+   and the no-box behavior this block established is still exactly current.
    =================================================================== */
-sectionHeader("v3.4.50 -- getSectionRanges() no longer widens the slab to the box's own depth (Option A: True Section)");
+sectionHeader("v3.4.50 -- getSectionRanges() no longer widens the slab to the box's own depth (Option A: True Section) -- box behavior since reversed, v3.4.116");
 
 check(
-  'the box-active branch for axis x no longer computes a halfSlab from activeSectionBox.xMax/xMin',
+  'the box-active branch for axis x no longer computes a halfSlab from activeSectionBox.xMax/xMin (that variable never came back either, v3.4.116 uses the box bounds directly)',
   !/const halfSlab = \(activeSectionBox\.xMax - activeSectionBox\.xMin\) \/ 2;/.test(html)
 );
 check(
@@ -835,15 +838,17 @@ check(
   !/const halfSlab = \(activeSectionBox\.yMax - activeSectionBox\.yMin\) \/ 2;/.test(html)
 );
 check(
-  'axis x box-active branch now uses the fixed SECTION_SLAB_HALF_WIDTH around xThreshold, same as the no-box case',
-  /plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+  '(v3.4.116: reversed) axis x/y box-active branches no longer use the fixed SECTION_SLAB_HALF_WIDTH around xThreshold/yThreshold -- see the v3.4.116 section for what they use now',
+  !/plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+  && !/plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
 );
 check(
-  'axis y box-active branch now uses the fixed SECTION_SLAB_HALF_WIDTH around yThreshold, same as the no-box case',
-  /plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+  'the no-box branches still use the fixed SECTION_SLAB_HALF_WIDTH around xThreshold/yThreshold -- this part of v3.4.50 is unchanged',
+  /plotLo: siteMinY, plotHi: siteMaxY, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
+  && /plotLo: siteMinX, plotHi: siteMaxX, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold \+ SECTION_SLAB_HALF_WIDTH/.test(html)
 );
 check(
-  'plotLo/plotHi still crop to the drawn box in both branches -- only the slab width changed, the box still crops the screen-horizontal range',
+  'plotLo/plotHi still crop to the drawn box in both branches -- v3.4.116 only changed the slab, not the plotted-axis crop',
   /plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax/.test(html) && /plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax/.test(html)
 );
 
@@ -1728,7 +1733,7 @@ sectionHeader("v3.4.89 -- setHeightCut() calls refreshCapFillVisibility()");
 
 check(
   'setHeightCut() calls refreshCapFillVisibility() after its existing syncCapFillPlanes()/updateCutLinePlanes()/syncHandlePositions() calls -- the Z-cap\'s visibility depends on sectionPlane.constant (v3.4.88), which this function is what actually changes. v3.4.91: also calls rebuildBuildingZCap() right after, since buildings\' Z cap now needs its actual geometry rebuilt on every height change, not just a visibility recheck',
-  /function setHeightCut\(value\)\{[\s\S]{0,1700}refreshCapFillVisibility\(\);\s*\n\s*rebuildBuildingZCap\(\); \/\/ v3\.4\.91[^\n]*\n\}/.test(html)
+  /function setHeightCut\(value\)\{[\s\S]{0,1700}refreshCapFillVisibility\(\);\s*\n\s*scheduleBuildingCapRebuild\('z'\); \/\/ v3\.4\.118[^\n]*\n\}/.test(html)
 );
 
 /* ===================================================================
@@ -1791,7 +1796,7 @@ check(
   && /if \(oldMesh\)\{ zGroup\.remove\(oldMesh\); oldMesh\.geometry\.dispose\(\); \}/.test(html)
   && /const mesh = new THREE\.Mesh\(geo, buildingZCapMaterial\);/.test(html)
   && /rebuildBuildingZCap\(\); \/\/ v3\.4\.91: builds the actual Z-cap mesh straight from real footprint geometry/.test(html)
-  && /rebuildBuildingZCap\(\); \/\/ v3\.4\.91: the Z cap's actual SHAPE depends on height now/.test(html)
+  && /scheduleBuildingCapRebuild\('z'\); \/\/ v3\.4\.118: was a direct rebuildBuildingZCap\(\) call/.test(html) // v3.4.118: setHeightCut() now debounces the actual rebuild -- see that section below
 );
 check(
   'buildingCapFillGroups.z.visible\'s formula (view-mode/box/height guards) is completely untouched by this rework -- only HOW the cap\'s geometry gets built changed, not when it shows',
@@ -1826,8 +1831,8 @@ check(
   'rebuildBuildingXYCap(axis) disposes the previous mesh\'s geometry before replacing it, reuses the shared buildingXCapMaterial/buildingYCapMaterial object rather than creating one per rebuild, and is called from buildBuildingCapFillGroups() (initial build) plus setXCutaway()/setYCutaway() (every threshold change) for the matching axis',
   /function rebuildBuildingXYCap\(axis\)\{/.test(html)
   && /if \(oldMesh\)\{ group\.remove\(oldMesh\); oldMesh\.geometry\.dispose\(\); \}/.test(html)
-  && /rebuildBuildingXYCap\('x'\); \/\/ v3\.4\.93: buildings' X cap's actual SHAPE depends on the threshold now/.test(html)
-  && /rebuildBuildingXYCap\('y'\); \/\/ v3\.4\.93: see setXCutaway\(\)'s matching comment above/.test(html)
+  && /scheduleBuildingCapRebuild\('x'\); \/\/ v3\.4\.118: was a direct rebuildBuildingXYCap\('x'\) call/.test(html)
+  && /scheduleBuildingCapRebuild\('y'\); \/\/ v3\.4\.118: was a direct rebuildBuildingXYCap\('y'\) call/.test(html) // v3.4.118: setXCutaway()/setYCutaway() now debounce the actual rebuild
 );
 check(
   'buildingXCapMaterial/buildingYCapMaterial each carry the same octant-restriction clippingPlanes the old quads used (sectionPlaneNeg + the OTHER axis\'s negated clip plane + SITE_BOUND_PLANES) -- the technique changed, not which region is allowed to show',
@@ -2250,7 +2255,7 @@ check(
 );
 check(
   'smoke_test.js has the Manhattan-context phase',
-  (() => { try { return /Phase 8 -- Manhattan context/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
+  (() => { try { const t = fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8'); return /Phase 8 -- Manhattan context/.test(t) && /every building in the box footprint crosses the section slab \(v3\.4\.116\)/.test(t); } catch (e) { return false; } })()
 );
 
 sectionHeader("v3.4.115 -- smoke test examines BOTH sides of the Manhattan-context toggle (Joe's standing rule)");
@@ -2266,6 +2271,164 @@ check(
 check(
   'the context-ON side fits Plan to the site (a real user zooms in first) before drawing boxes, since Plan with context ON frames the ~20km island',
   (() => { try { return /async function goPlan\(\)\{[\s\S]{0,700}oc\.zoom = \(oc\.top - oc\.bottom\) \/ \(Math\.max\(x1 - x0, y1 - y0\) \* 1\.4\);/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.116 -- box-active section slab spans the box's full depth, matching getCutAxisClipPlanes() and Plan's own footprint");
+
+check(
+  'getSectionRanges() uses the box\'s own full xMin/xMax (axis x) or yMin/yMax (axis y) as slabLo/slabHi when a box is active, not a fixed 2m sliver at one threshold',
+  /return \{ plotLo: activeSectionBox\.yMin, plotHi: activeSectionBox\.yMax, slabLo: activeSectionBox\.xMin, slabHi: activeSectionBox\.xMax \};/.test(html)
+  && /return \{ plotLo: activeSectionBox\.xMin, plotHi: activeSectionBox\.xMax, slabLo: activeSectionBox\.yMin, slabHi: activeSectionBox\.yMax \};/.test(html)
+);
+check(
+  'the free full-site case (no box) is untouched -- still the true thin +-SECTION_SLAB_HALF_WIDTH single-line section',
+  /return \{ plotLo: siteMinY, plotHi: siteMaxY, slabLo: xThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: xThreshold \+ SECTION_SLAB_HALF_WIDTH \};/.test(html)
+  && /return \{ plotLo: siteMinX, plotHi: siteMaxX, slabLo: yThreshold - SECTION_SLAB_HALF_WIDTH, slabHi: yThreshold \+ SECTION_SLAB_HALF_WIDTH \};/.test(html)
+);
+
+sectionHeader("v3.4.117 -- building cut-face caps (buildingXCapMaterial/buildingYCapMaterial) are box-scoped, matching every other piece of geometry");
+
+check(
+  'syncBuildingCapClipping(axis) is defined, guards on both cap materials existing, and only adds the box-plotted crop when a box is active',
+  /function syncBuildingCapClipping\(axis\)\{/.test(html)
+  && /if \(!buildingXCapMaterial \|\| !buildingYCapMaterial\) return;/.test(html)
+  && /if \(axis && activeSectionBox\)\{/.test(html)
+);
+check(
+  'the box-plotted crop mirrors syncBuildingClipping()\'s own existing pattern exactly -- same getSectionRanges(axis).plotLo/plotHi, same plane normals per axis',
+  /const \{ plotLo, plotHi \} = getSectionRanges\(axis\);\s*\n\s*if \(axis === 'x'\)\{\s*\n\s*baseX\.push\(new THREE\.Plane\(new THREE\.Vector3\(0, 1, 0\), -plotLo\), new THREE\.Plane\(new THREE\.Vector3\(0, -1, 0\), plotHi\)\);\s*\n\s*\} else \{\s*\n\s*baseY\.push\(new THREE\.Plane\(new THREE\.Vector3\(1, 0, 0\), -plotLo\), new THREE\.Plane\(new THREE\.Vector3\(-1, 0, 0\), plotHi\)\);/.test(html)
+);
+check(
+  'applySectionMode() calls syncBuildingCapClipping(axis) right after syncBuildingClipping(axis, false), so both stay in sync on every view/box change',
+  /syncBuildingClipping\(axis, false\); \/\/ v3\.4\.37:[\s\S]{0,500}\n\s*syncBuildingCapClipping\(axis\); \/\/ v3\.4\.117/.test(html)
+);
+check(
+  'the site-wide base clip planes (...SITE_BOUND_PLANES) are preserved, not replaced -- still correct with no box active',
+  /const baseX = \[sectionPlaneNeg, yClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\];\s*\n\s*const baseY = \[sectionPlaneNeg, xClipPlaneNeg, \.\.\.SITE_BOUND_PLANES\];/.test(html)
+);
+check(
+  'smoke_test.js has a phase testing Buildings and Negative space BOTH on at once, the combination that exposed this bug',
+  (() => { try { return /Phase 9 -- Buildings and Negative space both on at once/.test(fs.readFileSync(path.join(__dirname, 'smoke_test.js'), 'utf8')); } catch (e) { return false; } })()
+);
+
+sectionHeader("v3.4.118 -- expensive building-cap rebuild debounced to once per animation frame (keyboard/slider freeze)");
+
+check(
+  'pendingBuildingCapRebuild + scheduleBuildingCapRebuild(axis) are defined, coalescing to one requestAnimationFrame callback per axis',
+  /let pendingBuildingCapRebuild = \{ x: false, y: false, z: false \};/.test(html)
+  && /function scheduleBuildingCapRebuild\(axis\)\{\s*\n\s*if \(pendingBuildingCapRebuild\[axis\]\) return;/.test(html)
+);
+check(
+  'setHeightCut()/setXCutaway()/setYCutaway() call scheduleBuildingCapRebuild() instead of rebuildBuildingZCap()/rebuildBuildingXYCap() directly -- the ONLY remaining direct calls are buildBuildingCapFillGroups()\'s own initial build, which runs once per compute and correctly stays synchronous',
+  /scheduleBuildingCapRebuild\('z'\); \/\/ v3\.4\.118/.test(html)
+  && /scheduleBuildingCapRebuild\('x'\); \/\/ v3\.4\.118/.test(html)
+  && /scheduleBuildingCapRebuild\('y'\); \/\/ v3\.4\.118/.test(html)
+  && (html.match(/rebuildBuildingZCap\(\);/g) || []).length === 2 // one inside scheduleBuildingCapRebuild()'s own rAF callback, one in buildBuildingCapFillGroups()'s initial build
+  && (html.match(/rebuildBuildingXYCap\('x'\);/g) || []).length === 1 // only buildBuildingCapFillGroups()'s initial build -- the deferred callback calls rebuildBuildingXYCap(axis), not a literal 'x'
+  && (html.match(/rebuildBuildingXYCap\('y'\);/g) || []).length === 1
+);
+check(
+  'the deferred callback reads xThreshold/yThreshold/sectionPlane.constant fresh at call time -- rebuildBuildingXYCap()/rebuildBuildingZCap() themselves are unchanged, only how they\'re invoked changed',
+  /requestAnimationFrame\(\(\) => \{\s*\n\s*pendingBuildingCapRebuild\[axis\] = false;\s*\n\s*if \(axis === 'z'\) rebuildBuildingZCap\(\); else rebuildBuildingXYCap\(axis\);/.test(html)
+);
+
+/* ===================================================================
+   v3.4.119 -- ViewCube v1: six separate flat PlaneGeometry faces, each
+   manually oriented with lookAt() + a per-face up vector + a 180 flip.
+   SUPERSEDED by v3.4.120 below -- Joe's own screenshot showed a flat
+   square with no visible depth even from a clear 3/4 angle, which turned
+   out to be the technique itself, not a tuning problem: six coplanar-
+   looking quads never reads as a real cube. Left here, corrected rather
+   than deleted, as real project history.
+   =================================================================== */
+sectionHeader("v3.4.119 -- ViewCube v1 (six flat planes) -- replaced by v3.4.120's single BoxGeometry, not currently in the file");
+
+check(
+  '(v3.4.120: superseded) the six-separate-planes VIEW_CUBE_FACES array is gone from initViewCube() -- replaced by a single THREE.BoxGeometry with a 6-material array',
+  !/const VIEW_CUBE_FACES = \[/.test(html) && !/mesh\.rotateY\(Math\.PI\);/.test(html)
+);
+
+sectionHeader("v3.4.120 -- ViewCube v2: single real BoxGeometry with 6 materials, plus per-face UV rotation correction");
+
+check(
+  'initViewCube() builds the cube from one THREE.BoxGeometry with a 6-material array (order matches BoxGeometry\'s own fixed +X,-X,+Y,-Y,+Z,-Z group order) instead of six separate planes',
+  /const cubeMesh = new THREE\.Mesh\(new THREE\.BoxGeometry\(size, size, size\), materials\);/.test(html)
+  && /const order = \[\s*\n\s*\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 180 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)  // v3.4.125: TOP's rotDeg is now 180, not the original 0 -- see that version's own section
+);
+check(
+  'makeViewCubeFaceTexture() takes a rotDeg and rotates the canvas context before drawing the label -- compensates for BoxGeometry\'s own non-uniform per-face UV layout (confirmed by dumping geometry.attributes.uv directly, not assumed)',
+  /function makeViewCubeFaceTexture\(label, rotDeg\)\{/.test(html)
+  && /ctx\.rotate\(\(rotDeg \|\| 0\) \* Math\.PI \/ 180\);/.test(html)
+);
+check(
+  'click identification reads hit.face.materialIndex against the stored faceOrder array (BoxGeometry raycasts give one materialIndex per face) instead of a per-mesh dirKey on six separate objects',
+  /const hit = raycaster\.intersectObject\(cubeMesh, false\)\[0\];\s*\n\s*if \(hit\) snapPerspectiveToDirection\(cubeMesh\.userData\.faceOrder\[hit\.face\.materialIndex\]\.dirKey\);/.test(html)
+);
+check(
+  'snapPerspectiveToDirection() only ever moves `camera` (never orthoCamera) and never calls applySectionMode() -- a pure camera move, not a mode switch, reusing the same site-bbox source resetToDefaultView() already uses',
+  /function snapPerspectiveToDirection\(dirKey\)\{\s*\n\s*if \(activeCamera !== camera\) return;/.test(html)
+  && !/function snapPerspectiveToDirection[\s\S]{0,900}applySectionMode/.test(html)
+);
+check(
+  'updateViewCube() hides the whole panel whenever a locked N/S/E/W/Plan elevation is active (activeCamera !== camera), matching the ViewCube\'s job as a perspective-only shortcut',
+  /function updateViewCube\(\)\{[\s\S]{0,200}const show = activeCamera === camera;\s*\n\s*panel\.style\.display = show \? '' : 'none';/.test(html)
+);
+check(
+  'animate() calls updateViewCube() and initScene() calls initViewCube() -- both wired into the real render loop and startup, not just defined',
+  /renderer\.render\(scene, activeCamera\);\s*\n\s*updateViewCube\(\); \/\/ v3\.4\.119/.test(html)
+  && /updateCompass\(\);\s*\n\s*initViewCube\(\); \/\/ v3\.4\.119/.test(html)
+);
+
+sectionHeader("v3.4.121 -- ViewCube light tracks the camera every frame, matching orthoLight's own existing pattern");
+
+check(
+  'viewCubeLight is a DirectionalLight declared alongside the other viewCube module variables, not a local const trapped inside initViewCube()',
+  /let viewCubeScene, viewCubeCamera, viewCubeRenderer, viewCubeGroup, viewCubeLight;/.test(html)
+);
+check(
+  'initViewCube() no longer gives the directional light a fixed world position -- that was the actual bug (whichever face the orbiting camera faced was often the one facing away from a light that never moved)',
+  !/const dl = new THREE\.DirectionalLight\(0xffffff, 0\.8\);\s*\n\s*dl\.position\.set\(2, 3, 4\);/.test(html)
+  && /viewCubeLight = new THREE\.DirectionalLight\(0xffffff, 1\.1\);/.test(html)
+);
+check(
+  'updateViewCube() repositions viewCubeLight to the mini-camera\'s own position every frame, right alongside the camera sync it already does',
+  /viewCubeLight\.position\.copy\(back\); \/\/ v3\.4\.121/.test(html)
+);
+
+/* ===================================================================
+   v3.4.122/123 -- live Texture.rotation-based GRID_ROTATION_DEG correction
+   on TOP. REMOVED in v3.4.124. Wrong sign in 122; still wrong per Joe's
+   own report after 123's sign flip; unverifiable from here either way (no
+   live reference on the page existed to check it against -- see both
+   versions' own changelog entries). The real bug behind "top should be
+   north facing" was unrelated the whole time: a ~45deg azimuth baked into
+   the camera-snap epsilon itself, fixed in v3.4.124. Replaced by a plain
+   rotDeg on TOP (v3.4.125), the same proven canvas-bake mechanism every
+   other face already uses -- no live per-frame texture update, no
+   GRID_ROTATION_DEG dependency, no CW/CCW ambiguity to get backwards a
+   third time.
+   =================================================================== */
+sectionHeader("v3.4.122/123 (removed) -- ViewCube TOP Texture.rotation correction, superseded by v3.4.125's plain rotDeg");
+
+check(
+  '(removed in v3.4.124) viewCubeTopTexture and its live Texture.rotation correction are entirely gone -- no declaration, no center/rotation wiring, no per-frame update, no GRID_ROTATION_RAD reference anywhere in the ViewCube code',
+  !/viewCubeTopTexture/.test(html)
+);
+
+sectionHeader("v3.4.124 -- ViewCube TOP/BOTTOM click: fixed a real ~45deg rotation bug, unrelated to v3.4.122/123's grid-rotation work");
+
+check(
+  'snapPerspectiveToDirection() uses (0, 0.0001, 1)/(0, 0.0001, -1) for top/bottom -- an X component of exactly 0, not the old (0.0001, 0.0001, ...) whose equal X/Y produced a 45deg azimuth via OrbitControls\' own spherical.setFromVector3()',
+  /if \(dirKey === 'top'\) dir3 = new THREE\.Vector3\(0, 0\.0001, 1\);/.test(html)
+  && /else if \(dirKey === 'bottom'\) dir3 = new THREE\.Vector3\(0, 0\.0001, -1\);/.test(html)
+  && !/new THREE\.Vector3\(0\.0001, 0\.0001, 1\)/.test(html)
+);
+
+sectionHeader("v3.4.125 -- ViewCube TOP label rotated a further 180deg, per Joe's direct report after v3.4.124's azimuth fix");
+
+check(
+  'TOP\'s rotDeg is 180, not 0 -- N/S/E/W/BOTTOM rotDeg and dirKey mapping untouched',
+  /\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 180 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)
 );
 
 /* ===================================================================

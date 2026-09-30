@@ -1,3 +1,129 @@
+v3.4.125 - 2026-09-30 - Joe, immediately after v3.4.124's azimuth fix: "still wrong needs to be rotated 180 degrees."
+
+v3.4.124 fixed a real, confirmed bug (a ~45deg azimuth baked into the TOP/BOTTOM camera-snap offset). That fix was correct and stays. This is a separate, second adjustment on top of it: TOP's label itself still needed a further, plain 180-degree turn.
+
+Took the opportunity to also remove v3.4.122/123's live GRID_ROTATION_DEG correction (via Texture.rotation) entirely. That mechanism was wrong in 122 (backwards sign), "fixed" in 123, and still wrong per Joe's own report right after -- three attempts at a rotation direction is enough to stop trusting derivation and stop carrying the mechanism forward. Replaced with a plain rotDeg:180 on TOP, baked into the canvas the same proven way E/W/N/S/BOTTOM's own rotDeg already works -- no live per-frame texture update, no GRID_ROTATION_DEG dependency, and critically, no CW/CCW ambiguity: a full 180 is its own inverse regardless of which way you turn it, so this correction can't be backwards the way the last two were.
+
+Not yet confirmed on Joe's own reload.
+
+`audit_deploy.js`: v3.4.122/123's now-removed checks replaced with one check confirming the Texture.rotation mechanism is gone entirely; 1 new check for TOP's rotDeg:180; v3.4.120's own check (which still referenced TOP's old rotDeg:0) updated to match.
+
+v3.4.124 - 2026-09-29 - Joe's side-by-side screenshots settled it: fresh page load (image 1), click TOP, expected a clean top-down (image 2) -- got one rotated by what turned out to be exactly 45 degrees (image 3). "Top should be north facing" was this bug the whole time, not the grid-rotation question v3.4.122/123 chased.
+
+Root cause, confirmed with real measured numbers on Joe's own live page, not guessed: `snapPerspectiveToDirection('top')` used a camera offset of (0.0001, 0.0001, 1) -- a tiny nudge off the exact vertical pole, needed because OrbitControls' own polar-angle clamp and lookAt's degenerate-parallel-to-up case both misbehave exactly at the pole. But OrbitControls derives its on-screen rotation (azimuth) from that same offset vector via `spherical.setFromVector3()`, and (0.0001, 0.0001) -- EQUAL, both-positive X and Y -- has its own azimuth of atan2(0.0001, 0.0001) = 45 degrees. That 45 was landing directly in the rendered view. Measured directly: `screenUp` after a real TOP click was (-0.71, -0.71, 0), an exact 45-degree diagonal -- not an approximation, not damping, not anything upstream of this one number.
+
+Fixed by moving the epsilon onto the Y axis only: (0, 0.0001, 1). Still dodges the pole by the identical tiny amount; the azimuth this implies is now exactly 0, so nothing diagonal leaks into the click result. Verified directly before shipping: replayed the same position-and-orient math with the corrected vector and got `screenUp` = (0, -1, 0) -- a clean cardinal axis, not a diagonal.
+
+A real cost of chasing the wrong theory for two versions, stated plainly: v3.4.122 and v3.4.123 spent real effort getting Texture.rotation's sign right for a grid-rotation correction that was answering a question Joe never actually asked -- the cube's label texture was never the problem, a single miscalculated epsilon in the camera-snap math was. That code is left in place (it's independently correct, verified, and does what it claims -- nudges the TOP label a further ~29 degrees toward true north on top of this fix's clean local-north baseline) but it was not the fix Joe needed, and won't be re-litigated based on this round alone.
+
+Not yet confirmed on Joe's own reload.
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.123 - 2026-09-29 - Joe: "North is wrong" after v3.4.122 shipped a grid-rotation correction for the ViewCube's TOP face.
+
+Root cause: THREE.Texture.rotation is documented counterclockwise-positive -- the opposite of the canvas/CSS clockwise-positive convention updateCompass()'s own -GRID_ROTATION_DEG was written in. v3.4.122 copied that sign onto Texture.rotation without accounting for the different property's different convention, flipping the correction's direction entirely (not just its size) -- the fix made it wrong in the other direction instead of right.
+
+This is the fourth time this exact cube has needed a rotation-sign correction caught only by rendering and looking (the E/W/N label mapping, twice, during v3.4.119/120). Treated it the same way this time: built an isolated test (a plane textured with an arrow pointing up plus an asymmetric marker, using ONLY texture.rotation, nothing else) and rendered it at rotation=0 and rotation=+90deg side by side. The arrow moved from pointing up to pointing left -- a counterclockwise rotation for a positive value, confirming Texture.rotation's convention directly rather than trusting documentation recall a second time. Flipped the correction from -GRID_ROTATION_RAD to +GRID_ROTATION_RAD to match.
+
+Not yet confirmed on Joe's own reload. The isolated test confirms the PROPERTY's rotation direction with high confidence; it does not by itself confirm that TOP now visually points true north on Joe's actual screen, since (as noted in v3.4.122) there is still no live reference on the running page to check that against -- only Joe's own look at it settles that.
+
+`audit_deploy.js`: 1 new check; v3.4.122's now-wrong check corrected in place.
+
+v3.4.122 - 2026-09-29 - Joe: "top should be north facing," then a screenshot of TriBeCa near-top-down showing the cube's TOP label reading diagonally, not matching what the compass indicates.
+
+The TOP face's texture was baked with no rotation, so its "up" reading direction is local +Y with no correction. That's not the same as true north in this app: updateCompass() has applied a GRID_ROTATION_DEG correction since v3.0.27, because Manhattan's real street grid doesn't align to the raw world axes -- true north sits GRID_ROTATION_DEG to the west of local +Y (documented, already-verified in that function's own comment: "facing local +Y ... should show true north slightly to the LEFT of straight up"). TOP's static bake never accounted for this, so it was off by the district's grid-tilt angle (~29 degrees for TriBeCa), not a clean 90.
+
+Fixed by applying updateCompass()'s own exact correction (-GRID_ROTATION_DEG) to the TOP face specifically, via live Texture.rotation rather than baking it into the canvas: GRID_ROTATION_DEG is set per-district, after initViewCube() has already run once at startup, so a static bake would go stale the moment you switch districts. viewCubeTopTexture.rotation is refreshed to -GRID_ROTATION_RAD every frame in updateViewCube(), reading whatever the CURRENT district's real value is.
+
+Deliberately scoped to TOP's visual orientation only. N/S/E/W's rotDeg values and dirKey click-mapping are untouched -- those already match the rest of the app's own local-axis convention (the N/S/E/W nav buttons use the same un-corrected local +Y as "north," not true compass north), and changing that would have created a NEW inconsistency between the cube and the nav buttons it's meant to mirror, not fixed one.
+
+Honest limitation: I could not get a full live visual A/B confirmation before shipping. I tried to read updateCompass()'s own live needle rotation as ground truth to compare against, and found updateCompass() is only called once at page load, not continuously -- so there was no live reference to check the fix against on Joe's actual running page. The correction itself is not a guess: it's the exact, already-shipped, already-verified formula this codebase uses for the identical problem elsewhere, applied through a mechanism (live texture rotation) chosen specifically to survive a district switch. But the visual result on Joe's own screen, matched against what he's actually looking at, is still unconfirmed.
+
+`audit_deploy.js`: 3 new checks; one v3.4.121 check repaired in place after its declaration line changed length.
+
+v3.4.121 - 2026-09-29 - Joe: "why is it so dark?"
+
+The mini-scene's DirectionalLight sat at a single fixed world position (2,3,4), set once in initViewCube() and never touched again -- but the mini-camera orbits every frame to match wherever the user is currently looking (updateViewCube()). Whichever face the camera actually faced was frequently the one facing AWAY from a light that never moved, rendering it dark or near-black regardless of which label the user was trying to read.
+
+Exact same bug class, exact same fix already established in this file for the identical reason: orthoLight (v3.4.24) exists because the main scene's own fixed sun light left whichever facade a locked N/S/E/W elevation was showing dark half the time -- fixed there by repositioning a light to track the camera every frame instead of leaving it fixed. Applied the same pattern here: the directional light is now repositioned to the mini-camera's own position on every updateViewCube() call, so whatever face is actually being looked at is always front-lit.
+
+Verified live before shipping: built the old (fixed-position) and new (camera-tracking) lighting side by side against the same face, viewed from an angle chosen specifically because it's NOT near the old light's fixed position -- the old cube's face rendered essentially unreadable (near-black), the new one clearly lit. Not yet confirmed on Joe's own v3.4.121 reload.
+
+`audit_deploy.js`: 3 new checks.
+
+v3.4.120 - 2026-09-29 - Joe's screenshot: "the view cube does is not functioning as a view cube would... like any other 3d software solution" -- a flat square showing one letter, no visible depth even from a clear 3/4 camera angle.
+
+Root cause: v3.4.119's technique itself, not a tuning problem. Six separate flat PlaneGeometry quads positioned at cube-face offsets never reads as a real 3D object from most angles -- no connecting volume, so it looks like whatever single face happens to be closest to the camera. Rebuilt as one real THREE.BoxGeometry with a 6-material array (E/W/N/S/TOP/BOTTOM matching BoxGeometry's own fixed +X,-X,+Y,-Y,+Z,-Z group order) -- a genuine box volume with real corners and adjacent faces, the standard technique every 3D tool actually uses. Confirmed live: a corner view now shows two labeled faces simultaneously with visible depth between them, not a flat square.
+
+Verifying this surfaced a second, real bug: BoxGeometry's own UV layout is NOT uniform across its six faces (confirmed by dumping geometry.attributes.uv directly -- e.g. the +X face maps its U axis to world Z inverted, while +Z maps U to X direct). The same canvas texture, applied without correction, read upright on some faces and rotated/mirrored on others.
+
+Determined each face's correction empirically, not by formula: render the labeled face alone (every other face plain black) straight-on from its own real-world direction, read whether the text comes out upright. Final values: E=270°, W=90°, N/S/TOP/BOTTOM=0°.
+
+This took two passes to get right, and the failure mode of the first pass is worth recording. Reusing the same canvas/renderer/scene across successive tests produced corrupted, misleading results -- N appeared to need a 90° correction and at one point rendered as "Z", neither of which was real; both were artifacts of stale state bleeding between tests, not the actual UV behavior. Redone with a completely fresh canvas, renderer, and scene for every single face check, N (and every other face) confirmed correct with no rotation at all. The lesson, stated for next time: a verification technique that silently corrupts its own results is worse than not verifying, since it produces false confidence -- rebuilding the test harness cleanly once the anomaly was noticed, rather than trusting the first pass, is what caught it.
+
+Also fixed along the way: an unrelated earlier finding that the ViewCube panel sits close to the compass panel below it and near the viewport edge -- not changed this round, flagged but not acted on, since the depth and label bugs were the confirmed, reported problems.
+
+`audit_deploy.js`: v3.4.119's two now-obsolete checks (asserting the six-plane technique) corrected in place to assert its ABSENCE rather than deleted, consistent with how superseded sections are handled elsewhere in this file; 3 new checks for the actual v3.4.120 implementation.
+
+Not yet confirmed on Joe's own reload. Everything above was verified via direct injection against his live v3.4.119 session and isolated synthetic tests, not the final packaged file's real click-through-the-page behavior.
+
+v3.4.119 - 2026-09-29 - Joe: "is there we can get view controls in a 3d view top, left, right etc? ... view cube."
+
+Distinct from N/S/E/W/Plan: those lock the scene into the orthographic section system. A ViewCube is a different idea entirely -- snap the FREE perspective camera to a standard angle and leave it exactly as orbit-able as it always was. New small widget, stacked above the existing compass panel (bottom-right): a real 3D cube, rendered in its own small WebGLRenderer/canvas (a second tiny GL context, not scissor math against the main canvas), that rotates to match the current camera orientation every frame and can be clicked on any face to jump the view there.
+
+Two real bugs found and fixed via live testing before shipping, not caught by static reasoning alone -- both traced with the same technique: pick an unambiguous camera angle (straight down from above, due east, due north) and check which label actually renders.
+
+1. **Label mapping was inverted.** First attempt used "the face you'd see while standing IN that view carries that label" (N's face normal = world -Y). Looked right on paper. Live: pointing the camera straight down from above showed BOTTOM, not TOP. The actual, simpler rule: N's face carries world +Y directly -- approach the cube from the north and you see the face labeled N, like a real physical die.
+
+2. **Even with the correct mapping, the face geometry pointed inward.** `lookAt(0,0,0)` alone left the textured front of each plane facing the cube's own center; from outside, nothing was visible until `material.side = DoubleSide` was added purely as a diagnostic, and even then the label read mirrored (wrong side of the plane facing out). Fixed by flipping each face 180 degrees after `lookAt()`, back to single-sided FrontSide.
+
+Along the way, a third issue surfaced and was fixed before it could bite: `lookAt(0,0,0)`'s default up vector (0,1,0) is exactly parallel to the N/S faces' own target direction (both lie along Y) -- a genuinely undefined case for the basis Three.js builds internally. A single fixed replacement up vector would only move the same problem onto TOP/BOTTOM (both along Z). Each face now gets whichever of (0,0,1)/(0,1,0) is non-degenerate for its own direction.
+
+Confirmed against three independent, unambiguous camera angles before shipping: straight down from above -> TOP (correct, non-mirrored), due east -> E, due north -> N. Also confirmed the click/raycast path separately: identifying which face was hit under the corrected geometry still resolves to the correct dirKey.
+
+`snapPerspectiveToDirection()` reuses the exact direction vectors and "camera stands opposite the label, facing toward it" convention `setOrthogonalView()` already established (v3.0.18) for N/S/E/W -- clicking the cube's N face puts the camera in the identical position the N nav button would, the only difference being which camera (perspective, never `orthoCamera`) and that no section mode ever engages. The ViewCube only shows in the free perspective view (hidden during any locked N/S/E/W/Plan elevation, which already has the compass for that).
+
+Not yet confirmed on Joe's own reload -- everything above was verified via direct injection into his live v3.4.118 session, not the final packaged file's actual UI (positioning, click-through-the-real-DOM-canvas, and the stacked-panel layout still need his own look). `audit_deploy.js`: 5 new checks.
+
+v3.4.118 - 2026-09-29 - Joe: "keyboard arrow nudging seems to freeze the app can you check."
+
+Measured live on his own Upper West Side session (4979 buildings) before touching anything: a single setYCutaway() call -- one keystroke's worth of work -- took 2642ms. Almost all of it is rebuildBuildingXYCap()/rebuildBuildingZCap() (v3.4.91/93) re-slicing EVERY building footprint in the district and merging the result, synchronously on the main thread, on every single call -- with no debounce, since v3.4.91/93 shipped.
+
+That's fine for a mouse click. It's not fine for a held arrow key: the keyboard nudge handler (v3.2.28) calls setXCutaway()/setYCutaway()/setHeightCut() directly on every keydown, and OS key-repeat fires those every ~30-50ms once a key is held. JS is single-threaded, so each repeat queues another 2.6s of work behind whatever's still running -- holding a key for two seconds backs up over a minute of unresponsive freeze, growing without bound the longer the key stays down. Same mechanism, smaller scale, on a fast slider drag (the slider's own 'input' event calls these same setters).
+
+Fixed by debouncing just the expensive part: a new scheduleBuildingCapRebuild(axis) coalesces to at most one requestAnimationFrame callback per axis, regardless of how many events fire before it runs -- reading xThreshold/yThreshold/sectionPlane.constant fresh when it does, so a burst of keypresses collapses to the LATEST value, not a queue of stale ones. The cheap parts of these setters (plane constants, slider/number display, handle positions, the skyline profile) are completely untouched and stay exactly as synchronous/responsive as before. buildBuildingCapFillGroups()'s own initial build (once per compute) still calls rebuildBuildingZCap()/rebuildBuildingXYCap() directly, on purpose -- nothing to debounce for a one-time call.
+
+Known limitation, stated plainly: this fixes the FREEZE (unbounded backlog), not the underlying slowness -- each individual commit in a large district still takes real time (measured 2.6s here), so nudging will still feel a beat behind in a big district, just no longer compound into a multi-minute lockup. Speeding up the rebuild itself (e.g. spatially culling to buildings actually near the current threshold instead of slicing the whole district every time) is a real, separate, larger change -- not attempted this round; flagged as a follow-on if the residual lag itself becomes the complaint.
+
+`audit_deploy.js`: 3 new checks. Not yet confirmed on Joe's own reload -- the 2642ms measurement above is real, live, on his own data; the debounce itself needs an actual held-key test on his machine to confirm the freeze is gone in practice, not just in the math.
+
+v3.4.117 - 2026-09-29 - Joe's screenshots: Buildings AND Negative space toggled on at once, a box active, N view in Upper West Side -- an isolated dark rectangle floating far from the box.
+
+Root-caused live using the project's own hide-one-thing-at-a-time technique: solidGroup, all three capFillGroups, and streetsGroup were each hidden in turn on his real session with the artifact still present; hiding one specific mesh removed it. That mesh turned out to be buildingXCapMaterial/buildingYCapMaterial -- the solid cut-face shown where a locked axis slices through a building's interior, Buildings mode only (v3.4.82/93). Two compounding causes: buildBuildingXYCapGeometry() slices EVERY building footprint in the district at the current threshold, not just ones in a drawn box; and the two materials' clippingPlanes were fixed to the whole site (...SITE_BOUND_PLANES) at construction time and never revisited -- unlike syncBuildingClipping()/the poche/ground/streets, which all correctly box-scope themselves already. With a box active but no box-aware crop on these two materials specifically, the cap kept showing real cut faces for buildings anywhere in the district that happened to cross that one line.
+
+This combination -- Buildings and Negative space BOTH on -- had never been tested. Every existing smoke-test phase deliberately keeps exactly one of the two toggles on at a time (setMode()), which is exactly why this survived every prior fix.
+
+Fixed with a new syncBuildingCapClipping(axis), called from applySectionMode() right after the existing syncBuildingClipping(), adding the identical box-plotted-range crop (same getSectionRanges(axis).plotLo/plotHi, same plane normals) that the real solid already gets -- on top of each material's existing site-wide base, not replacing it, so the no-box case is untouched. Verified twice on Joe's live session before shipping: (1) applied the fix's exact new plane values to the actual broken mesh and re-rendered -- the stray geometry disappeared, screenshot-confirmed; (2) later, on the still-unfixed live build, confirmed both cap materials read exactly 8 clip planes with no box-boundary match -- the precise broken state the fix targets.
+
+smoke_test.js: added Phase 9, the first test to turn Buildings and Negative space on simultaneously with a box active, checking both cap materials are box-scoped in all four directions. Run as a negative control against the live, unfixed build: both xCapScoped and yCapScoped came back false (8 clip planes, no box match) -- exactly the reported bug, confirming the test catches it.
+
+`audit_deploy.js`: 5 new checks.
+
+v3.4.116 - 2026-09-28 - Joe, on the "density of the floor" follow-up: "there are a lot more building/forms in plan view from what i see in elevation. so either the plan geometry is wrong or the elevation is." Then, after I laid out the mechanism and asked how to proceed: "well it needs to read correctly."
+
+Checked both. Plan geometry is correct -- it shows every building whose footprint overlaps the drawn box. The real building SOLID has also always clipped to the box's FULL depth on the cut axis (`getCutAxisClipPlanes()`, using `activeSectionBox.xMin/xMax` or `.yMin/.yMax` directly, unchanged since v3.4.13). The actual bug: `getSectionRanges()` fed `buildSectionProfile()` (the poche's own hole-punch profile, what Negative-space mode actually shows) a thin +-2m slab at ONE line (`xThreshold`/`yThreshold`), regardless of the box's real depth -- so Buildings mode showed everything the box's real depth contains, but Negative-space mode only punched holes for buildings crossing that one specific line. Two display modes of the same box disagreeing was the tell.
+
+Verified with real numbers before changing anything: drew a box in Harlem/Polo Grounds, found 3 buildings whose footprint overlaps it, only 2 crossed the old 2m slab. This is exactly the earlier "single-line section vs. full box" tension from the tabled Option A/B design fork -- Option B (shipped, v3.4.53) widened the CUTOUT to match the profile at one line, but never widened the line itself. Joe's "it needs to read correctly" is the answer to that fork, finally given: when a box is active, use it fully.
+
+Fixed: `getSectionRanges()`'s box-active branches now use the box's own `xMin/xMax` (axis x) or `yMin/yMax` (axis y) as `slabLo/slabHi` -- identical to what `getCutAxisClipPlanes()` already uses for the real solid, so Buildings and Negative-space modes now agree, and Negative-space shows everything Plan's box outline actually contains. The free full-site case (no box) is untouched -- a true single-line section is still exactly right there, since there's no box expressing how deep the user wants to look.
+
+Live-verified the fix's actual output against the same box and real data before shipping: recomputed the crossing count with the new slab -- 3 of 3, matching the box footprint exactly (previously 2 of 3).
+
+`smoke_test.js`: added a check that every building in a drawn box's footprint also crosses the section slab (Negative-space mode) -- this is what would have caught the bug directly, rather than just checking "something shows." `audit_deploy.js`: 2 new checks; the v3.4.50 (Option A) section corrected in place rather than deleted -- its no-box checks are still accurate, its box-active checks now assert the behavior they used to forbid, with the history kept in the comment rather than erased. 345/346 (the one failure is this entry's own version bump, expected until this ships).
+
+Not yet confirmed on Joe's own reload.
+
 v3.4.115 - 2026-09-28 - Joe: "we need to examine both sides Manhattan and Non Manhattan -- this was a rule we made a long time ago."
 
 I could not find that rule written anywhere in the project notes (searched the whole Negative Space file), so I am recording my reading of it here so it stops living only in memory: EVERY view/fix is examined with the Manhattan context layer both OFF and ON. It is a real axis: the layer changes framing (Plan frames the whole ~20km island when it is on), adds a large backdrop, and its toggle routes through the perspective camera without clearing the elevation state. v3.4.114's fix was found and first verified on the ON side only; the OFF side was never re-run.
