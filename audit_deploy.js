@@ -674,8 +674,8 @@ check(
   && /const capInert = axis === null && !!activeSectionBox;/.test(html)
 );
 check(
-  'High detail moved out of the Simple tab into the Export accordion, next to Export STL -- it was never a viewing setting, only ever relevant when producing an image or file to keep',
-  (() => { const m = html.match(/<summary>Export<\/summary>[\s\S]*?<\/details>/); return m && /id="highDetailToggle"/.test(m[0]); })()
+  'High detail lives in the Display accordion (v3.4.126; v3.4.39 had put it in Export, but it only raises on-screen render resolution and Export has no image output)',
+  (() => { const m = html.match(/<summary>Display<\/summary>[\s\S]*?<\/details>/); const e = html.match(/<summary>Export<\/summary>[\s\S]*?<\/details>/); return m && /id="highDetailToggle"/.test(m[0]) && e && !/highDetailToggle/.test(e[0]); })()
   && !/<div id="capFillRow"[\s\S]{0,300}id="highDetailToggle"/.test(html)
 );
 check(
@@ -1303,7 +1303,7 @@ check(
 );
 check(
   'Display and Export accordions are untouched -- still directly inside #exploreExtras, not pulled into Advanced along with Units (unlike Units, both apply regardless of which tab is open)',
-  /<details class="accordion" id="displayAccordion">\s*<summary>Display<\/summary>[\s\S]{0,50}<div class="accordion-body">/.test(html) &&
+  /<details class="accordion" id="displayAccordion"(?: open)?>(?:\s*<!--[\s\S]*?-->)?\s*<summary>Display<\/summary>[\s\S]{0,50}<div class="accordion-body">/.test(html) &&
   /<\/details>\s*<\/div>\s*<div id="sectionRow"/.test(html)
 );
 
@@ -1342,7 +1342,7 @@ sectionHeader("v3.4.70 -- zoomToBoroughContext() calls updateCurrentViewIndicato
 
 check(
   'updateCurrentViewIndicator(\'home\') lives in resetSharedViewState(), and zoomToBoroughContext() calls it -- so entering Manhattan context still syncs the View compass (was stuck on the prior elevation\'s N/S/E/W button/label before v3.4.70). v3.4.90: extracted into the shared function, see resetSharedViewState()\'s own comment',
-  /function resetSharedViewState\(\)\{[\s\S]{0,300}updateCurrentViewIndicator\('home'\);/.test(html)
+  /function resetSharedViewState\(\)\{[\s\S]{0,700}updateCurrentViewIndicator\('home'\);/.test(html)
   && /function zoomToBoroughContext\(\)\{\s*if \(!boroughsGroup\) return;\s*resetSharedViewState\(\);/.test(html)
 );
 check(
@@ -1389,7 +1389,7 @@ check(
 );
 check(
   'High detail\'s tooltip lives on the <label> (title attribute), not inside a way that could toggle the checkbox on click',
-  /<label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution[\s\S]{0,300}<input type="checkbox" id="highDetailToggle">/.test(html)
+  /<label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:8px;" title="Sharper image, lower frame rate\.[\s\S]{0,300}<input type="checkbox" id="highDetailToggle">/.test(html)
 );
 
 /* ===================================================================
@@ -1750,7 +1750,7 @@ sectionHeader("v3.4.90 -- resetSharedViewState() extracted; resetToDefaultView()
 
 check(
   'resetSharedViewState() exists and contains all 5 pieces both callers need: box-draw cleanup, camera switch, rotate unlock, light reset (the actual v3.4.90 fix -- this line didn\'t exist in zoomToBoroughContext() before), and indicator update',
-  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;\s*controls\.object = camera;\s*controls\.enableRotate = true;\s*sun\.visible = true;\s*orthoLight\.visible = false;\s*updateCurrentViewIndicator\('home'\);\s*\}/.test(html)
+  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;\s*controls\.object = camera;\s*controls\.enableRotate = true;\s*sun\.visible = true;\s*orthoLight\.visible = false;\s*(?:showBuildings = true;[^\n]*\n\s*)?updateCurrentViewIndicator\('home'\);\s*\}/.test(html)
 );
 check(
   'resetToDefaultView() calls resetSharedViewState() (after v3.4.94\'s own clearActiveSectionBox() call), then applySectionMode(null) -- v3.4.90 deliberately did NOT move the cutaway-mode reset into the shared function, since zoomToBoroughContext() relies on it NOT running (v3.2.23: a box-scoped elevation\'s cutaway state persists into Manhattan context)',
@@ -1904,7 +1904,7 @@ sectionHeader("v3.4.97 -- turning Negative space on also exposes Advanced and op
 
 check(
   'the Display <details> accordion has an id (displayAccordion) to target -- previously anonymous, only reachable by position',
-  /<details class="accordion" id="displayAccordion">\s*<summary>Display<\/summary>/.test(html)
+  /<details class="accordion" id="displayAccordion"(?: open)?>(?:\s*<!--[\s\S]*?-->)?\s*<summary>Display<\/summary>/.test(html)
 );
 check(
   'viewNegative\'s click handler calls setUiMode(\'advanced\') and opens displayAccordion only on the off->true transition (inside the showNegative-true branch), not from refreshViewToggles() or any other function that runs on unrelated state changes -- so it never fights a later manual tab-switch/collapse while Negative space stays on',
@@ -1967,7 +1967,7 @@ check(
 check(
   'refreshCapFillCoverage() sets the quad/outline geometry and visibility split directly on the two children (quad.visible/outline.visible), leaving each group\'s own .visible (set by refreshCapFillVisibility()) untouched -- the two toggles are independent and compose correctly (three.js requires every ancestor visible to render), and it\'s called from both buildCapFillGroups() (a fresh compute) and syncCapFillPlanes() (every threshold change, so the split stays live as sliders move)',
   /function refreshCapFillCoverage\(groups, colorOverride\)\{/.test(html)
-  && /const large = ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;\s*\n\s*quad\.visible = !large;\s*\n\s*outline\.visible = large;/.test(html)
+  && /const large = !activeSectionBox && ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;\s*\n\s*quad\.visible = !large;\s*\n\s*outline\.visible = large;/.test(html)
   && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: set the correct fill-vs-outline split for this district's real \(freshly rebuilt\) site bounds before the first paint/.test(html)
   && /refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.99: re-check fill-vs-outline for negative space's own caps every time a threshold that could change their real exposed area moves/.test(html)
 );
@@ -2353,7 +2353,7 @@ sectionHeader("v3.4.120 -- ViewCube v2: single real BoxGeometry with 6 materials
 check(
   'initViewCube() builds the cube from one THREE.BoxGeometry with a 6-material array (order matches BoxGeometry\'s own fixed +X,-X,+Y,-Y,+Z,-Z group order) instead of six separate planes',
   /const cubeMesh = new THREE\.Mesh\(new THREE\.BoxGeometry\(size, size, size\), materials\);/.test(html)
-  && /const order = \[\s*\n\s*\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 180 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)  // v3.4.125: TOP's rotDeg is now 180, not the original 0 -- see that version's own section
+  && /const order = \[\s*\n\s*\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 0 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)  // v3.4.125: TOP's rotDeg is now 180, not the original 0 -- see that version's own section
 );
 check(
   'makeViewCubeFaceTexture() takes a rotDeg and rotates the canvas context before drawing the label -- compensates for BoxGeometry\'s own non-uniform per-face UV layout (confirmed by dumping geometry.attributes.uv directly, not assumed)',
@@ -2418,8 +2418,8 @@ check(
 sectionHeader("v3.4.124 -- ViewCube TOP/BOTTOM click: fixed a real ~45deg rotation bug, unrelated to v3.4.122/123's grid-rotation work");
 
 check(
-  'snapPerspectiveToDirection() uses (0, 0.0001, 1)/(0, 0.0001, -1) for top/bottom -- an X component of exactly 0, not the old (0.0001, 0.0001, ...) whose equal X/Y produced a 45deg azimuth via OrbitControls\' own spherical.setFromVector3()',
-  /if \(dirKey === 'top'\) dir3 = new THREE\.Vector3\(0, 0\.0001, 1\);/.test(html)
+  'snapPerspectiveToDirection() uses (0, -0.0001, 1) for top (v3.4.126: -Y side so screen-up is +Y / north-up; the +Y epsilon gave south-up) and (0, 0.0001, -1) for bottom -- an X component of exactly 0, not the old (0.0001, 0.0001, ...) whose equal X/Y produced a 45deg azimuth via OrbitControls\' own spherical.setFromVector3()',
+  /if \(dirKey === 'top'\) dir3 = new THREE\.Vector3\(0, -0\.0001, 1\);/.test(html)
   && /else if \(dirKey === 'bottom'\) dir3 = new THREE\.Vector3\(0, 0\.0001, -1\);/.test(html)
   && !/new THREE\.Vector3\(0\.0001, 0\.0001, 1\)/.test(html)
 );
@@ -2427,8 +2427,55 @@ check(
 sectionHeader("v3.4.125 -- ViewCube TOP label rotated a further 180deg, per Joe's direct report after v3.4.124's azimuth fix");
 
 check(
-  'TOP\'s rotDeg is 180, not 0 -- N/S/E/W/BOTTOM rotDeg and dirKey mapping untouched',
-  /\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 180 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)
+  'TOP\'s rotDeg is back to 0 (v3.4.126: the real fix was the camera epsilon, not the label) -- N/S/E/W/BOTTOM rotDeg and dirKey mapping untouched',
+  /\{ label: 'E', dirKey: 'e', rotDeg: 270 \}, \{ label: 'W', dirKey: 'w', rotDeg: 90 \},\s*\n\s*\{ label: 'N', dirKey: 'n', rotDeg: 0 \}, \{ label: 'S', dirKey: 's', rotDeg: 0 \},\s*\n\s*\{ label: 'TOP', dirKey: 'top', rotDeg: 0 \}, \{ label: 'BOTTOM', dirKey: 'bottom', rotDeg: 0 \},/.test(html)
+);
+
+sectionHeader("v3.4.126 -- TOP north-up (camera epsilon), box-scoped caps always fill, Buildings on in Home/Manhattan, Display open + High detail in Display, ViewCube spacing");
+
+check(
+  'TOP snap offsets the camera to the -Y side, (0, -0.0001, 1): with camera.up = +Z that makes screen-up = +Y (north-up). The +Y epsilon (v3.4.124) gave a south-up view',
+  /if \(dirKey === 'top'\) dir3 = new THREE\.Vector3\(0, -0\.0001, 1\);/.test(html)
+  && !/dirKey === 'top'\) dir3 = new THREE\.Vector3\(0, 0\.0001, 1\)/.test(html)
+);
+check(
+  'refreshCapFillCoverage(): a drawn box (activeSectionBox) always gets the fill, never the outline-only fallback -- the 50%-of-site coverage rule is for full-site caps, and a wide E-W box tripped it in N/S elevations',
+  /const large = !activeSectionBox && ratio > POCHE_OUTLINE_COVERAGE_THRESHOLD;/.test(html)
+);
+check(
+  'applyPlanBoxDirection() re-runs refreshCapFillCoverage(capFillGroups) after setOrthogonalView(), so the fill-vs-outline decision is made against the final box state',
+  /setOrthogonalView\(direction\);[^\n]*\n\s*refreshCapFillCoverage\(capFillGroups\); \/\/ v3\.4\.126/.test(html)
+);
+check(
+  'resetSharedViewState() sets showBuildings = true (Home and Manhattan context both land in a 3D perspective view with Buildings on), and zoomToBoroughContext() calls refreshViewToggles() to sync the button/solidGroup since that path never runs applySectionMode()',
+  /function resetSharedViewState\(\)\{[\s\S]{0,400}showBuildings = true;/.test(html)
+  && /function zoomToBoroughContext\(\)[\s\S]*?refreshViewToggles\(\); \/\/ v3\.4\.126/.test(html)
+);
+check(
+  'the Display accordion starts open (the `open` attribute on #displayAccordion), so it is expanded on load in both Manhattan-context and non-Manhattan views',
+  /<details class="accordion" id="displayAccordion" open>/.test(html)
+);
+check(
+  'the ViewCube panel sits at bottom:calc(142px + safe-area), clear of the compass panel below it (was 130px, ~8px gap)',
+  /bottom:calc\(142px \+ env\(safe-area-inset-bottom\)\)/.test(html)
+);
+
+sectionHeader("v3.4.128 -- section ground-line segment removed from buildSkylineProfileLine() (A/B test for the white poché)");
+check(
+  'buildSkylineProfileLine() does NOT append a z=0 ground-line segment (pts.push(toVec(lo, 0), toVec(hi, 0))) -- removed in v3.4.128 for the white-poché A/B test; if the poché is red again it returns as a separate mesh',
+  !/pts\.push\(toVec\(lo, 0\), toVec\(hi, 0\)\);/.test(html)
+);
+
+sectionHeader("v3.4.129 -- ground plate returns whenever the Manhattan-context layer is not showing (incl. locked elevations)");
+check(
+  'updateContextLayerVisibility() sets groundMesh.visible = !boroughsGroup.visible, so a locked elevation with Manhattan context on still has its ground plate as the section base',
+  /function updateContextLayerVisibility\(\)\{[\s\S]{0,900}if \(groundMesh && boroughsGroup\) groundMesh\.visible = !boroughsGroup\.visible;/.test(html)
+);
+
+sectionHeader("v3.4.130 -- poché cap quads are unlit (MeshBasicMaterial) so lighting cannot wash the red out");
+check(
+  'makeCapQuad() builds the poché quad from MeshBasicMaterial (unlit), not MeshStandardMaterial -- keeps clippingPlanes, stencil ops, polygonOffset, transparency and addSkyDiscard intact',
+  (() => { const m = html.match(/function makeCapQuad\([^)]*\)\{[\s\S]*?addSkyDiscard\(mat\)/); return !!m && /new THREE\.MeshBasicMaterial\(\{\s*\n\s*color: color \|\| POCHE_COLOR, side: THREE\.DoubleSide,/.test(m[0]) && !/new THREE\.MeshStandardMaterial\(/.test(m[0]) && /clippingPlanes: restrictPlanes/.test(m[0]) && /stencilWrite: true/.test(m[0]) && /polygonOffset: true/.test(m[0]); })()
 );
 
 /* ===================================================================

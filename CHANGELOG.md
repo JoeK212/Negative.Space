@@ -1,3 +1,55 @@
+v3.4.130 - 2026-10-01 - Poché is now unlit, so lighting can never wash it out.
+
+Joe saw the poché render pale gray-blue instead of red in some N/S/E/W elevations (seen on v3.4.127 and v3.4.128; red again on v3.4.129 across Midtown and Inwood). The exact trigger was never found: the console readout showed the Y poché quad visible with colour #b23a2e at 0.4 opacity throughout; no other translucent mesh was drawn; the v3.4.127 ground-line segment was ruled out (still white on v3.4.128 without it); but hiding the Y cap group removed the pale fill, and so did hiding either light -- so its on-screen colour depended on the lighting, not only on the material. A lit surface that is meant to be a flat mass is the fragile part, so makeCapQuad() now builds the poché from MeshBasicMaterial (unlit), like the cutaway handles since v3.4.98. Clipping planes, the stencil ops, polygonOffset, opacity and the sky-discard shader patch (which hooks #include <common>/<color_fragment>/<begin_vertex>, present in the basic shader too) are all unchanged. In the good state the result is visually identical (the lit colour there came out at ~1.0 x the albedo).
+
+This removes the lighting-dependent failure mode; it does not prove that was the only cause. If a pale poché is ever seen again on v3.4.130 or later, run the pixel-readout diagnostic from the v3.4.129 session notes while it is on screen.
+
+Not yet confirmed on Joe's own reload.
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.129 - 2026-10-01 - Section base (ground) with Manhattan context on; the ground-line segment stays out.
+
+v3.4.128's A/B confirmed Joe's poché is red again with the v3.4.127 ground-line segment removed, so that segment stays out of buildSkylineProfileLine() (why it turned the fill pale was never found). The original complaint -- the base of an elevation reading as cut off -- turns out to have a different cause: zoomToBoroughContext() hides the tan ground plate (groundMesh) when Manhattan context is switched on, and nothing restored it when a locked elevation then hid the context layer itself (v3.4.114). So with context ON, N/S/E/W had no ground plate at all; with context OFF the plate shows edge-on as the base. updateContextLayerVisibility() now sets groundMesh.visible = !boroughsGroup.visible, so the ground plate is back whenever the context layer is not showing (including every locked elevation) and still hidden in Plan/Perspective with context on. No new geometry.
+
+Not yet confirmed on Joe's own reload.
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.128 - 2026-10-01 - A/B test: v3.4.127 minus the section ground line.
+
+Joe: the poché reads white/pale slate in N/S/E/W elevations on v3.4.127, but red on v3.4.126, across several areas. The only code change between those two versions was v3.4.127's ground-line segment appended to buildSkylineProfileLine(). The console readout on Joe's page showed the poché quad itself fine (visible, #b23a2e, opacity 0.4, negative-space shell hidden, Section fill ticked), and no causal path from the segment to the fill colour was found in the code, so this is a test, not a proven fix. The segment is removed; everything else in v3.4.127 is unchanged (TOP north-up, box-scoped caps always fill, Buildings on in Home/Manhattan, Display open, High detail in Display, ViewCube spacing).
+
+If the poché is red again: the ground line comes back as its own separate mesh, not part of the skyline LineSegments. If it is still white: the ground line is ruled out and the investigation continues elsewhere.
+
+`audit_deploy.js`: the v3.4.127 ground-line check is replaced by a check that the segment is NOT present.
+
+v3.4.127 - 2026-10-01 - Joe, on a South elevation of Inwood/Washington Heights: the base of the section read as cut off.
+
+A section should read like an architectural section: solid cut fill, ONE continuous ground line at grade, streets as open gaps at grade, no plan-view street layers (Major streets stay hidden in elevations, per v3.4.110). The first two were true except the ground line: the red skyline only touched z=0 inside the gaps between buildings. buildSkylineProfileLine() now appends a single segment along the cut plane at z=0 from the plot range's lo to hi (same red, same renderOrder), so the base is continuous. Standing rule recorded: apply this section convention by default, don't ask again.
+
+Not yet confirmed on Joe's own reload (the function is module-scoped, so it could not be exercised on the live page without swapping the file).
+
+`audit_deploy.js`: 1 new check.
+
+v3.4.126 - 2026-10-01 - Joe: carry-forward list (ViewCube TOP, missing N/S fill, panel spacing, soak test), plus Display/High detail/Home requests.
+
+**ViewCube TOP is now north-up.** v3.4.124's camera-snap epsilon was (0, +0.0001, 1), which puts the camera on the +Y side; with camera.up = +Z that yields screen-up = -Y, i.e. a SOUTH-up top view (checked numerically with lookAt: screen-up (0,-1,0)). v3.4.125's 180deg label flip only rotated the cube's texture, not the real view. Epsilon moved to the -Y side, (0, -0.0001, 1) -> screen-up (0,+1,0); TOP's rotDeg back to 0. Confirmed on Joe's localhost: Battery Park at the bottom, label upright.
+
+**Box-scoped caps always fill.** refreshCapFillCoverage() fell back to outline-only whenever a cap covered >50% of the site. That rule is for full-site caps in free perspective; for a drawn box the elevation camera frames the box, and a wide E-W box easily exceeds half the (narrow) site X span, flipping N/S elevations to outline-only with no maroon fill. E/W compare against the much longer Y span, so they almost never tripped it. Now `!activeSectionBox && ratio > threshold`; applyPlanBoxDirection() also re-runs refreshCapFillCoverage() after setOrthogonalView(). Side effect: box-cropped E/W with large boxes now always fill. Not reproduced by hand before the fix -- the diagnosis is from the code path and the smoke test's fill checks.
+
+**Buildings ON in Home and Manhattan context.** An N/S/E/W elevation force-turns Buildings off (v3.4.48), and that carried into Home. resetSharedViewState() now sets showBuildings = true; zoomToBoroughContext() calls refreshViewToggles() so the button and solidGroup sync.
+
+**Display accordion opens by default; High detail moved into it.** v3.4.39 had put High detail in Export, but it only raises on-screen render resolution and Export has no image output. Now at the bottom of Display, with a clearer tooltip. Off by default.
+
+**ViewCube panel spacing.** bottom offset 130px -> 142px (was ~8px above the compass panel, now ~20px).
+
+**smoke_test.js:** Phase 9 (Buildings + Negative space both on, a box) now re-enables both toggles after each box-direction click (entering an elevation turns Buildings off by design), and its cut-face-cap check requires only the ACTIVE axis's cap material to be box-scoped (only that group is visible in a locked elevation). runSmokeBothSides(): 290/290 on Midtown-era localhost (137 context OFF, 153 context ON).
+
+**Not done / still open:** soak_test.js has not been run successfully (needs Joe's own foreground tab); the original missing-fill report was not reproduced by hand; the intermittent N/S/E/W rendering bug remains open per the project notes.
+
+`audit_deploy.js`: v3.4.124/125 checks updated for the epsilon and rotDeg change, High detail / Display / resetSharedViewState / refreshCapFillCoverage expectations updated, 6 new checks.
+
 v3.4.125 - 2026-09-30 - Joe, immediately after v3.4.124's azimuth fix: "still wrong needs to be rotated 180 degrees."
 
 v3.4.124 fixed a real, confirmed bug (a ~45deg azimuth baked into the TOP/BOTTOM camera-snap offset). That fix was correct and stays. This is a separate, second adjustment on top of it: TOP's label itself still needed a further, plain 180-degree turn.

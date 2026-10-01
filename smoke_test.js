@@ -364,6 +364,10 @@ async function runSmokeTest(label, opts = {}){
     for (const [btn, dir] of [['boxViewN','N'],['boxViewS','S'],['boxViewE','E'],['boxViewW','W']]){
       if (!document.getElementById(btn)) continue;
       click(btn); await wait(200);
+      // v3.4.126: entering an N/S/E/W elevation deliberately force-switches Buildings OFF (v3.4.48), so this phase has to turn it back on to actually test the both-on combination it names.
+      if (!document.getElementById('viewSolid').classList.contains('active')) click('viewSolid');
+      if (!document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');
+      await wait(250);
       const axis = NS.sectionModeAxis;
       const g = NS.capFillGroups[axis];
       const L = 'both-on box->' + dir;
@@ -387,7 +391,8 @@ async function runSmokeTest(label, opts = {}){
         if (o.material.clippingPlanes.includes(NS.yClipPlaneNeg)) xCapMat = o.material;
         if (o.material.clippingPlanes.includes(NS.xClipPlaneNeg)) yCapMat = o.material;
       });
-      check(L + ': building cut-face caps are box-scoped', capsBoxScoped(xCapMat) && capsBoxScoped(yCapMat));
+      // v3.4.126: only the ACTIVE axis's cap group is ever visible in a locked elevation (refreshViewToggles: buildingCapFillGroups.x/y.visible keyed to sectionModeAxis), and syncBuildingCapClipping() deliberately box-scopes only that one -- so require just that material, not both.
+      check(L + ': building cut-face caps are box-scoped', capsBoxScoped(axis === 'x' ? xCapMat : yCapMat));
       await redraw();
       if (!document.getElementById('viewSolid').classList.contains('active')) click('viewSolid');
       if (!document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');

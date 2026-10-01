@@ -1760,3 +1760,12 @@ same way for both cameras.
   the cut-line scattered-dots symptom below).
 - Cut-line "scattered dots" — resolved in v3.0.37 (EdgesGeometry replaced
   with an exact triangle/plane cross-section).
+
+### v3.4.126 state (2026-10-01)
+
+- ViewCube TOP: camera epsilon on the -Y side (screen-up = +Y, north-up). TOP's label rotDeg is 0 again.
+- refreshCapFillCoverage(): box-scoped caps always fill (`!activeSectionBox && ratio > threshold`); applyPlanBoxDirection() re-runs it after setOrthogonalView().
+- resetSharedViewState() sets showBuildings = true (Home + Manhattan context); zoomToBoroughContext() calls refreshViewToggles().
+- Display accordion open by default; High detail (slower) lives in Display, not Export.
+- Still open: soak_test.js not yet run successfully (needs a foreground tab); the original missing-fill report was not reproduced by hand; the intermittent N/S/E/W rendering bug (see above) remains open until Joe's own local testing says otherwise.
+- smoke_test.js Phase 9 re-enables Buildings + Negative space after each box-direction click and checks only the active axis's building cap material.

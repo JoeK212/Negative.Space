@@ -709,7 +709,7 @@
     version's own comment, at Export's new spot near the bottom of this
     panel) -- Joe's call that Export is secondary to what this tool is
     actually for, not something that needed to sit right next to Display. -->
-    <details class="accordion" id="displayAccordion">
+    <details class="accordion" id="displayAccordion" open> <!-- v3.4.126: Joe -- Display starts expanded in both Manhattan-context and non-Manhattan views -->
       <summary>Display</summary>
       <div class="accordion-body">
         <div class="row" style="align-items:center;">
@@ -717,6 +717,11 @@
           <button class="btn secondary" id="viewStreets">Major streets</button>
           <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays every real named street around the current site, not just avenues.</span></span>
         </div>
+        <!-- v3.4.126: Joe -- High detail moved here from Export (where v3.4.39 had put it). It only raises on-screen render resolution (pixel ratio) -- no geometry or STL effect, and Export has no image output for it to belong to -- so it is a viewing setting. -->
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:8px;" title="Sharper image, lower frame rate. Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls -- best for screenshots; off by default">
+          <input type="checkbox" id="highDetailToggle">
+          High detail (slower)
+        </label>
       </div>
     </details>
   </div>
@@ -846,17 +851,6 @@
         just the discoverability piece -- without a visible way to grab
         it, a user has to already know to look at their own address bar. -->
         <button class="btn secondary" id="copyLinkBtn" style="margin-top:2px;" title="Copies a link to this exact district, cutaway position, and layer(s) shown. Camera view/orientation and any drawn box aren't included yet.">Copy link</button>
-        <!-- v3.4.39: Joe -- "is [High detail] useful?" Genuinely marginal
-        for most people most of the time; the one real case is wanting a
-        crisp image (a screenshot, a portfolio shot) rather than anything
-        about the model/geometry itself, which is an EXPORT concern, not a
-        general viewing setting. Moved from the Simple tab (where it sat
-        with no connection to anything else nearby) to here, next to the
-        other actual export option. -->
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;" title="Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls — a real frame-time cost, so it's off by default">
-          <input type="checkbox" id="highDetailToggle">
-          High detail (slower)
-        </label>
       </div>
     </details>
   </div>
@@ -931,7 +925,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.125'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.130'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1370,6 +1364,7 @@ function buildSkylineProfileLine(profileArr, lo, hi, axisIsX, planeCoord){
       pts.push(toVec(x1, h), toVec(x1, profileArr[i + 1])); // vertical riser to the next bin's height
     }
   }
+  // v3.4.128: the v3.4.127 ground-line segment that was appended here is removed for an A/B test -- Joe's poché read WHITE (not red) in elevations on v3.4.127 vs red on v3.4.126, and this was the only change between them. If the poché is red again, the ground line returns as its own separate mesh.
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.LineBasicMaterial({ color: 0xFF0000, depthTest: false }); // same look as the existing cut-lines
   const mesh = new THREE.LineSegments(geo, mat);
@@ -2137,8 +2132,9 @@ function capQuadFaceOnEnough(planeNormal){
 
 function makeCapQuad(size, restrictPlanes, renderOrder, skySampleAxis, color, opacity){
   const geom = new THREE.PlaneGeometry(size, size);
-  const mat = new THREE.MeshStandardMaterial({
-    color: color || POCHE_COLOR, metalness: 0.02, roughness: 0.95, side: THREE.DoubleSide, // DoubleSide so the fill stays visible from either side as the user orbits
+  // v3.4.130: UNLIT (MeshBasicMaterial), was a lit MeshStandardMaterial. Joe saw the poché render pale gray-blue instead of red in some elevations (v3.4.127/128); hiding either light removed the pale fill entirely, i.e. the on-screen colour depended on the lights, not just the material (whose colour read #b23a2e throughout). The poché is meant to be one flat, uniform mass (see the founding-design block above), so lighting has no business in it: unlit, the on-screen colour is exactly the material colour at the material's opacity, whatever state the lights are in. In the good state this renders identically (lit ~= 1.0 there).
+  const mat = new THREE.MeshBasicMaterial({
+    color: color || POCHE_COLOR, side: THREE.DoubleSide, // DoubleSide so the fill stays visible from either side as the user orbits
     transparent: true, opacity: opacity != null ? opacity : 0.4, // v3.0.29 -- translucent plane instead of a solid opaque wall, see POCHE_COLOR comment above. v3.4.84: optional override -- buildings' charcoal at the original 0.4 blended into shaded building facades (confirmed live: a bright-green swap at the same opacity showed the cap WAS rendering correctly, just illegible at this color+opacity against dark, unlit building faces), Joe chose a denser fill over a lighter color or different hue
     clippingPlanes: restrictPlanes, // clipIntersection left at default (false/union): kept only where BOTH restrictPlanes agree
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
@@ -5124,6 +5120,7 @@ function resetSharedViewState(){
   controls.enableRotate = true;
   sun.visible = true;
   orthoLight.visible = false;
+  showBuildings = true; // v3.4.126: Joe -- Home / 3D perspective must have Buildings ON in both Manhattan-context and non-Manhattan views (an elevation's v3.4.48 auto-off was otherwise carrying into Home)
   updateCurrentViewIndicator('home');
 }
 function resetToDefaultView(){
@@ -5979,6 +5976,8 @@ function inLockedElevation(){
 // to exactly showBoroughs the moment you leave.
 function updateContextLayerVisibility(){
   if (boroughsGroup) boroughsGroup.visible = showBoroughs && !inLockedElevation();
+  // v3.4.129: the tan ground plate is what the Manhattan-context layer replaces (zoomToBoroughContext() hides it), so it must come back whenever the context layer is NOT showing -- in particular in a locked elevation with Manhattan context toggled on, where it used to stay hidden and left the section with no base at all (Joe: "street graphic cut off?"; a section needs grade under it).
+  if (groundMesh && boroughsGroup) groundMesh.visible = !boroughsGroup.visible;
 }
 function updateStreetLabelVisibility(){
   if (!streetsGroup) return;
@@ -6131,6 +6130,7 @@ function zoomToBoroughContext(){
   // rather than adding anything, so just leave them as the user already
   // set them.
   if (groundMesh) groundMesh.visible = false;
+  refreshViewToggles(); // v3.4.126: resetSharedViewState() just forced Buildings on -- sync the button + solidGroup, since this path (unlike Home) never runs applySectionMode()
 }
 function exitBoroughContext(){
   camera.near = ORIGINAL_CAMERA_NEAR;
