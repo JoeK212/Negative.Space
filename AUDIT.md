@@ -1815,3 +1815,24 @@ Reopen with exact steps if any of these is seen again.
 - Smoke (`runSmokeBothSides`): district-1 327/327; Midtown, Upper East Side, Inwood / Washington Heights and Chelsea each 158/158 (context OFF) + 169/169 (context ON). Phase 10 (elevations entered from Home) included.
 - Soak with `navHome` added to the move list and a "Manhattan context layer visible in a locked elevation" invariant (soak_test.js, test-only): Midtown, Manhattan context ON, `runSoakTest({cycles:300})` in Joe's own foreground tab: 0 violations.
 - Not covered by scripts: how the fill light looks (Joe's visual check), the hosted Netlify build.
+
+### v3.4.133 Terrain (2026-10-02)
+
+- Data: Terrarium tiles (AWS), z14, fetched live; bit-exact PNG decode (canvas decode corrupted R by 256 m on Joe's machine). Grid >= 16 m in the district's rotated frame via the exact inverse of project(). Datum: lowest ground in the padded site minus 1 m = z 0.
+- Buildings stand on the lowest footprint terrain; roof = base + Overture height; 0.5 m footing. Compute = mold - earth heightfield solid - buildings. Ground mesh keeps groundMesh identity; streets draped.
+- Sections: section profile gaps = ground height (highest terrain across the slab), terrain surface clipped to the cut slab in locked elevations (terrainGroundClipPlanes, re-applied from refreshActiveSectionProfile).
+- Verified live (in-memory patch of served 132): smoke 153/153 + 169/169 on Inwood with terrain on. Note OFF-pass count is 153 when the district was already computed (Phases 1-2 are skipped), 158 when it is not.
+- Not done: earth poche under the ground line; per-district grid rotation bug (see CHANGELOG); foreground-tab run; visual sign-off.
+
+### Grid rotation fix (v3.4.133)
+
+GRID_COS/GRID_SIN were `const` from the page-load default (28.96deg) and never followed setGridRotation(); every district was projected at 28.96deg. Now `let`, updated in setGridRotation(). Live check on Greenwich Village: weighted wall bearing +3.89deg -> -0.89deg (shift 4.78deg = 28.96 - 24.18). Residual < 1deg is the data's own bias.
+
+### Greenwich Village smoke, context ON (found 2026-10-02, predates 133)
+`runSmokeBothSides` on Greenwich Village with the grid fix: OFF 158/158, ON 164/169. The 5 failures are all Phase 6 "gap box, stale threshold, compass nav{N,S,E,W}: section is not empty (skyline maxZ > 0) -- maxZ=0". The same ON pass on the unfixed v3.4.132 fails the same 4 distinct checks, so it is not from the grid fix or terrain. Not investigated further.
+
+### v3.4.134 transit footprints over streets (2026-10-02)
+Cause (Midtown screenshots): Overture train_station / transportation footprints drawn over the streets above stations. Rule: drop any covering > 50 m of street centreline (parts judged individually, bridge_structure exempt). Midtown drops: ef5effa2 (no height, never drawn), a35c1295 (Herald Sq, 56 m), 76fa88dd (Grand Central Terminal, 46 m), and two Park Ave station-complex parts (150 m, 65 m); JS result matches a shapely cross-check (a35c1295 857 m vs 856 m). Live smoke on Midtown with the rule (in-memory patch of served 133): OFF 158/158, ON 169/169.
+
+### v3.4.135 Grand Central exemption (2026-10-02)
+Joe reported GCT missing; it was dropped by the v3.4.134 rule (411 m of Park Ave viaduct centreline). TRANSIT_KEEP_IDS now exempts 76fa88dd-a26d-4716-9261-ffd8ba2a9a0c. Live check on Midtown (in-memory patch of served 134): GCT not in droppedTransit, flat-fallback 2561 (was 2560).

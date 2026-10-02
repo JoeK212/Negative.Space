@@ -717,6 +717,10 @@
           <button class="btn secondary" id="viewStreets">Major streets</button>
           <span class="info-badge" tabindex="0">?<span class="tip">Manhattan context zooms out to show where this site sits on the island — still a free 3D view, cutaway tools stay usable. Major streets overlays every real named street around the current site, not just avenues.</span></span>
         </div>
+        <div class="row" style="align-items:center; margin-top:6px;">
+          <button class="btn secondary" id="viewTerrain">Terrain</button>
+          <span class="info-badge" tabindex="0">?<span class="tip">Terrain follows the real ground: buildings stand on it, the negative space is carved above it, and streets drape over it. Elevation data is fetched live (public ~7 m tiles) the first time you switch it on. Turning it on or off rebuilds the site (and recomputes if you had computed). Elevations/sections with terrain on are still being finished.</span></span>
+        </div>
         <!-- v3.4.126: Joe -- High detail moved here from Export (where v3.4.39 had put it). It only raises on-screen render resolution (pixel ratio) -- no geometry or STL effect, and Export has no image output for it to belong to -- so it is a viewing setting. -->
         <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:8px;" title="Sharper image, lower frame rate. Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls -- best for screenshots; off by default">
           <input type="checkbox" id="highDetailToggle">
@@ -925,7 +929,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.132'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.135'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1568,8 +1572,8 @@ function buildAxisHeightProfile(axis, lo, hi, capHeight, bins = 2048){
   const arr = new Float32Array(bins);
   const binW = (hi - lo) / bins;
   for (const f of buildingsGeo.features){
-    const h = Math.min(f.properties.height || 0, capHeight);
-    if (h <= 0) continue;
+    const h = Math.min(featureTopZ(f), capHeight); // v3.4.133: absolute roof (== height when terrain is off)
+    if ((f.properties.height || 0) <= 0) continue;
     const pts = flattenRings(f.geometry).flat().map(([lon, lat]) => project(lon, lat));
     let bMin = Infinity, bMax = -Infinity;
     for (const [x, y] of pts){
@@ -1708,6 +1712,7 @@ function buildBuildingBBoxCache(){
   }
   const pushBBox = (geometry, h) => {
     if (h <= 0) return;
+    h += terrainBaseOfGeometry(geometry); // v3.4.133: absolute roof height; 0 added when terrain is off
     const pts = flattenRings(geometry).flat().map(([lon, lat]) => project(lon, lat));
     let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
     for (const [x, y] of pts){
@@ -1739,6 +1744,21 @@ function buildSectionProfile(axis, lo, hi, capHeight, slabLo, slabHi, bins = 204
     const i1 = Math.min(bins - 1, Math.ceil((vMax - lo) / binW));
     for (let i = i0; i <= i1; i++) if (h > arr[i]) arr[i] = h;
   }
+  // v3.4.133: with terrain on, the open gaps (streets) sit at the GROUND height of the cut, not at 0. Ground per bin = the highest terrain
+  // seen across the slab (a few samples through its depth), so the skyline line and the roof/building discard tests follow the terrain.
+  if (terrainData){
+    const slabN = Math.max(1, Math.min(6, Math.ceil((slabHi - slabLo) / 40)));
+    for (let i = 0; i < bins; i++){
+      const v = lo + (i + 0.5) * binW;
+      let g = 0;
+      for (let s = 0; s <= slabN; s++){
+        const c = slabLo + (slabHi - slabLo) * (s / slabN);
+        const t = axis === 'x' ? terrainZ(v, c) : terrainZ(c, v);
+        if (t > g) g = t;
+      }
+      if (g > arr[i]) arr[i] = g;
+    }
+  }
   return arr;
 }
 // Rebuilds the skyline line + sky-discard texture for whichever axis is
@@ -1764,6 +1784,15 @@ function makeHeightTexture(arr){
   tex.needsUpdate = true;
   return tex;
 }
+function terrainGroundClipPlanes(axis){ // v3.4.133
+  const planes = (activeSectionBox && axis !== null) ? getPlanBoxClipPlanes().slice(1) : [];
+  if (terrainData && axis !== null){
+    const { slabLo, slabHi } = getSectionRanges(axis);
+    if (axis === 'x'){ planes.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -slabLo), new THREE.Plane(new THREE.Vector3(-1, 0, 0), slabHi)); }
+    else { planes.push(new THREE.Plane(new THREE.Vector3(0, 1, 0), -slabLo), new THREE.Plane(new THREE.Vector3(0, -1, 0), slabHi)); }
+  }
+  return planes;
+}
 function refreshActiveSectionProfile(){
   if (!negativeMesh || !siteCapHeight) return;
   let tex;
@@ -1787,6 +1816,7 @@ function refreshActiveSectionProfile(){
   // zeros), so the fill doesn't collapse to a sliver at z=0 in that edge
   // case; the small margin matches the same headroom already used for
   // the roofline discard elsewhere in this file.
+  if (terrainData && groundMesh){ groundMesh.material.clippingPlanes = terrainGroundClipPlanes(sectionModeAxis); groundMesh.material.needsUpdate = true; } // v3.4.133: slab moved with the threshold
   const arr = tex === negHeightTexY ? negHeightProfileY : negHeightProfileX;
   let localMax = 0;
   for (let i = 0; i < arr.length; i++) if (arr[i] > localMax) localMax = arr[i];
@@ -3040,6 +3070,7 @@ let GRID_ROTATION_RAD = GRID_ROTATION_DEG * Math.PI / 180;
 function setGridRotation(deg){
   GRID_ROTATION_DEG = deg;
   GRID_ROTATION_RAD = deg * Math.PI / 180;
+  GRID_COS = Math.cos(GRID_ROTATION_RAD); GRID_SIN = Math.sin(GRID_ROTATION_RAD); // v3.4.133: project() reads these, so they must follow the district's own angle
 }
 
 // v3.1.0: each entry is a neighborhood that has actually been fetched,
@@ -3064,7 +3095,8 @@ const NEIGHBORHOODS = [
   { id: 'district-12', name: 'Inwood / Washington Heights', gridRotationDeg: 30.52 },
 ];
 let currentNeighborhoodId = null;
-const GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);
+// v3.4.133: was `const`, computed once at page load from the 28.96deg default and NEVER updated by setGridRotation(), so every district was projected at 28.96deg while the compass/labels used its own measured angle (Greenwich Village ~4.8deg off, Inwood ~1.6deg). Now `let`, kept in sync by setGridRotation().
+let GRID_COS = Math.cos(GRID_ROTATION_RAD), GRID_SIN = Math.sin(GRID_ROTATION_RAD);
 
 function setProjectionOrigin(lon, lat){
   lon0 = lon; lat0 = lat;
@@ -3123,8 +3155,310 @@ function extrudedMesh(shape, minH, maxH, material){
 }
 
 
+/* ================= Terrain (v3.4.133) =================
+   Joe: "terrain ... negative space, sections and ground follow terrain ... able to be toggled." Elevation comes
+   from the public Terrarium tiles (AWS, ~7 m/px at this latitude), fetched live -- no data files. OFF = the exact
+   flat pipeline that existed before (everything below is gated on terrainData being non-null).
+   Model: z=0 is a district datum, 1 m below the lowest ground in the (margin-padded) site, so all terrain z >= 1.
+   - Each building/part stands on min(terrain under its footprint vertices): roof = base + Overture height, and it is
+     extruded 0.5 m lower than its base so the solid always penetrates the ground (no hairline gaps downhill).
+   - Compute: mold box minus an "earth" solid (a closed heightfield) minus the buildings, so the negative space's floor IS the terrain.
+   - Display: groundMesh keeps its identity (so every existing visibility/clipping rule still applies) but swaps in the terrain surface.
+   - Streets are densified and draped. */
+let terrainOn = false;
+let terrainBusy = false;
+let terrainData = null; // { x0, y0, step, nx, ny, z:Float32Array (datum-relative), datum, minZ, maxZ }
+let groundPlaneGeo = null;
+let terrainGroundGeo = null;
+const TERRAIN_ZOOM = 14;
+const TERRAIN_MARGIN_M = 60;
+const TERRAIN_FOOTING_M = 0.5;
+const TERRAIN_EARTH_FLOOR = -2;
+const terrainBaseCache = new WeakMap();
+function terrainLocalToLonLat(x, y){
+  // exact inverse of project(): same GRID_COS/GRID_SIN it uses, so terrain lines up with the buildings
+  const xr = x * GRID_COS + y * GRID_SIN, yr = -x * GRID_SIN + y * GRID_COS;
+  return [lon0 + xr / M_PER_DEG_LON, lat0 + yr / M_PER_DEG_LAT];
+}
+function terrainTileXY(lon, lat, z){
+  const n = 2 ** z, r = lat * Math.PI / 180;
+  return [(lon + 180) / 360 * n, (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n];
+}
+// Bit-exact 8-bit RGB PNG decoder. Terrarium packs elevation into R/G/B, so ONE count of drift in R is 256 m: going through
+// <canvas>/getImageData (colour management, dithering) corrupted a large share of pixels on Joe's machine, so we inflate the
+// PNG ourselves.
+async function decodePngRGB8(buf){
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  let p = 8, w = 0, h = 0; const idat = [];
+  while (p < buf.length){
+    const len = dv.getUint32(p), type = String.fromCharCode(buf[p + 4], buf[p + 5], buf[p + 6], buf[p + 7]);
+    if (type === 'IHDR'){ w = dv.getUint32(p + 8); h = dv.getUint32(p + 12); if (buf[p + 16] !== 8 || buf[p + 17] !== 2 || buf[p + 20] !== 0) throw new Error('unsupported terrain PNG layout'); }
+    else if (type === 'IDAT') idat.push(buf.subarray(p + 8, p + 8 + len));
+    p += 12 + len;
+  }
+  let tot = 0; for (const c of idat) tot += c.length;
+  const z = new Uint8Array(tot); let o = 0; for (const c of idat){ z.set(c, o); o += c.length; }
+  const raw = new Uint8Array(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+  const bpp = 3, stride = w * bpp, out = new Uint8Array(h * stride);
+  for (let y = 0; y < h; y++){
+    const ft = raw[y * (stride + 1)], ro = y * (stride + 1) + 1, oo = y * stride;
+    for (let x = 0; x < stride; x++){
+      const a = x >= bpp ? out[oo + x - bpp] : 0, b = y > 0 ? out[oo - stride + x] : 0, c = (x >= bpp && y > 0) ? out[oo - stride + x - bpp] : 0;
+      let v = raw[ro + x];
+      if (ft === 1) v += a; else if (ft === 2) v += b; else if (ft === 3) v += (a + b) >> 1;
+      else if (ft === 4){ const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); v += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c); }
+      out[oo + x] = v & 255;
+    }
+  }
+  return { w, h, rgb: out };
+}
+async function fetchTerrainMosaic(minLon, maxLon, minLat, maxLat){
+  const z = TERRAIN_ZOOM;
+  const [fx0, fy1] = terrainTileXY(minLon, minLat, z);
+  const [fx1, fy0] = terrainTileXY(maxLon, maxLat, z);
+  const tx0 = Math.floor(fx0), tx1 = Math.floor(fx1), ty0 = Math.floor(fy0), ty1 = Math.floor(fy1);
+  const nx = tx1 - tx0 + 1, ny = ty1 - ty0 + 1;
+  if (nx * ny > 36) throw new Error('Terrain area too large (' + nx * ny + ' tiles)');
+  const W = nx * 256, H = ny * 256, elev = new Float32Array(W * H);
+  const jobs = [];
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++){
+    jobs.push((async () => {
+      const res = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`);
+      if (!res.ok) throw new Error(`Terrain tile ${z}/${tx}/${ty} failed (${res.status})`);
+      const { rgb } = await decodePngRGB8(new Uint8Array(await res.arrayBuffer()));
+      const ox = (tx - tx0) * 256, oy = (ty - ty0) * 256;
+      for (let py = 0; py < 256; py++) for (let px = 0; px < 256; px++){
+        const i = (py * 256 + px) * 3;
+        const e = rgb[i] * 256 + rgb[i + 1] + rgb[i + 2] / 256 - 32768; // Terrarium encoding
+        elev[(oy + py) * W + ox + px] = e > 0 ? e : 0; // water/bathymetry (and its encoding noise) = sea level; Manhattan ground is >= 0
+      }
+    })());
+  }
+  await Promise.all(jobs);
+  return { elev, W, H, tx0, ty0, z };
+}
+function terrainElevLonLat(mos, lon, lat){
+  const [fx, fy] = terrainTileXY(lon, lat, mos.z);
+  const px = Math.min(Math.max((fx - mos.tx0) * 256 - 0.5, 0), mos.W - 1.001);
+  const py = Math.min(Math.max((fy - mos.ty0) * 256 - 0.5, 0), mos.H - 1.001);
+  const x0 = Math.floor(px), y0 = Math.floor(py), ax = px - x0, ay = py - y0, W = mos.W, e = mos.elev;
+  const a = e[y0 * W + x0], b = e[y0 * W + x0 + 1], c = e[(y0 + 1) * W + x0], d = e[(y0 + 1) * W + x0 + 1];
+  return (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+}
+async function loadTerrainForSite(minX, maxX, minY, maxY){
+  const m = TERRAIN_MARGIN_M;
+  const x0 = minX - m, x1 = maxX + m, y0 = minY - m, y1 = maxY + m;
+  const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => terrainLocalToLonLat(x, y));
+  const lons = corners.map(c => c[0]), lats = corners.map(c => c[1]);
+  const pad = 0.0006;
+  const mos = await fetchTerrainMosaic(Math.min(...lons) - pad, Math.max(...lons) + pad, Math.min(...lats) - pad, Math.max(...lats) + pad);
+  const step = Math.max(16, Math.sqrt((x1 - x0) * (y1 - y0) / 25000)); // coarser grid keeps the CSG fast: 10 m / ~60k verts took ~30 s to compute vs ~2 s flat
+  const nx = Math.ceil((x1 - x0) / step) + 1, ny = Math.ceil((y1 - y0) / step) + 1;
+  const z = new Float32Array(nx * ny);
+  let lo = Infinity, hi = -Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){
+    const [lon, lat] = terrainLocalToLonLat(x0 + i * step, y0 + j * step);
+    const e = terrainElevLonLat(mos, lon, lat);
+    z[j * nx + i] = e;
+    if (e < lo) lo = e; if (e > hi) hi = e;
+  }
+  const datum = lo - 1;
+  for (let k = 0; k < z.length; k++) z[k] -= datum;
+  terrainData = { x0, y0, step, nx, ny, z, datum, minZ: lo - datum, maxZ: hi - datum };
+}
+function terrainZ(x, y){
+  const t = terrainData;
+  const gx = Math.min(Math.max((x - t.x0) / t.step, 0), t.nx - 1.001), gy = Math.min(Math.max((y - t.y0) / t.step, 0), t.ny - 1.001);
+  const i = Math.floor(gx), j = Math.floor(gy), ax = gx - i, ay = gy - j, nx = t.nx, z = t.z;
+  const a = z[j * nx + i], b = z[j * nx + i + 1], c = z[(j + 1) * nx + i], d = z[(j + 1) * nx + i + 1];
+  return (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+}
+function terrainBaseOfGeometry(geometry){
+  if (!terrainData) return 0;
+  let v = terrainBaseCache.get(geometry);
+  if (v !== undefined) return v;
+  v = Infinity;
+  for (const ring of flattenRings(geometry)) for (const [lon, lat] of ring){ const [x, y] = project(lon, lat); const t = terrainZ(x, y); if (t < v) v = t; }
+  if (!isFinite(v)) v = 0;
+  terrainBaseCache.set(geometry, v);
+  return v;
+}
+function featureTopZ(f){ // absolute roof height: terrain base + Overture height (flat mode: just the height)
+  return (f.properties.height || 0) + (terrainData ? terrainBaseOfGeometry(f.geometry) : 0);
+}
+function buildTerrainGroundGeometry(){
+  const t = terrainData, nx = t.nx, ny = t.ny, pos = new Float32Array(nx * ny * 3);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){
+    const o = (j * nx + i) * 3;
+    pos[o] = t.x0 + i * t.step; pos[o + 1] = t.y0 + j * t.step; pos[o + 2] = t.z[j * nx + i];
+  }
+  const idx = new Uint32Array((nx - 1) * (ny - 1) * 6);
+  let k = 0;
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++){
+    const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+    idx[k++] = a; idx[k++] = b; idx[k++] = d; idx[k++] = a; idx[k++] = d; idx[k++] = c; // CCW seen from above
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  return geo;
+}
+function applyTerrainGround(){
+  if (!groundMesh) return;
+  if (!groundPlaneGeo) groundPlaneGeo = groundMesh.geometry;
+  if (terrainGroundGeo){ terrainGroundGeo.dispose(); terrainGroundGeo = null; }
+  if (terrainData){
+    terrainGroundGeo = buildTerrainGroundGeometry();
+    groundMesh.geometry = terrainGroundGeo;
+    groundMesh.position.z = -0.05; // just below the negative-space floor / street ribbons, same small clearance idea as the flat plate's -0.5
+  } else {
+    groundMesh.geometry = groundPlaneGeo;
+    groundMesh.position.z = -0.5;
+  }
+}
+// Closed, outward-wound heightfield solid: terrain top, a copy of the boundary ring dropped to TERRAIN_EARTH_FLOOR for the side
+// walls, and a fan bottom -- shared ring vertices keep it watertight, which Manifold requires.
+function buildTerrainEarthManifold(){
+  const t = terrainData, nx = t.nx, ny = t.ny, nTop = nx * ny;
+  const ring = [];
+  for (let i = 0; i < nx; i++) ring.push(0 * nx + i);
+  for (let j = 1; j < ny; j++) ring.push(j * nx + (nx - 1));
+  for (let i = nx - 2; i >= 0; i--) ring.push((ny - 1) * nx + i);
+  for (let j = ny - 2; j >= 1; j--) ring.push(j * nx);
+  const R = ring.length, nVerts = nTop + R + 1;
+  const vp = new Float32Array(nVerts * 3);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++){
+    const o = (j * nx + i) * 3; vp[o] = t.x0 + i * t.step; vp[o + 1] = t.y0 + j * t.step; vp[o + 2] = t.z[j * nx + i];
+  }
+  for (let r = 0; r < R; r++){
+    const s = ring[r] * 3, o = (nTop + r) * 3;
+    vp[o] = vp[s]; vp[o + 1] = vp[s + 1]; vp[o + 2] = TERRAIN_EARTH_FLOOR;
+  }
+  const cIdx = nTop + R, co = cIdx * 3;
+  vp[co] = t.x0 + (nx - 1) * t.step / 2; vp[co + 1] = t.y0 + (ny - 1) * t.step / 2; vp[co + 2] = TERRAIN_EARTH_FLOOR;
+  const tris = [];
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++){
+    const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+    tris.push(a, b, d, a, d, c);
+  }
+  for (let r = 0; r < R; r++){
+    const r2 = (r + 1) % R;
+    const tk = ring[r], tk1 = ring[r2], bk = nTop + r, bk1 = nTop + r2;
+    tris.push(tk, bk, bk1, tk, bk1, tk1); // outward side wall
+    tris.push(cIdx, bk1, bk);             // downward bottom fan
+  }
+  const { Manifold, Mesh } = manifoldWasm;
+  const mesh = new Mesh({ numProp: 3, vertProperties: vp, triVerts: new Uint32Array(tris) });
+  return new Manifold(mesh);
+}
+function densifyPolyline(pts, maxLen){
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++){
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / maxLen));
+    for (let s = 1; s <= n; s++) out.push([x0 + (x1 - x0) * s / n, y0 + (y1 - y0) * s / n]);
+  }
+  return out;
+}
+function drapeGeometryOnTerrain(geo){
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setZ(i, p.getZ(i) + terrainZ(p.getX(i), p.getY(i)));
+  p.needsUpdate = true;
+  geo.computeBoundingSphere();
+}
+function refreshTerrainToggle(){
+  const btn = document.getElementById('viewTerrain');
+  if (!btn) return;
+  btn.classList.toggle('active', terrainOn);
+  btn.classList.toggle('secondary', !terrainOn);
+}
+document.getElementById('viewTerrain').addEventListener('click', async () => {
+  if (!currentNeighborhoodId || terrainBusy || !manifoldWasm) return;
+  terrainBusy = true;
+  const hadCompute = !!negativeMesh;
+  terrainOn = !terrainOn;
+  refreshTerrainToggle();
+  toast(terrainOn ? 'Terrain on — fetching elevation tiles and rebuilding…' : 'Terrain off — rebuilding flat…');
+  try {
+    await loadData(currentNeighborhoodId);
+    if (hadCompute) await computeNegativeSpace();
+  } finally { terrainBusy = false; }
+});
+
 /* ================= Data loading + solid building ================= */
 let buildingsGeo = null, partsGeo = null;
+/* v3.4.134 -- station/transportation footprints that cover streets.
+   Joe, Midtown: "there is form geometry in the area that is supposed to be streets". Cause is in the Overture data, not the app: subway/rail
+   station and transport-structure footprints (class train_station, subtype transportation) are drawn at the surface over the streets above them
+   (Herald Square 34 St station ~16,000 m2 over Broadway/6th Ave at 56 m tall, Grand Central, Port Authority, ...). Joe chose: drop any such
+   footprint (and its parts) that covers more than TRANSIT_STREET_DROP_M metres of street centreline. bridge_structure is exempt (a bridge deck
+   is meant to cover its own roadway). Runs after the projection origin is set, so the district's coordinate frame does not move.
+   Disable for a comparison with ?transit=keep in the URL. The dropped list is on __NS.droppedTransit and in a toast. */
+const TRANSIT_STREET_DROP_M = 50;
+// v3.4.135: Joe -- "GCT appears to be missing". Grand Central Terminal covers ~411 m of Park Ave viaduct centreline, so the rule dropped it. These
+// real buildings are exempt (id = Overture building id). Add an id here to bring a dropped footprint back.
+const TRANSIT_KEEP_IDS = new Set([
+  '76fa88dd-a26d-4716-9261-ffd8ba2a9a0c', // Grand Central Terminal (district-5, Midtown), 45.8 m
+]);
+let droppedTransit = [];
+function isTransitFootprint(p){ return p && p.class !== 'bridge_structure' && (p.class === 'train_station' || p.subtype === 'transportation'); }
+function pointInRingsXY(x, y, rings){ // even-odd across all rings, so holes work
+  let inside = false;
+  for (const r of rings){
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++){
+      const xi = r[i][0], yi = r[i][1], xj = r[j][0], yj = r[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+  }
+  return inside;
+}
+async function dropTransitOverStreets(neighborhoodId){
+  droppedTransit = [];
+  if (new URLSearchParams(location.search).get('transit') === 'keep') return;
+  const cands = buildingsGeo.features.filter(f => isTransitFootprint(f.properties) && !TRANSIT_KEEP_IDS.has(f.properties.id));
+  if (!cands.length) return;
+  let raw;
+  try { const r = await fetch(`data/${neighborhoodId}/streets.json`); if (!r.ok) return; raw = await r.json(); } catch (e){ return; }
+  const lines = [];
+  for (const row of raw) for (const part of row.p){ if (part.length >= 2) lines.push(part.map(([lon, lat]) => project(lon, lat))); }
+  const streetMetresUnder = (geometry) => { // length of street centreline inside this footprint
+    const rings = flattenRings(geometry).map(r => r.map(([lon, lat]) => project(lon, lat)));
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const r of rings) for (const [x, y] of r){ if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    let covered = 0;
+    for (const pts of lines) for (let i = 1; i < pts.length; i++){
+      const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+      if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+      const len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(len / 2)), step = len / n;
+      for (let k = 0; k < n; k++){ const t = (k + 0.5) / n; if (pointInRingsXY(ax + (bx - ax) * t, ay + (by - ay) * t, rings)) covered += step; }
+    }
+    return covered;
+  };
+  const partsOf = new Map();
+  for (const p of partsGeo.features){ const k = p.properties.building_id; if (!partsOf.has(k)) partsOf.set(k, []); partsOf.get(k).push(p); }
+  const dropBuildings = new Set(), dropParts = new Set();
+  for (const f of cands){
+    const id = f.properties.id, parts = partsOf.get(id);
+    if (parts && parts.length){
+      // A station/transport COMPLEX that has parts is drawn from its parts (the whole footprint is never extruded), so judge each part on its
+      // own: a part that sits on the street goes, the rest (platform buildings, towers over the station) stay.
+      for (const p of parts){
+        const m = streetMetresUnder(p.geometry);
+        if (m > TRANSIT_STREET_DROP_M){ dropParts.add(p); droppedTransit.push({ id: p.properties.id, of: id, kind: 'part', class: f.properties.class || null, height: p.properties.height ?? null, streetMetres: Math.round(m) }); }
+      }
+    } else {
+      const m = streetMetresUnder(f.geometry);
+      if (m > TRANSIT_STREET_DROP_M){ dropBuildings.add(id); droppedTransit.push({ id, kind: 'footprint', class: f.properties.class || null, subtype: f.properties.subtype || null, height: f.properties.height ?? null, streetMetres: Math.round(m) }); }
+    }
+  }
+  if (!dropBuildings.size && !dropParts.size) return;
+  buildingsGeo.features = buildingsGeo.features.filter(f => !dropBuildings.has(f.properties.id));
+  partsGeo.features = partsGeo.features.filter(p => !dropParts.has(p));
+  const n = droppedTransit.filter(d => d.height != null).length; // no-height footprints were never drawn
+  console.info('v3.4.134: omitted ' + droppedTransit.length + ' station/transport footprint(s) covering streets (' + n + ' had a height)', droppedTransit);
+  if (n) toast(`Omitted ${n} station/transport footprint${n > 1 ? 's' : ''} that cover streets`);
+}
 let solidMeshes = []; // flat list, for rendering the Buildings layer
 let solidsByBuilding = new Map(); // building id -> its own solid mesh(es), for the compute step (see computeNegativeSpace)
 let buildingFootprints = []; // v3.4.91: {shape, minH, maxH} per building/part
@@ -3202,11 +3536,26 @@ async function loadData(neighborhoodId){
     (Math.min(...lons) + Math.max(...lons)) / 2,
     (Math.min(...lats) + Math.max(...lats)) / 2
   );
+  await dropTransitOverStreets(neighborhoodId); // v3.4.134
   // v3.0.15: raw site footprint in lon/lat, captured before any compute has
   // run -- used only for the "you are here" marker in the Manhattan context
   // layer below, independent of siteMinX/Y (which stay undefined until a
   // compute finishes).
   siteFootprintLonLat = { minLon: Math.min(...lons), maxLon: Math.max(...lons), minLat: Math.min(...lats), maxLat: Math.max(...lats) };
+  // v3.4.133: terrain. Fetched BEFORE any solid is built, since every building's base comes from it.
+  terrainData = null;
+  if (terrainOn){
+    try {
+      const xy = allCoords.map(([lon, lat]) => project(lon, lat));
+      let tx0 = Infinity, tx1 = -Infinity, ty0 = Infinity, ty1 = -Infinity;
+      for (const [x, y] of xy){ if (x < tx0) tx0 = x; if (x > tx1) tx1 = x; if (y < ty0) ty0 = y; if (y > ty1) ty1 = y; }
+      await loadTerrainForSite(tx0, tx1, ty0, ty1);
+    } catch (e){
+      terrainOn = false; terrainData = null; refreshTerrainToggle();
+      toast('Terrain unavailable (' + (e && e.message ? e.message : e) + ') — showing flat ground');
+    }
+  }
+  applyTerrainGround();
 
   const partsByBuilding = new Map();
   for (const f of partsGeo.features){
@@ -3240,16 +3589,19 @@ async function loadData(neighborhoodId){
         const poly = outerRingPolygon(pf.geometry);
         const maxH = pf.properties.height;
         if (!shape || !poly || maxH == null) continue;
-        const minH = pf.properties.min_height || 0;
-        const mesh = extrudedMesh(shape, minH, maxH, buildingMat);
+        const rawMin = pf.properties.min_height || 0;
+        const tBase = terrainBaseOfGeometry(pf.geometry); // 0 when terrain is off
+        const minH = tBase + rawMin - (terrainData && rawMin === 0 ? TERRAIN_FOOTING_M : 0); // v3.4.133
+        const maxHAbs = tBase + maxH;
+        const mesh = extrudedMesh(shape, minH, maxHAbs, buildingMat);
         solidGroup.add(mesh);
         solidMeshes.push(mesh);
         group.push(mesh);
-        buildingFootprints.push({ shape, minH, maxH }); // v3.4.91
+        buildingFootprints.push({ shape, minH, maxH: maxHAbs }); // v3.4.91
         usedParts++;
         try {
           const cs = new CrossSection([poly]);
-          let m = Manifold.extrude(cs, Math.max(maxH - minH, 0.1));
+          let m = Manifold.extrude(cs, Math.max(maxHAbs - minH, 0.1));
           if (minH !== 0) m = m.translate(0, 0, minH);
           cs.delete();
           partManifolds.push(m);
@@ -3260,15 +3612,18 @@ async function loadData(neighborhoodId){
       const poly = outerRingPolygon(bf.geometry);
       const h = bf.properties.height;
       if (!shape || !poly || h == null) continue;
-      const mesh = extrudedMesh(shape, 0, h, buildingMat);
+      const fBase = terrainBaseOfGeometry(bf.geometry); // v3.4.133: 0 when terrain is off
+      const fMin = fBase - (terrainData ? TERRAIN_FOOTING_M : 0), fMax = fBase + h;
+      const mesh = extrudedMesh(shape, fMin, fMax, buildingMat);
       solidGroup.add(mesh);
       solidMeshes.push(mesh);
       group.push(mesh);
-      buildingFootprints.push({ shape, minH: 0, maxH: h }); // v3.4.91
+      buildingFootprints.push({ shape, minH: fMin, maxH: fMax }); // v3.4.91
       usedFallback++;
       try {
         const cs = new CrossSection([poly]);
-        const m = Manifold.extrude(cs, Math.max(h, 0.1));
+        let m = Manifold.extrude(cs, Math.max(fMax - fMin, 0.1));
+        if (fMin !== 0) m = m.translate(0, 0, fMin);
         cs.delete();
         partManifolds.push(m);
       } catch (e){ /* see above */ }
@@ -3460,7 +3815,7 @@ async function computeNegativeSpace(){
   const xs = allXY.map(p => p[0]), ys = allXY.map(p => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const maxHeight = Math.max(...buildingsGeo.features.map(f => f.properties.height || 0));
+  const maxHeight = Math.max(...buildingsGeo.features.map(f => featureTopZ(f))); // v3.4.133: roof absolute height (== height when terrain is off)
   // Cap height is exactly the tallest building -- NOT tallest+padding. This
   // is the core "mold" concept: pour concrete up to the height of the
   // tallest building, pull the buildings out, what's left is the negative
@@ -3503,12 +3858,30 @@ async function computeNegativeSpace(){
   statEl.textContent = `Unioning ${solidsByBuilding.size} buildings…`;
   await new Promise(r => setTimeout(r, 0));
   const buildingManifolds = [...solidsByBuilding.values()].map(g => g.manifold).filter(Boolean);
+  window.__tt = [['start', 0]]; const __tp = (n) => window.__tt.push([n, Math.round(performance.now() - t0)]); // v3.4.133: stage timings for tuning terrain compute
   const mergedBuildings = Manifold.union(buildingManifolds);
+  __tp('union buildings');
 
   statEl.textContent = `Subtracting from site volume…`;
   await new Promise(r => setTimeout(r, 0));
   const siteBox = Manifold.cube([(maxX - minX) + boundaryMargin * 2, (maxY - minY) + boundaryMargin * 2, capHeight]).translate(minX - boundaryMargin, minY - boundaryMargin, 0);
-  const result = Manifold.difference(siteBox, mergedBuildings);
+  let moldAboveGround = siteBox;
+  if (terrainData){ // v3.4.133: the mold's floor becomes the terrain surface
+    statEl.textContent = `Building terrain solid…`;
+    await new Promise(r => setTimeout(r, 0));
+    let earth;
+    try { earth = buildTerrainEarthManifold(); } catch (e){ earth = null; }
+    if (!earth || earth.status() !== 'NoError'){
+      toast('Terrain compute failed: ' + (earth ? earth.status() : 'could not build terrain solid'));
+      btn.disabled = false;
+      return;
+    }
+    __tp('earth built');
+    moldAboveGround = Manifold.difference(siteBox, earth);
+    __tp('box - earth');
+  }
+  const result = Manifold.difference(moldAboveGround, mergedBuildings);
+  __tp('mold - buildings');
   if (result.status() !== 'NoError'){
     toast(`Compute failed: ${result.status()}`);
     btn.disabled = false;
@@ -3539,10 +3912,12 @@ async function computeNegativeSpace(){
   // unfiltered watertight geometry.
   const positions = rawPositions;
 
+  __tp('getMesh');
   const cleanedGeo = new THREE.BufferGeometry();
   cleanedGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   cleanedGeo.setAttribute('normal', new THREE.BufferAttribute(buildCoplanarPatchNormals(positions), 3));
 
+  __tp('normals');
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
 
   if (negativeMesh) scene.remove(negativeMesh);
@@ -4471,7 +4846,7 @@ function applySectionMode(axis, isPlanView){
     // box-clip during a real locked elevation, same reversal as
     // negMat/buildingMat/the Z quad just above. Still exactly right for
     // N/S/E/W.
-    groundMesh.material.clippingPlanes = (activeSectionBox && axis !== null) ? getPlanBoxClipPlanes().slice(1) : [];
+    groundMesh.material.clippingPlanes = terrainGroundClipPlanes(axis); // v3.4.133: == the old box-only list when terrain is off
     groundMesh.material.needsUpdate = true;
   }
   if (streetMaterials && streetMaterials.length){
@@ -5823,9 +6198,11 @@ async function buildStreetsLayer(neighborhoodId){
     const widthM = row.w * 0.3048; // real feet -> meters, same real-unit convention as everything else in this app
     for (const part of row.p){
       if (part.length < 2) continue;
-      const pts = part.map(([lon, lat]) => project(lon, lat));
+      let pts = part.map(([lon, lat]) => project(lon, lat));
+      if (terrainData) pts = densifyPolyline(pts, 15); // v3.4.133: short segments so the ribbon follows the ground between its original vertices
       const geo = buildRibbonGeometry(pts, widthM, STREET_HEIGHT);
       if (!geo) continue;
+      if (terrainData) drapeGeometryOnTerrain(geo);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.z = 0.03; // just above the ground/borough-plate surface (z=0, -0.02) -- same small-clearance convention as the ground plane itself
       streetsGroup.add(mesh);
@@ -5858,7 +6235,9 @@ async function buildStreetsLayer(neighborhoodId){
   for (const [name, { part }] of byName){
     const mid = part[Math.floor((part.length - 1) / 2)];
     const [x, y] = project(mid[0], mid[1]);
-    streetsGroup.add(makeStreetLabel(name, x, y));
+    const lbl = makeStreetLabel(name, x, y);
+    if (terrainData) lbl.position.z += terrainZ(x, y); // v3.4.133
+    streetsGroup.add(lbl);
   }
 
   scene.add(streetsGroup);
@@ -5986,7 +6365,7 @@ function inLockedElevation(){
 function updateContextLayerVisibility(){
   if (boroughsGroup) boroughsGroup.visible = showBoroughs && !inLockedElevation();
   // v3.4.129: the tan ground plate is what the Manhattan-context layer replaces (zoomToBoroughContext() hides it), so it must come back whenever the context layer is NOT showing -- in particular in a locked elevation with Manhattan context toggled on, where it used to stay hidden and left the section with no base at all (Joe: "street graphic cut off?"; a section needs grade under it).
-  if (groundMesh && boroughsGroup) groundMesh.visible = !boroughsGroup.visible;
+  if (groundMesh && boroughsGroup) groundMesh.visible = !boroughsGroup.visible || !!terrainData; // v3.4.133: the terrain surface stays when terrain is on
 }
 function updateStreetLabelVisibility(){
   if (!streetsGroup) return;
@@ -6138,7 +6517,7 @@ function zoomToBoroughContext(){
   // toggle state; forcing them off here was overriding that correct state
   // rather than adding anything, so just leave them as the user already
   // set them.
-  if (groundMesh) groundMesh.visible = false;
+  if (groundMesh) groundMesh.visible = !!terrainData; // v3.4.133: terrain surface stays in the Manhattan-context view
   refreshViewToggles(); // v3.4.126: resetSharedViewState() just forced Buildings on -- sync the button + solidGroup, since this path (unlike Home) never runs applySectionMode()
 }
 function exitBoroughContext(){
@@ -7688,6 +8067,8 @@ document.getElementById('fullWidthBtn').addEventListener('click', clearActiveSec
     // orthoCamera only gets (re)constructed once and boroughsGroup only
     // exists after a district loads.
     get orthoCamera(){ return orthoCamera; }, get activeCamera(){ return activeCamera; },
+    get droppedTransit(){ return droppedTransit; }, // v3.4.134
+    get terrainOn(){ return terrainOn; }, get terrainData(){ return terrainData; }, get groundMesh(){ return groundMesh; }, // v3.4.133
     get boroughsGroup(){ return boroughsGroup; },
     get THREE(){ return THREE; },
     get negativeMesh(){ return negativeMesh; }, get solidGroup(){ return solidGroup; },

@@ -1,7 +1,22 @@
-# Negative Space -- handoff for a new chat (v3.4.132, 2026-10-02)
+# Negative Space -- handoff for a new chat (v3.4.135, 2026-10-02)
 
 ## What this package is
 Full project zip, v3.4.132. `audit_deploy.js` 380/380. v3.4.131 (Home -> N/S/E/W context/streets fix) passed `runSmokeBothSides()` 327/327 on Joe's localhost (context OFF 158, ON 169, incl. Phase 10). v3.4.130 (before this fix) passed `runSmokeBothSides()` 295/295 and `runSoakTest({cycles:300})` 0 violations (no box, and with a drawn box + Manhattan context ON) on district-1, in Joe's own foreground tab. v3.4.131 itself has NOT been run through smoke/soak or confirmed on Joe's reload; its fix was checked live only by patching the same two lines into the served v3.4.130 HTML in memory.
+
+## v3.4.135 -- Grand Central Terminal exempted
+`TRANSIT_KEEP_IDS` (index.html) lists Overture building ids the street rule never drops; it has Grand Central only. Joe may want Port Authority (district-4 f78c98b4) and the two Park Ave parts (district-5 66393436, 34623232) added. See CHANGELOG.md v3.4.135.
+
+## v3.4.134 -- station/transport footprints over streets
+Midtown showed building masses where streets should be. Cause: Overture `train_station`/`transportation` footprints drawn over the streets above stations. Joe chose to drop those covering > 50 m of street; implemented as dropTransitOverStreets() (bridge_structure exempt). It also removes Grand Central Terminal, Port Authority and two tall Park Ave parts in Midtown, by design. `?transit=keep` disables it. Details: CHANGELOG.md v3.4.134.
+
+## STATUS v3.4.133 (Terrain) -- read first
+New **Terrain** toggle (Display, off by default). Full details in CHANGELOG.md v3.4.133. Verified on Joe's localhost ONLY by patching the same edits into the served v3.4.132 page in memory (hidden Claude-in-Chrome tab): Terrain on for district-1 (TriBeCa/FiDi) and Inwood, compute with terrain (143k / 243k triangles), N/S/E/W with the terrain-following skyline, `runSmokeBothSides` on Inwood WITH terrain on: 153/153 (context OFF) + 169/169 (context ON). NOT yet confirmed on Joe's own reload, not yet run in a foreground tab, and no visual sign-off.
+Known gaps: no earth poche under the ground line in sections (the red line is the ground); ~16 m grid; terrain compute is slower than flat; stage timings are in window.__tt after each compute.
+Grid-rotation bug FIXED in 133 (GRID_COS/GRID_SIN now follow each district's angle; every district other than ~28.96deg is rotated slightly differently than in 132, streets now axis-aligned). Check a couple of districts visually.
+Test with terrain: click Terrain, (wait), Compute, then `await runSmokeBothSides('x')` -- smoke does not click the Terrain button itself.
+
+## Known pre-existing test finding (not caused by 133)
+Greenwich Village, context ON, smoke Phase 6 "gap box, stale threshold, compass nav*": `section is not empty (skyline maxZ > 0) -- maxZ=0` (4 distinct checks, 5 failures). Reproduced identically on the UNFIXED served v3.4.132 (A/B), so it predates the grid-rotation fix and terrain. Context OFF passes 158/158 there. Cause not investigated: most likely the "gap midpoint" box lands in a stretch with no buildings in that district (a legitimate empty section, a test-premise problem) -- but if the app should still show something in that case, it is a real "stranded user" bug. Other districts (district-1, Midtown, Upper East Side, Inwood, Chelsea) pass 158 + 169.
 
 ## What to do first (Joe)
 1. Extract the zip, swap it into the folder served at http://localhost:8888/ , hard-refresh. Footer must read **v3.4.132**.

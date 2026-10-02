@@ -428,7 +428,7 @@ check('makeStreetLabel() is defined', /function makeStreetLabel\(/.test(html));
 check('toTitleCaseStreet() is defined', /function toTitleCaseStreet\(/.test(html));
 check(
   'Street labels are added to streetsGroup (so they toggle with Major streets, not a separate control)',
-  /streetsGroup\.add\(makeStreetLabel\(/.test(html)
+  /streetsGroup\.add\((?:makeStreetLabel\(|lbl\))/.test(html)
 );
 check(
   'Labels dedupe by name to one per unique street (not one per block segment)',
@@ -511,7 +511,7 @@ check(
 );
 check(
   'v3.4.37 reversal: groundMesh and streetMaterials only box-clip for a real locked elevation (axis !== null), never for Plan anymore -- Plan always shows the full site now, box drawn as an outline instead (updatePlanBoxOutline())',
-  /groundMesh\.material\.clippingPlanes = \(activeSectionBox && axis !== null\) \? getPlanBoxClipPlanes\(\)\.slice\(1\) : \[\];/.test(html)
+  /groundMesh\.material\.clippingPlanes = terrainGroundClipPlanes\(axis\);/.test(html) && /function terrainGroundClipPlanes\(axis\)\{[^\n]*\n\s*const planes = \(activeSectionBox && axis !== null\) \? getPlanBoxClipPlanes\(\)\.slice\(1\) : \[\];/.test(html)
   && !/isPlanViewActive\)\) \? getPlanBoxClipPlanes/.test(html)
 );
 check(
@@ -1779,8 +1779,8 @@ check(
   'buildingFootprints is declared alongside solidMeshes/solidsByBuilding, reset in the same place, and populated ({shape, minH, maxH}) at both building-loading sites (the parts loop and the flat-fallback branch) right where extrudedMesh() already consumes the same shape',
   /let buildingFootprints = \[\]; \/\/ v3\.4\.91/.test(html)
   && /buildingFootprints = \[\]; \/\/ v3\.4\.91/.test(html)
-  && /buildingFootprints\.push\(\{ shape, minH, maxH \}\); \/\/ v3\.4\.91/.test(html)
-  && /buildingFootprints\.push\(\{ shape, minH: 0, maxH: h \}\); \/\/ v3\.4\.91/.test(html)
+  && /buildingFootprints\.push\(\{ shape, minH, maxH: maxHAbs \}\); \/\/ v3\.4\.91/.test(html)
+  && /buildingFootprints\.push\(\{ shape, minH: fMin, maxH: fMax \}\); \/\/ v3\.4\.91/.test(html)
 );
 check(
   'buildBuildingZCapGeometry(height) filters buildingFootprints to entries whose own [minH,maxH] range actually contains the given height (a horizontal slice through a vertical extrusion is always that building\'s own footprint, unchanged at every height within its own range), builds a flat ShapeGeometry per qualifying building translated to that height, and merges them -- returning null (not an empty geometry) when nothing qualifies',
@@ -2004,10 +2004,33 @@ check(
   'fillLight is swapped with the sun: hidden in setOrthogonalView(), shown in resetSharedViewState() (elevations stay front-lit by orthoLight only)',
   /sun\.visible = false;\s*\n\s*fillLight\.visible = false;/.test(html) && /sun\.visible = true;\s*\n\s*fillLight\.visible = true;/.test(html)
 );
+sectionHeader("v3.4.133 -- Terrain toggle (live Terrarium tiles; buildings, ground, streets, negative space and section follow it)");
+check('Terrain toggle button #viewTerrain exists and defaults to off (terrainOn = false)', /id="viewTerrain"/.test(html) && /let terrainOn = false;/.test(html));
+check('Terrain tiles are decoded bit-exactly by decodePngRGB8 (canvas getImageData corrupted Terrarium RGB), not through a canvas', /async function decodePngRGB8\(buf\)/.test(html) && !/getImageData\(0, 0, 256, 256\)/.test(html));
+check('Every terrain path is gated on terrainData: flat extrusion base is 0 when off (terrainBaseOfGeometry returns 0), compute only subtracts the earth when terrainData is set', /function terrainBaseOfGeometry\(geometry\)\{\s*\n\s*if \(!terrainData\) return 0;/.test(html) && /if \(terrainData\)\{ \/\/ v3\.4\.133: the mold's floor becomes the terrain surface/.test(html));
+check('compute floors the mold with the terrain: Manifold.difference(siteBox, earth) then minus the buildings', /moldAboveGround = Manifold\.difference\(siteBox, earth\)/.test(html) && /Manifold\.difference\(moldAboveGround, mergedBuildings\)/.test(html));
+check('building solids stand on terrain: roof = base + Overture height at BOTH loading sites (parts and flat fallback)', /const maxHAbs = tBase \+ maxH;/.test(html) && /fMax = fBase \+ h/.test(html));
+check('section profile gaps sit at ground height when terrain is on (buildSectionProfile adds the terrain floor)', /function buildSectionProfile[\s\S]{0,2200}if \(terrainData\)\{[\s\S]{0,700}terrainZ\(/.test(html));
+check('streets drape on terrain (densified, z added per vertex) and labels are lifted', /drapeGeometryOnTerrain\(geo\)/.test(html) && /lbl\.position\.z \+= terrainZ/.test(html));
+check('terrain surface keeps groundMesh identity; in a locked elevation it is clipped to the cut slab by terrainGroundClipPlanes (also refreshed when the slab moves)', /groundMesh\.geometry = terrainGroundGeo/.test(html) && /groundMesh\.material\.clippingPlanes = terrainGroundClipPlanes\(sectionModeAxis\)/.test(html));
+
+sectionHeader("v3.4.133 -- per-district grid rotation actually reaches project()");
 check(
-  'APP_VERSION is 3.4.132',
-  /const APP_VERSION = '3\.4\.132';/.test(html)
+  'GRID_COS/GRID_SIN are `let` and setGridRotation() updates them (they were `const`, computed once from the 28.96deg default, so every district was projected at 28.96deg)',
+  /let GRID_COS = Math\.cos\(GRID_ROTATION_RAD\), GRID_SIN = Math\.sin\(GRID_ROTATION_RAD\);/.test(html)
+  && /function setGridRotation\(deg\)\{[\s\S]{0,260}GRID_COS = Math\.cos\(GRID_ROTATION_RAD\); GRID_SIN = Math\.sin\(GRID_ROTATION_RAD\);/.test(html)
+  && !/const GRID_COS/.test(html)
 );
+
+sectionHeader("v3.4.134 -- station/transport footprints that cover streets are dropped");
+check('dropTransitOverStreets() runs in loadData right after setProjectionOrigin() (so the district frame does not move) and before any solid is built', /setProjectionOrigin\([\s\S]{0,160}\);\s*\n\s*await dropTransitOverStreets\(neighborhoodId\);/.test(html));
+check('the rule: class train_station OR subtype transportation, bridge_structure exempt, > TRANSIT_STREET_DROP_M (50) metres of street centreline inside the footprint', /const TRANSIT_STREET_DROP_M = 50;/.test(html) && /p\.class !== 'bridge_structure' && \(p\.class === 'train_station' \|\| p\.subtype === 'transportation'\)/.test(html) && /covered > TRANSIT_STREET_DROP_M|m > TRANSIT_STREET_DROP_M/.test(html));
+check('a transport complex that has parts is judged part by part (its whole footprint is never extruded), a footprint without parts is judged whole', /droppedTransit\.push\(\{ id: p\.properties\.id, of: id, kind: 'part'/.test(html) && /kind: 'footprint'/.test(html));
+check('?transit=keep disables the rule for comparison, and the dropped list is exposed as __NS.droppedTransit', /get\('transit'\) === 'keep'/.test(html) && /get droppedTransit\(\)/.test(html));
+
+sectionHeader("v3.4.135 -- transit exemption list (Grand Central Terminal kept)");
+check('TRANSIT_KEEP_IDS exempts Grand Central Terminal (76fa88dd-...) and the rule skips exempt ids', /const TRANSIT_KEEP_IDS = new Set\(\[\s*\n\s*'76fa88dd-a26d-4716-9261-ffd8ba2a9a0c'/.test(html) && /isTransitFootprint\(f\.properties\) && !TRANSIT_KEEP_IDS\.has\(f\.properties\.id\)/.test(html));
+check('APP_VERSION is 3.4.135', /const APP_VERSION = '3\.4\.135';/.test(html));
 
 /* ===================================================================
    Summary
@@ -2488,7 +2511,7 @@ check(
 sectionHeader("v3.4.129 -- ground plate returns whenever the Manhattan-context layer is not showing (incl. locked elevations)");
 check(
   'updateContextLayerVisibility() sets groundMesh.visible = !boroughsGroup.visible, so a locked elevation with Manhattan context on still has its ground plate as the section base',
-  /function updateContextLayerVisibility\(\)\{[\s\S]{0,900}if \(groundMesh && boroughsGroup\) groundMesh\.visible = !boroughsGroup\.visible;/.test(html)
+  /function updateContextLayerVisibility\(\)\{[\s\S]{0,900}if \(groundMesh && boroughsGroup\) groundMesh\.visible = !boroughsGroup\.visible(?: \|\| !!terrainData)?;/.test(html)
 );
 
 sectionHeader("v3.4.130 -- poché cap quads are unlit (MeshBasicMaterial) so lighting cannot wash the red out");
