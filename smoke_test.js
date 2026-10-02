@@ -402,6 +402,20 @@ async function runSmokeTest(label, opts = {}){
   if (document.getElementById('viewSolid').classList.contains('active') !== true) click('viewSolid');
   if (document.getElementById('viewNegative').classList.contains('active')) click('viewNegative');
 
+  // v3.4.131: Joe -- Manhattan context ON, then N/S/E/W straight from the perspective/Home view left the island slab + MANHATTAN label (and streets) visible in the elevation. setOrthogonalView() ran applySectionMode() -> updateContextLayerVisibility()/updateStreetLabelVisibility() BEFORE switching to the ortho camera, so inLockedElevation() was false. Every earlier phase goes through Plan first (already the ortho camera), which is why none of them saw it. This one starts every elevation from Home (perspective).
+  console.log('\nPhase 10 -- N/S/E/W entered straight from Home (perspective), context layer + streets must hide (v3.4.131)');
+  await setContext(ctxOn);
+  for (const d of ['navN','navS','navE','navW']){
+    click('navHome'); await wait(500);
+    check('Home before ' + d + ': perspective camera', NS.activeCamera.isPerspectiveCamera === true);
+    click(d); await wait(500);
+    const L = 'Home->' + d;
+    check(L + ': ortho camera active', NS.activeCamera.isOrthographicCamera === true);
+    check(L + ': Manhattan context layer hidden', NS.boroughsGroup?.visible === false);
+    check(L + ': streets hidden', NS.streetsGroup?.visible === false);
+  }
+  click('navPlan'); await wait(200);
+
   click('navE'); await wait(150); click('viewStreets'); await wait(100); click('viewStreets'); await wait(100);
   check('streets toggle inside a locked elevation stays hidden', NS.streetsGroup?.visible === false);
   Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Full width')?.click();

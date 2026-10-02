@@ -1,3 +1,23 @@
+v3.4.132 - 2026-10-02 - Fill light in the perspective/Home view so south- and west-facing walls are no longer black.
+
+Joe: "the south faces of building are always dark." The perspective sun sits at (400, 300, 700); its light vector has a negative dot product with every south-facing wall (N.L -0.34) and west-facing wall (-0.46), so those walls got only the HemisphereLight and read near-black. Added `fillLight`, a DirectionalLight at (-400, -300, 150), intensity 0.5, from the sun's mirrored horizontal direction and low: south walls get N.L about +0.57, west walls about +0.77, roofs only +0.29, so the sun still sets the main light/shade pattern. It is swapped with the sun exactly like `sun` is (hidden in setOrthogonalView(), shown in resetSharedViewState()); the N/S/E/W/Plan views are already front-lit by orthoLight and are unchanged. The poche quads are unlit since v3.4.130 and are unaffected.
+
+Previewed live on district-1 by adding the same light to the scene at intensity 0 vs 0.5 before shipping: at 0.5 south/west faces read mid-gray with form. Intensity 0.5 is a judgment call, one constant (`new THREE.DirectionalLight(0xffffff, 0.5)`); raise toward 0.8 for flatter/brighter, lower toward 0.3 for more contrast.
+
+Not yet confirmed on Joe's own reload. Check Home on a couple of districts, orbit all the way around, and confirm N/S/E/W elevations look the same as on 131.
+
+`audit_deploy.js`: 3 new checks (the v3.4.131 version-only check is replaced by the 3.4.132 one).
+
+v3.4.131 - 2026-10-02 - Manhattan context layer and streets now hide when N/S/E/W is entered from the perspective/Home view.
+
+Joe: with Manhattan context ON, clicking N (or S/E/W) from the perspective view left the gray island slab and the "MANHATTAN" label in the elevation. Console readout in that state: sectionModeAxis 'y', activeCamera Orthographic, boroughsGroup.visible true. Root cause is call ordering in setOrthogonalView(): applySectionMode() runs first and ends with updateContextLayerVisibility() and updateStreetLabelVisibility(); both ask inLockedElevation() (sectionModeAxis !== null && activeCamera === orthoCamera), but activeCamera is only switched to orthoCamera later in the function, so both saw the perspective camera and answered "not locked". From Plan the camera is already the ortho one, so every path the smoke and soak tests used (they always go through Plan first) worked. Fix: after `activeCamera = orthoCamera`, call updateContextLayerVisibility() and updateStreetLabelVisibility() again. Major streets had the same ordering and are covered by the same two lines; that second symptom was found in the code, not seen on screen.
+
+smoke_test.js: new Phase 10 starts every N/S/E/W from Home (perspective) and checks the ortho camera is active and the Manhattan layer and streets are hidden, in both context passes.
+
+Not yet confirmed on Joe's own reload. Needs: swap in, hard-refresh (footer v3.4.131), Manhattan context ON, Home, then N/S/E/W with and without a drawn box -- no slab, no MANHATTAN label, tan ground plate as the base.
+
+`audit_deploy.js`: 2 new checks (ordering, version).
+
 v3.4.130 - 2026-10-01 - Poché is now unlit, so lighting can never wash it out.
 
 Joe saw the poché render pale gray-blue instead of red in some N/S/E/W elevations (seen on v3.4.127 and v3.4.128; red again on v3.4.129 across Midtown and Inwood). The exact trigger was never found: the console readout showed the Y poché quad visible with colour #b23a2e at 0.4 opacity throughout; no other translucent mesh was drawn; the v3.4.127 ground-line segment was ruled out (still white on v3.4.128 without it); but hiding the Y cap group removed the pale fill, and so did hiding either light -- so its on-screen colour depended on the lighting, not only on the material. A lit surface that is meant to be a flat mass is the fragile part, so makeCapQuad() now builds the poché from MeshBasicMaterial (unlit), like the cutaway handles since v3.4.98. Clipping planes, the stencil ops, polygonOffset, opacity and the sky-discard shader patch (which hooks #include <common>/<color_fragment>/<begin_vertex>, present in the basic shader too) are all unchanged. In the good state the result is visually identical (the lit colour there came out at ~1.0 x the albedo).

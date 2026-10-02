@@ -475,11 +475,11 @@ check(
 );
 check(
   'setOrthogonalView() swaps sun off / orthoLight on when entering an elevation',
-  /sun\.visible = false;\s*\n\s*orthoLight\.visible = true;/.test(html)
+  /sun\.visible = false;[^\n]*\n(?:\s*fillLight\.visible = false;[^\n]*\n)?\s*orthoLight\.visible = true;/.test(html)
 );
 check(
   'resetToDefaultView() swaps back to sun for perspective',
-  /sun\.visible = true;.*\n\s*orthoLight\.visible = false;/.test(html)
+  /sun\.visible = true;.*\n(?:\s*fillLight\.visible = true;[^\n]*\n)?\s*orthoLight\.visible = false;/.test(html)
 );
 check(
   'zCutLineMesh visibility requires isPlanViewActive, not just sectionModeAxis===null -- v3.4.39: Joe found it reading as noise in free-orbit perspective too (axis===null covers both Plan and perspective), narrowed to Plan only, where the Height Cut cross-section is at least a real top-down slice',
@@ -1750,7 +1750,7 @@ sectionHeader("v3.4.90 -- resetSharedViewState() extracted; resetToDefaultView()
 
 check(
   'resetSharedViewState() exists and contains all 5 pieces both callers need: box-draw cleanup, camera switch, rotate unlock, light reset (the actual v3.4.90 fix -- this line didn\'t exist in zoomToBoroughContext() before), and indicator update',
-  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;\s*controls\.object = camera;\s*controls\.enableRotate = true;\s*sun\.visible = true;\s*orthoLight\.visible = false;\s*(?:showBuildings = true;[^\n]*\n\s*)?updateCurrentViewIndicator\('home'\);\s*\}/.test(html)
+  /function resetSharedViewState\(\)\{\s*if \(boxDrawMode\) cancelPlanBox\(\);\s*activeCamera = camera;\s*controls\.object = camera;\s*controls\.enableRotate = true;\s*sun\.visible = true;\s*(?:fillLight\.visible = true;[^\n]*\n\s*)?orthoLight\.visible = false;\s*(?:showBuildings = true;[^\n]*\n\s*)?updateCurrentViewIndicator\('home'\);\s*\}/.test(html)
 );
 check(
   'resetToDefaultView() calls resetSharedViewState() (after v3.4.94\'s own clearActiveSectionBox() call), then applySectionMode(null) -- v3.4.90 deliberately did NOT move the cutaway-mode reset into the shared function, since zoomToBoroughContext() relies on it NOT running (v3.2.23: a box-scoped elevation\'s cutaway state persists into Manhattan context)',
@@ -1988,6 +1988,25 @@ check(
   'computeNegativeSpace() still hides firstRunHint once a compute succeeds (so it doesn\'t linger once the user has clearly found the button), just without persisting that to localStorage -- a fresh page load always starts with the hint visible again (the HTML itself has no hidden/display:none on firstRunHint by default)',
   /async function computeNegativeSpace\(\)\{[\s\S]{0,1100}const hintEl = document\.getElementById\('firstRunHint'\);\s*\n\s*if \(hintEl\) hintEl\.style\.display = 'none';/.test(html)
   && !/<p id="firstRunHint" style="display:\s*none/.test(html)
+);
+
+sectionHeader("v3.4.131 -- context layer and streets re-evaluated after setOrthogonalView() switches to the ortho camera");
+check(
+  'setOrthogonalView() calls updateContextLayerVisibility() and updateStreetLabelVisibility() AFTER activeCamera = orthoCamera (applySectionMode() runs before the camera swap, so inLockedElevation() was false from Home/perspective)',
+  /activeCamera = orthoCamera;[\s\S]{0,1800}updateContextLayerVisibility\(\);\s*\n\s*updateStreetLabelVisibility\(\);\s*\n\s*controls\.object = orthoCamera;/.test(html)
+);
+sectionHeader("v3.4.132 -- perspective fill light so south/west faces are not black");
+check(
+  'fillLight is a DirectionalLight at (-400,-300,150), intensity 0.5, added to the scene next to the sun',
+  /fillLight = new THREE\.DirectionalLight\(0xffffff, 0\.5\);\s*\n\s*fillLight\.position\.set\(-400, -300, 150\);\s*\n\s*scene\.add\(fillLight\);/.test(html)
+);
+check(
+  'fillLight is swapped with the sun: hidden in setOrthogonalView(), shown in resetSharedViewState() (elevations stay front-lit by orthoLight only)',
+  /sun\.visible = false;\s*\n\s*fillLight\.visible = false;/.test(html) && /sun\.visible = true;\s*\n\s*fillLight\.visible = true;/.test(html)
+);
+check(
+  'APP_VERSION is 3.4.132',
+  /const APP_VERSION = '3\.4\.132';/.test(html)
 );
 
 /* ===================================================================

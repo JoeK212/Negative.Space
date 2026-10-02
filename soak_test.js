@@ -36,7 +36,8 @@ async function runSoakTest(opts = {}){
   const click = id => { const el = document.getElementById(id); if (el && !el.disabled) el.click(); };
   if (!NS.negativeMesh) return { error: 'Compute first' };
 
-  const moves = ['navN','navS','navE','navW','navPlan','navN','navS','navE','navW'];
+  // v3.4.133 (test only): navHome added. Every earlier soak entered an elevation via Plan (already the ortho camera), so it could not see the v3.4.131 bug (elevation entered from the PERSPECTIVE/Home camera left the Manhattan layer + streets visible). Start with Manhattan context ON for the strongest run.
+  const moves = ['navN','navS','navE','navW','navPlan','navN','navS','navE','navW','navHome','navHome','navHome'];
   const violations = [];
   const history = [];
   let seed = opts.seed || 1234567;
@@ -49,6 +50,7 @@ async function runSoakTest(opts = {}){
     if (axis === null) return bad;
     if (NS.negativeMesh.visible) bad.push('negativeMesh visible in a locked elevation');
     if (NS.streetsGroup && NS.streetsGroup.visible) bad.push('streets visible in a locked elevation');
+    if (NS.boroughsGroup && NS.boroughsGroup.visible) bad.push('Manhattan context layer visible in a locked elevation');
     if (!neg) return bad; // buildings-only view has no poche to check
     const g = NS.capFillGroups[axis];
     const showing = !!(g.userData.quad?.visible || g.userData.outline?.visible);

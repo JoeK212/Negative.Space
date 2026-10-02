@@ -1,14 +1,19 @@
-# Negative Space -- handoff for a new chat (v3.4.130, 2026-10-01)
+# Negative Space -- handoff for a new chat (v3.4.132, 2026-10-02)
 
 ## What this package is
-Full project zip, v3.4.130. `audit_deploy.js` 376/376. `runSmokeBothSides()` passed 290/290 (Manhattan context OFF 137, ON 153) with the unlit poché patched into the page in memory. NOT yet confirmed on Joe's own reload.
+Full project zip, v3.4.132. `audit_deploy.js` 380/380. v3.4.131 (Home -> N/S/E/W context/streets fix) passed `runSmokeBothSides()` 327/327 on Joe's localhost (context OFF 158, ON 169, incl. Phase 10). v3.4.130 (before this fix) passed `runSmokeBothSides()` 295/295 and `runSoakTest({cycles:300})` 0 violations (no box, and with a drawn box + Manhattan context ON) on district-1, in Joe's own foreground tab. v3.4.131 itself has NOT been run through smoke/soak or confirmed on Joe's reload; its fix was checked live only by patching the same two lines into the served v3.4.130 HTML in memory.
 
 ## What to do first (Joe)
-1. Extract the zip and swap it into the folder served at http://localhost:8888/ . Hard-refresh (Ctrl+Shift+R). The footer should read **v3.4.130**.
-2. Eyeball the poché in every view: Plan, Home, and N/S/E/W elevations, with Manhattan context ON and OFF. It should be red everywhere. Before 130 it was sometimes pale gray-blue in elevations (v3.4.127/128).
-3. In an elevation with Manhattan context ON, the tan ground plate should be the base under the section (v3.4.129).
-4. Run in your own FOREGROUND tab: `await runSoakTest({ cycles: 300 })` (paste soak_test.js first). Send any violations.
-5. Run `runSmokeBothSides()` (paste smoke_test.js first) and send the totals.
+1. Extract the zip, swap it into the folder served at http://localhost:8888/ , hard-refresh. Footer must read **v3.4.132**.
+2. Manhattan context ON, click Home, then N, S, E, W (with and without a drawn box). No gray island slab, no MANHATTAN label, no street layer; tan ground plate is the base. Plan and Home with context ON still show the island and streets.
+3. Paste smoke_test.js (it now has Phase 10), run `await runSmokeBothSides('Joe')`, send the totals. New phase starts every elevation from Home.
+4. Optional: `await runSoakTest({ cycles: 300 })` again in a foreground tab.
+
+## What changed in 132
+Added `fillLight` (DirectionalLight, (-400,-300,150), intensity 0.5) for the perspective/Home view so south- and west-facing walls are not black; swapped with `sun` like `sun` is swapped with `orthoLight`. Elevations unchanged. Intensity is one constant in index.html; Joe may want it tuned (0.3 more contrast, 0.8 flatter). Check Home on a few districts and orbit all the way round; confirm N/S/E/W look the same as on 131.
+
+## What changed in 131
+setOrthogonalView() now calls updateContextLayerVisibility() and updateStreetLabelVisibility() after `activeCamera = orthoCamera`. Before, applySectionMode() ran them while the camera was still perspective, so inLockedElevation() was false and the Manhattan layer + streets stayed visible in an elevation entered from Home/perspective. See CHANGELOG.md and AUDIT.md.
 
 ## What changed v3.4.126 -> 130
 - 126: ViewCube TOP north-up (camera epsilon (0,-0.0001,1), label rotDeg 0); box-scoped caps always fill; Buildings ON in Home and Manhattan context; Display accordion open by default with High detail (slower) moved into it; ViewCube panel spacing 142px. smoke_test.js Phase 9 fixes.
@@ -36,11 +41,15 @@ out.push(['canvas alpha/premult',String(gl.getContextAttributes().alpha)+'/'+Str
 console.table(out)})()
 ```
 
+## Closed as "not reproduced" (Joe's call, 2026-10-02) -- NOT proven fixed
+Joe could not recall which areas he was testing and chose to close these out and see whether they come back. Reopen any of them, with the exact steps, if it is seen again.
+- Intermittent N/S/E/W rendering bug: 600 soak cycles, 0 violations (v3.4.130, district-1, no box and box + Manhattan context ON); on v3.4.132 Midtown, Manhattan context ON, with Home added to the soak's moves: 300 cycles, 0 violations (Joe's foreground tab); smoke 327/327 on district-1 and 158/158 + 169/169 on Midtown, Upper East Side, Inwood and Chelsea.
+- Pale poché in elevations: unlit since 130. One pale pixel reading in N with Manhattan context ON (700 ms after the toggle) was not reproduced in three retries. If it recurs, run the pixel-readout diagnostic in the section above while it is on screen.
+- Wide-box N/S fill: Midtown 808 x 354 m box, S and N, context OFF: quad visible, maroon fill on screen. Context ON with the 131/132 build not hand-checked.
+- Street-name labels at ground level in a South view with no box, view tiny/unframed: never reproduced. Possibly related to the v3.4.131 ordering bug (streets stayed visible in an elevation entered from Home/perspective), which is fixed and covered by smoke Phase 10; that link is a guess, not confirmed.
+
 ## Still open
-- Intermittent N/S/E/W rendering bug: open until Joe's own local testing says otherwise (soak test not yet returned a result).
-- Wide-box N/S fill fix: diagnosed from the code path, not reproduced by hand.
-- Possible, unconfirmed: street-name labels visible at ground level in a South view with no box drawn; that same view came out tiny/unframed.
-- Not done: GitHub/Netlify not updated; AUDIT.md only has a short v3.4.126 entry (127-130 are in CHANGELOG.md).
+- GitHub/Netlify not updated (Joe's to do). AUDIT.md has entries for 127-132.
 
 ## Standing rules (Joe)
 - Ask before packaging; when he says yes, deliver the FULL zip (entire project).
@@ -50,4 +59,4 @@ console.table(out)})()
 - Keep Randalls/Wards/Roosevelt Island buildings as they are.
 - Joe's focus is the island of Manhattan, not other boroughs.
 - Keep answers short and direct.
-- The Claude-in-Chrome tab runs on Joe's own machine: ask before connecting, and note that navigating reloads his page.
+- The Claude-in-Chrome tab runs on Joe's own machine: ask before connecting, and note that navigating reloads his page. Its tab group opens in a background window (document hidden, no animation frames), so the soak test must be run in Joe's own foreground tab; smoke_test.js works in the hidden tab.

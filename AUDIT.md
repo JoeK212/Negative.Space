@@ -1769,3 +1769,49 @@ same way for both cameras.
 - Display accordion open by default; High detail (slower) lives in Display, not Export.
 - Still open: soak_test.js not yet run successfully (needs a foreground tab); the original missing-fill report was not reproduced by hand; the intermittent N/S/E/W rendering bug (see above) remains open until Joe's own local testing says otherwise.
 - smoke_test.js Phase 9 re-enables Buildings + Negative space after each box-direction click and checks only the active axis's building cap material.
+
+### v3.4.127-130 (2026-10-01)
+
+- **127** appended a continuous z=0 ground-line segment to buildSkylineProfileLine(). Joe saw the poché pale gray-blue in several N/S/E/W elevations on 127. **Removed in 128** (A/B build). The poché stayed pale on 128 without the segment, so the segment was not the cause; it stays out. If a ground line is wanted later it must be its own mesh, not part of the skyline LineSegments.
+- **129** updateContextLayerVisibility() sets `groundMesh.visible = !boroughsGroup.visible`. zoomToBoroughContext() hid the tan ground plate when Manhattan context went on, and nothing restored it when a locked elevation then hid the context layer, so context-ON elevations had no base. Plan/Perspective with context ON still hide the plate.
+- **130** makeCapQuad() builds the poché from MeshBasicMaterial (unlit) instead of MeshStandardMaterial. Clipping planes, stencil ops, polygonOffset, opacity and addSkyDiscard are unchanged.
+- **Pale poché, unresolved cause.** On 127/128 the Y quad was visible, #b23a2e at 0.4 opacity, negative-space shell hidden, no other translucent mesh drawn. Hiding the Y cap group or either light removed the pale fill, so the on-screen colour depended on lighting. 130 removes that dependency; it does not prove it was the only cause. If a pale poché recurs on 130+, run the pixel-readout diagnostic in HANDOFF.md while it is on screen.
+
+**Local live testing on v3.4.130 (district-1, TriBeCa / Battery Park City / FiDi):**
+- `runSmokeBothSides()` 295/295 (context OFF 142, ON 153), no failures.
+- `runSoakTest({ cycles: 300 })`: 0 violations, run in Joe's own foreground tab, once with no box and once with a drawn box and Manhattan context ON.
+- Pixel check (red vs pale pixels, N/S/E/W, context OFF and ON): seven of eight views red. One reading in N with context ON, taken 700 ms after switching context on, was mostly pale (red 247, pale 4064). Three retries after a 1500 ms wait were all red. Not reproduced; may be a transition-timing artifact. The replay that tried to reproduce it froze the browser connection.
+
+**Still open:** the single pale reading above; the wide-box N/S fill fix (diagnosed from the code path, no confirmed wide-box test); street-name labels at ground level in a South view with no box, and that view framing tiny; GitHub/Netlify not updated. The intermittent N/S/E/W bug is not reproduced in 600 soak cycles on one district; it is not declared fixed.
+
+### v3.4.131 (2026-10-02)
+
+- **Bug:** Manhattan context ON, then N/S/E/W entered from the perspective/Home view left the island slab, the MANHATTAN label and the street layer visible in the elevation. Readout in that state: `sectionModeAxis 'y'`, `activeCamera` Orthographic, `boroughsGroup.visible` true, `streetsGroup.visible` true.
+- **Cause:** ordering in setOrthogonalView(). applySectionMode() ends with updateContextLayerVisibility() and updateStreetLabelVisibility(); both call inLockedElevation() (`sectionModeAxis !== null && activeCamera === orthoCamera`). `activeCamera = orthoCamera` is set later in the function, so they saw the perspective camera. From Plan the camera is already ortho, which is why smoke Phase 3/5/8 and the soak (always via Plan) never hit it.
+- **Fix:** both functions are called again right after `activeCamera = orthoCamera`.
+- **Checked live** (Joe's localhost, v3.4.130 served): before the fix, Home -> N/S/E/W with context ON gave boroughs true / streets true in all four. With the identical two lines patched into the served HTML in memory: boroughs false / streets false in all four directions; Plan and Home with context ON still show both; context OFF unchanged. The packaged file itself has not been run on Joe's reload.
+- **Test added:** smoke_test.js Phase 10 starts every elevation from Home (perspective) and checks ortho camera, context layer hidden, streets hidden. It fails on v3.4.130.
+- **Lesson:** any test that always enters an elevation through Plan cannot see a bug that depends on the previous camera. Vary the starting view.
+
+### v3.4.132 (2026-10-02)
+
+- **Request:** Joe -- south faces of buildings are always dark (perspective/Home view).
+- **Cause:** the only directional light in perspective is `sun` at (400, 300, 700). Its light vector has N.L -0.34 against south walls and -0.46 against west walls, so they receive only the HemisphereLight. Elevations avoid this because orthoLight follows the camera.
+- **Change:** `fillLight`, DirectionalLight (-400, -300, 150), intensity 0.5, swapped with `sun` (hidden in setOrthogonalView(), shown in resetSharedViewState()). South walls N.L about +0.57, west about +0.77, roofs +0.29. Elevations and the unlit poche are unchanged.
+- **Previewed live** on district-1 by adding the same light at intensity 0 vs 0.5: dark faces read mid-gray with form at 0.5. 0.5 is a judgment call (one constant).
+- **Audit:** 3 new checks; three older checks that pinned `sun.visible`/`orthoLight.visible` on adjacent lines now allow the fillLight line between them.
+
+### Open items closed as "not reproduced" (2026-10-02)
+
+Joe, who could not recall which areas he had been testing, chose to close the remaining open items and watch for them to return. None is declared fixed:
+- Intermittent N/S/E/W rendering bug: 600 soak cycles / 0 violations on v3.4.130 (district-1); smoke 327/327 on v3.4.132. Last confirmed recurring at v3.4.47.
+- Pale poché in elevations: poché unlit since v3.4.130; one pale reading with context ON (v3.4.130) not reproduced in three retries.
+- Wide-box N/S fill (v3.4.126 change): Midtown 808 x 354 m box, S and N, context OFF, maroon fill on screen; never reproduced the original failure by hand.
+- Street labels at ground level in a South view with no box / tiny unframed view: never reproduced. May relate to the v3.4.131 context/street visibility ordering bug (unconfirmed).
+Reopen with exact steps if any of these is seen again.
+
+### Regression pass on v3.4.132 (2026-10-02)
+
+- Smoke (`runSmokeBothSides`): district-1 327/327; Midtown, Upper East Side, Inwood / Washington Heights and Chelsea each 158/158 (context OFF) + 169/169 (context ON). Phase 10 (elevations entered from Home) included.
+- Soak with `navHome` added to the move list and a "Manhattan context layer visible in a locked elevation" invariant (soak_test.js, test-only): Midtown, Manhattan context ON, `runSoakTest({cycles:300})` in Joe's own foreground tab: 0 violations.
+- Not covered by scripts: how the fill light looks (Joe's visual check), the hosted Netlify build.

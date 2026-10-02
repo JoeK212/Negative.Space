@@ -925,7 +925,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.130'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.132'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1101,7 +1101,7 @@ window.addEventListener('resize', checkScreenGate);
 
 /* ================= Three.js scene ================= */
 let scene, camera, renderer, controls;
-let sun, orthoLight; // v3.4.24: sun = perspective view's fixed-direction light (unchanged); orthoLight = camera-relative headlight, active only during N/S/E/W/Plan so every elevation is front-lit the same way -- see updateOrthoLight()
+let sun, fillLight, orthoLight; // v3.4.24: sun = perspective view's fixed-direction light (unchanged); orthoLight = camera-relative headlight, active only during N/S/E/W/Plan so every elevation is front-lit the same way -- see updateOrthoLight()
 let orthoCamera, activeCamera; // v3.0.42 -- orthoCamera only becomes activeCamera during a true N/S/E/W flat elevation view; Home/free-orbit use the perspective camera
 let solidGroup, negativeMesh; // negativeMesh is a THREE.Group of [outerSkin, cavityWalls] once computed
 let groundMesh; // v3.0.20 -- needed so zoomToBoroughContext() can hide it (a real extruded borough slab now sits well above the small 4000-unit ground plane, poking out oddly around its edges otherwise)
@@ -2857,6 +2857,10 @@ function initScene(){
   sun = new THREE.DirectionalLight(0xffffff, 1.4);
   sun.position.set(400, 300, 700);
   scene.add(sun);
+  // v3.4.132: Joe -- "the south faces of building are always dark." The sun above (400,300,700) has a negative dot product with every south-facing (-0.34) and west-facing (-0.46) wall, so they get only the HemisphereLight and read near-black in the perspective/Home view. FILL LIGHT: a weaker directional light from the opposite horizontal direction and low (the sun's horizontal direction mirrored, from the south-west) so those walls get N.L of about +0.57 (south) and +0.77 (west) at 0.5 intensity, while the sun still sets the main light/shade hierarchy and roofs barely change (z component 0.29). Perspective only: swapped with orthoLight exactly like `sun` (setOrthogonalView / resetSharedViewState), so the elevations, which are already front-lit by orthoLight, are unchanged. Previewed live at 0 vs 0.5 on district-1 before shipping.
+  fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  fillLight.position.set(-400, -300, 150);
+  scene.add(fillLight);
 
   // v3.4.24: "north elevation black" -- root cause was this fixed sun
   // position (400,300,700), which lights north- and east-facing walls
@@ -5043,6 +5047,9 @@ function setOrthogonalView(direction, overrideTargetSpan){
     orthoCamera.position.set(target.x - dir[0] * camDist, target.y - dir[1] * camDist, target.z);
   }
   activeCamera = orthoCamera;
+  // v3.4.131: Joe -- Manhattan context ON, then N/S/E/W from the perspective/Home view left the island slab and the MANHATTAN label visible in the elevation (readout: axis 'y', cam Orthographic, boroughsGroup.visible true). Root cause is ordering: applySectionMode() above ends with updateContextLayerVisibility() and updateStreetLabelVisibility(), both of which ask inLockedElevation() (sectionModeAxis !== null && activeCamera === orthoCamera), but activeCamera is only switched to orthoCamera HERE, so they saw a perspective camera and answered "not locked". Coming from Plan the camera was already ortho, which is why smoke/soak never hit it. Re-run both now that the camera is final.
+  updateContextLayerVisibility();
+  updateStreetLabelVisibility();
   controls.object = orthoCamera; // reassigning .object on the SAME OrbitControls instance -- a supported, well-established three.js pattern (used in three.js's own multi-camera examples); avoids maintaining two independent controls instances with their own mouse/touch listeners
   controls.target.copy(target);
   // v3.2.34: Joe reported a section view visibly NOT axis-aligned. Root
@@ -5057,6 +5064,7 @@ function setOrthogonalView(direction, overrideTargetSpan){
   controls.update();
   updateOrthoLight(direction, target, camDist); // v3.4.24
   sun.visible = false;
+  fillLight.visible = false; // v3.4.132: perspective-only fill, see its creation
   orthoLight.visible = true;
   updateCurrentViewIndicator(direction); // v3.4.33
 }
@@ -5119,6 +5127,7 @@ function resetSharedViewState(){
   controls.object = camera;
   controls.enableRotate = true;
   sun.visible = true;
+  fillLight.visible = true; // v3.4.132
   orthoLight.visible = false;
   showBuildings = true; // v3.4.126: Joe -- Home / 3D perspective must have Buildings ON in both Manhattan-context and non-Manhattan views (an elevation's v3.4.48 auto-off was otherwise carrying into Home)
   updateCurrentViewIndicator('home');
