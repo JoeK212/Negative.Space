@@ -96,6 +96,7 @@ function smokeFindGapBox(bboxes, near, H){
 }
 
 async function runSmokeTest(label, opts = {}){
+  try { localStorage.setItem('ns_tourDone', '1'); const sk = document.getElementById('tourSkip'), lay = document.getElementById('tourLayer'); if (sk && lay && lay.classList.contains('show')) sk.click(); } catch (e){} // v3.4.149: a first-visit guided tour must not be running during the smoke
   const ctxOn = opts.context === 'on'; // v3.4.115: which side of the Manhattan-context toggle this pass tests
   const results = []; let pass = 0, fail = 0;
   const check = (name, ok, detail) => { results.push({ name, pass: !!ok, detail: detail || '' }); if (ok) pass++; else fail++; console.log((ok ? '  [pass] ' : '  [FAIL] ') + name + (detail ? ' -- ' + detail : '')); };

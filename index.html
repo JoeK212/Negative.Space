@@ -497,6 +497,44 @@
   #helpBody dd{margin:2px 0 0; color:var(--ink-soft);}
   #helpBody a{color:var(--accent);}
 
+
+  /* v3.4.149: guided tour. The dim layer and spotlight never take clicks (pointer-events:none), so the highlighted control can be used directly; only the card is clickable. */
+  #tourLayer{ display:none; position:fixed; inset:0; z-index:80; pointer-events:none; }
+  #tourLayer.show{ display:block; }
+  #tourSpot{
+    position:fixed; border-radius:10px; pointer-events:none;
+    box-shadow:0 0 0 9999px rgba(4,16,28,0.52), 0 0 0 2px var(--accent);
+    transition:left .22s ease, top .22s ease, width .22s ease, height .22s ease;
+  }
+  #tourCard{
+    position:fixed; width:320px; max-width:calc(100vw - 24px); pointer-events:auto;
+    background:var(--card); color:var(--ink); border:1.5px solid var(--accent); border-radius:10px;
+    box-shadow:var(--shadow); padding:16px 18px 14px; font-family:var(--font-body);
+  }
+  #tourStepNo{ font-family:var(--font-ui); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); }
+  #tourTitle{ font-family:var(--font-display); font-size:17px; margin:4px 0 8px; font-weight:600; }
+  #tourText{ font-size:14px; line-height:1.55; margin:0 0 10px; }
+  #tourNote{ font-family:var(--font-ui); font-size:12.5px; color:var(--accent); margin:0 0 10px; }
+  #tourNote:empty{ display:none; }
+  #tourDemoRow{ margin-bottom:12px; }
+  #tourDemoRow:empty{ display:none; }
+  #tourNav{ display:flex; align-items:center; gap:8px; }
+  #tourNav .spacer{ flex:1; }
+
+
+  /* v3.4.150: header Tour button and the Exercises panel */
+  #tourToggle{ width:auto; border-radius:19px; padding:0 14px; font-family:var(--font-ui); font-size:13px; font-weight:600; letter-spacing:0.02em; cursor:pointer; }
+  #tourToggle:hover{ border-color:var(--accent); color:var(--accent); }
+  .exIntro{ font-family:var(--font-ui); font-size:12.5px; color:var(--ink-soft); margin:0 0 10px; }
+  .exRow{ margin:0 0 12px; padding-left:22px; position:relative; }
+  .exRow::before{ content:'\25CB'; position:absolute; left:0; top:0; color:var(--ink-soft); font-size:15px; line-height:1.3; }
+  .exRow.done::before{ content:'\2713'; color:var(--accent); font-weight:700; }
+  .exTitle{ font-family:var(--font-ui); font-size:13px; font-weight:600; margin:0; }
+  .exTask{ font-family:var(--font-body); font-size:13px; line-height:1.45; margin:2px 0 2px; }
+  .exMsg{ font-family:var(--font-ui); font-size:12px; color:var(--ink-soft); margin:0; }
+  .exRow.done .exMsg{ color:var(--accent); }
+  #exCount{ font-weight:400; color:var(--ink-soft); }
+
   #footVersion{
     font-family:var(--font-ui); font-size:10px; letter-spacing:0.06em;
     color:var(--ink-soft); opacity:0.7; margin:2px 0 0;
@@ -523,6 +561,7 @@
     <p id="footVersion"></p>
   </div>
   <div style="display:flex; gap:8px;">
+    <button class="theme-toggle" id="tourToggle" type="button" aria-label="Guided tour">Tour</button>
     <button class="theme-toggle" id="helpToggle" aria-label="Help">?</button>
     <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">🌙</button>
   </div>
@@ -535,6 +574,7 @@
       <button id="helpClose" aria-label="Close">✕</button>
     </header>
     <div id="helpBody">
+      <p><button class="btn secondary" id="tourReplayBtn" type="button">Take the guided tour</button></p>
       <h3>What this is</h3>
       <p>Takes a bounding "mold" volume the size of a chosen NYC neighborhood — footprint × tallest building — and subtracts every real building from it. What's left is the negative space: the shape of the air around and above the buildings, capped by the mold's own outer boundary.</p>
 
@@ -562,6 +602,8 @@
         <dd>Shades the newly-exposed cut faces translucent — red for negative space (the void), charcoal for Buildings (cut solid mass) — so a cut reads as solid material instead of a hollow outline. Negative space's own fill switches to a thin outline instead, on whichever cut face currently exposes more than about half the site — a full fill at that size reads as an overwhelming wash rather than useful shading, so the outline takes over automatically as the exposed area grows. Works in a locked N/S/E/W section, and in free Perspective/Plan wherever the current viewing angle isn't too edge-on to the cut face.</dd>
         <dt>3D drag handles</dt>
         <dd>Colored handles (blue = Height, orange = X, green = Y) sit at the center of each cut face and can be dragged directly in the viewport instead of using the sliders.</dd>
+        <dt>Reading the numbers</dt>
+        <dd>X and Y read as the distance from the slider's low end (0 at the left, like Height). The fill on a cut face only shows while you are facing the cut, not from behind it.</dd>
         <dt>Units</dt>
         <dd>Metric (m) / Imperial (ft) — only affects these slider labels and values; the underlying geometry always stays in meters.</dd>
       </dl>
@@ -584,12 +626,43 @@
         <dd>Zooms out to show the neighborhood's real position on the island — still a free 3D view, cutaway tools stay usable while it's on.</dd>
         <dt>Major streets</dt>
         <dd>Every real named street (Street Centerline data) around the site — not just avenues.</dd>
+        <dt>Terrain</dt>
+        <dd>Buildings stand on the real ground, the negative space is carved above it and streets drape over it. Elevation data is fetched live (public tiles) the first time you switch it on, and turning it on or off rebuilds the site.</dd>
+        <dt>High detail (slower)</dt>
+        <dd>Builds the negative space at a finer resolution. Slower to compute.</dd>
       </dl>
 
       <h3>Export</h3>
       <p>Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL. Set "Model scale 1:N" first (default 1:500) — the app's geometry is real-world meters, converted to millimeters at that scale. Negative space must be computed first. Copy link grabs a URL to this exact district, cutaway position, and layer(s) shown — anyone who opens it lands in the same configuration. Camera view/orientation and a drawn box aren't included yet.</p>
+      <dl>
+        <dt>Export image (PNG)</dt>
+        <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
+        <dt>Export DXF (CAD)</dt>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied (the cut faces are left open).</dd>
+        <dt>Guided tour</dt>
+        <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
+        <dt>Exercises</dt>
+        <dd>Five short tasks in the side panel (below Display). Each one ticks by itself when you have done it, and Check my work tells you what is still missing.</dd>
+      </dl>
 
       <p style="margin-top:16px; color:var(--ink-soft); font-size:13px;">Full write-up: <a href="README.md">README.md</a> · deeper technical notes: <a href="EXTENDED.md">EXTENDED.md</a></p>
+    </div>
+  </div>
+</div>
+
+<div id="tourLayer" aria-live="polite">
+  <div id="tourSpot"></div>
+  <div id="tourCard" role="dialog" aria-labelledby="tourTitle">
+    <div id="tourStepNo"></div>
+    <h3 id="tourTitle"></h3>
+    <p id="tourText"></p>
+    <p id="tourNote"></p>
+    <div id="tourDemoRow"><button class="btn secondary" id="tourDemoBtn" type="button"></button></div>
+    <div id="tourNav">
+      <button class="btn ghost" id="tourSkip" type="button">Skip tour</button>
+      <span class="spacer"></span>
+      <button class="btn secondary" id="tourBack" type="button">Back</button>
+      <button class="btn" id="tourNext" type="button">Next</button>
     </div>
   </div>
 </div>
@@ -840,6 +913,14 @@
     panel, after everything else #sectionRow contains, still inside the
     same #exploreExtras/#sectionRow gating (a compute) it already had.
     Nothing about ITS OWN markup changed, only where it sits in the DOM. -->
+    <details class="accordion" id="exercisesAccordion">
+      <summary>Exercises <span id="exCount"></span></summary>
+      <div class="accordion-body">
+        <p class="exIntro">Try each one in the viewport; a tick appears by itself when it is done.</p>
+        <div id="exList"></div>
+        <button class="btn secondary" id="exCheckBtn" type="button">Check my work</button>
+      </div>
+    </details>
     <details class="accordion">
       <summary>Export</summary>
       <div class="accordion-body">
@@ -952,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.148'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.150'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1115,6 +1196,199 @@ document.getElementById('helpToggle').addEventListener('click', openHelp);
 document.getElementById('helpClose').addEventListener('click', closeHelp);
 helpOverlay.addEventListener('click', (e) => { if (e.target === helpOverlay) closeHelp(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && helpOverlay.classList.contains('show')) closeHelp(); });
+
+/* ================= Guided tour (v3.4.149) ================= */
+// Eight steps over the site that is already loaded. Runs by itself on a first visit (ns_tourDone unset, no shared-link state in the URL, not a small screen) and
+// replays from the help window. The only thing saved is ns_tourDone. The panel reveals below are temporary inline-display changes that endTour() undoes exactly
+// (or hands back to showPostComputeUI() if a compute happened meanwhile). A demo that presses the real Negative space button makes the app save Advanced mode, so endTour()
+// puts the Simple/Advanced choice back as it was; ns_exploredOnce is left as the app set it (the user did explore) and the theme is never touched. The "Show me"
+// buttons press the same real buttons a user would, so their effects (a compute, a layer on) are the app's own.
+const TOUR_KEY = 'ns_tourDone';
+let tourOn = false, tourIdx = 0, tourSnap = null, tourTimer = null;
+const tourFlags = {}; // on/off of demos whose result cannot be read back from the page
+const tourEl = id => document.getElementById(id);
+const tourComputed = () => !!negativeMesh;
+const tourBtnOn = id => { const b = tourEl(id); return !!b && b.classList.contains('active'); };
+const tourPress = id => { const b = tourEl(id); if (b) b.click(); };
+const tourSlide = (id, frac) => { const el = tourEl(id); if (!el) return; const lo = +el.min, hi = +el.max; el.value = String(lo + frac * (hi - lo)); el.dispatchEvent(new Event('input', { bubbles: true })); }; // sliders hold meters whatever the unit toggle says
+const TOUR_STEPS = [
+  { id: 'buildings', title: 'The real buildings', ids: ['viewSolid'],
+    text: 'Every grey solid is a real NYC building, extruded from Overture Maps footprint and height data. Buildings and Negative space are two layers: show them together or on their own.' },
+  { id: 'compute', title: 'Compute the negative space', ids: ['computeBtn'],
+    text: 'Computing subtracts every building from a mold the size of the site (its footprint by its tallest building). What is left is the air around and above the buildings. It is needed once per neighborhood.',
+    demo: { label: 'Compute now', run: () => { if (!tourComputed()) tourPress('computeBtn'); } },
+    isDone: tourComputed, gateNext: true, waitNote: 'Press Compute negative space (or the button below). This can take a few seconds.', doneNote: 'Done: the negative space is computed.' },
+  { id: 'void', title: 'See the void', ids: ['viewNegative'], needsCompute: true,
+    text: 'Negative space shows that leftover air as one solid form. Turn it on, then switch Buildings on and off to compare the carve with the real buildings.',
+    demo: { label: 'Show me', undoLabel: 'Hide it again', run: () => { if (!tourBtnOn('viewNegative')) tourPress('viewNegative'); }, undo: () => { if (tourBtnOn('viewNegative')) tourPress('viewNegative'); }, isOn: () => tourBtnOn('viewNegative') } },
+  { id: 'cut', title: 'Cut a corner away', ids: ['sectionCutRow', 'xCutRow', 'yCutRow'], needsCompute: true, section: true, advanced: true,
+    text: 'Height, X and Y remove one corner of the solid so you can see inside. The fill on the cut face is red for the void and charcoal for buildings, and shows only while you face the cut. Drag a slider or a coloured 3D handle; Flip X and Flip Y choose the corner.',
+    demo: { label: 'Show me a cut', undoLabel: 'Reset the cut',
+      run: () => { tourPress('navHome'); tourSlide('xClipSlider', 0.5); tourSlide('yClipSlider', 0.45); tourSlide('sectionSlider', 0.12); tourFlags.cut = true; },
+      undo: () => { tourPress('resetCutawayBtn'); tourFlags.cut = false; }, isOn: () => !!tourFlags.cut } },
+  { id: 'box', title: 'Draw a section', ids: ['drawBoxBtn'],
+    text: 'Your turn: click Draw section box, drag a rectangle around the blocks you want, then pick N, S, E or W. You get a true architectural elevation through just that box. Full width clears the box.',
+    isDone: () => !!activeSectionBox, doneNote: 'Done: you drew a section box.' },
+  { id: 'nav', title: 'Move around', ids: ['navN', 'navW', 'navHome', 'navE', 'navS', 'navPlan'],
+    text: 'N, S, E and W are flat elevations, Plan looks straight down, and the house button returns to the free 3D view. The compass needle always points at true north.',
+    demo: { label: 'Show the West elevation', undoLabel: 'Back to 3D', run: () => { tourPress('navW'); tourFlags.nav = true; }, undo: () => { tourPress('navHome'); tourFlags.nav = false; }, isOn: () => !!tourFlags.nav } },
+  { id: 'context', title: 'Context and terrain', ids: ['viewBoroughs', 'viewStreets', 'viewTerrain'],
+    text: 'Manhattan context shows where the site sits on the island, and Major streets adds the named street labels. Terrain puts everything on the real ground; it fetches elevation data the first time and rebuilds the site.',
+    demo: { label: 'Show Manhattan context', undoLabel: 'Hide it again', run: () => { if (!tourBtnOn('viewBoroughs')) tourPress('viewBoroughs'); }, undo: () => { if (tourBtnOn('viewBoroughs')) tourPress('viewBoroughs'); }, isOn: () => tourBtnOn('viewBoroughs') } },
+  { id: 'export', title: 'Export and share', ids: ['exportStlBtn', 'exportImageBtn', 'exportDxfBtn', 'copyLinkBtn'], needsCompute: true, section: true, openAccordion: true,
+    text: 'Export an STL for 3D printing at your chosen scale, a PNG image, or a DXF for CAD (in Perspective it carries real heights with your cutaway applied). Copy link saves this exact cut as a web address. Then test yourself with the Exercises panel.',
+    demo: { label: 'Copy the link', run: () => tourPress('copyLinkBtn') } }
+];
+function tourTargetRect(st){
+  let r = null;
+  for (const id of st.ids){
+    const el = tourEl(id); if (!el || !el.getClientRects().length) continue;
+    const b = el.getBoundingClientRect();
+    r = r ? { l: Math.min(r.l, b.left), t: Math.min(r.t, b.top), r: Math.max(r.r, b.right), b: Math.max(r.b, b.bottom) } : { l: b.left, t: b.top, r: b.right, b: b.bottom };
+  }
+  return r;
+}
+function tourPosition(){
+  if (!tourOn) return;
+  const st = TOUR_STEPS[tourIdx], spot = tourEl('tourSpot'), card = tourEl('tourCard'), r = tourTargetRect(st), pad = 6;
+  const cw = card.offsetWidth, ch = card.offsetHeight, W = window.innerWidth, H = window.innerHeight;
+  if (!r){ spot.style.display = 'none'; card.style.left = Math.max(12, (W - cw) / 2) + 'px'; card.style.top = Math.max(12, (H - ch) / 2) + 'px'; return; }
+  spot.style.display = 'block';
+  spot.style.left = (r.l - pad) + 'px'; spot.style.top = (r.t - pad) + 'px'; spot.style.width = (r.r - r.l + 2 * pad) + 'px'; spot.style.height = (r.b - r.t + 2 * pad) + 'px';
+  const pr = tourEl('controls').getBoundingClientRect();
+  const inPanel = r.l >= pr.left - 2 && r.r <= pr.right + 2;
+  let x = (inPanel ? pr.right : r.r + pad) + 14; // beside the whole side panel when the target is inside it (so the card never covers the neighbouring buttons), else right of the target
+  if (x + cw > W - 12) x = r.l - pad - 14 - cw;
+  x = Math.min(Math.max(12, x), W - cw - 12);
+  const y = Math.min(Math.max(12, r.t - pad), Math.max(12, H - ch - 12));
+  card.style.left = x + 'px'; card.style.top = y + 'px';
+}
+function tourApplyReveal(st){
+  tourEl('exploreExtras').style.display = 'flex'; tourEl('decisionStage').style.display = 'none';
+  const explored = (() => { try { return localStorage.getItem('ns_exploredOnce') === '1'; } catch (e){ return false; } })();
+  tourEl('sectionRow').style.display = (st.section || (explored && tourComputed())) ? 'flex' : 'none';
+  tourEl('advancedCutawayControls').style.display = (st.advanced || uiMode === 'advanced') ? 'flex' : 'none'; // display only: setUiMode() would save the choice
+  if (st.openAccordion){ const d = tourEl('exportDxfBtn').closest('details'); if (d && !d.open){ d.open = true; tourSnap.opened.push(d); } }
+}
+function tourRefresh(){
+  if (!tourOn) return;
+  const st = TOUR_STEPS[tourIdx], done = st.isDone ? !!st.isDone() : false, demo = st.demo, btn = tourEl('tourDemoBtn');
+  tourEl('tourNote').textContent = st.isDone ? (done ? st.doneNote : (st.waitNote || '')) : '';
+  tourEl('tourNext').disabled = !!(st.gateNext && !done);
+  if (demo){
+    const on = demo.isOn ? !!demo.isOn() : false;
+    btn.textContent = on && demo.undoLabel ? demo.undoLabel : demo.label;
+    btn.disabled = !!((st.needsCompute && !tourComputed()) || (st.isDone && done && st.gateNext));
+    btn.title = st.needsCompute && !tourComputed() ? 'Compute the negative space first' : '';
+  }
+  tourPosition();
+}
+function tourRender(){
+  const st = TOUR_STEPS[tourIdx];
+  tourApplyReveal(st);
+  const first = st.ids.map(tourEl).find(el => el && el.getClientRects().length);
+  if (first) first.scrollIntoView({ block: 'nearest' }); // scrolls the side panel only
+  const panel = tourEl('controls'), pb = panel.getBoundingClientRect(), tr = tourTargetRect(st); // then make the whole target (a row group can be tall) fit, top first
+  if (tr && tr.l >= pb.left - 2 && tr.r <= pb.right + 2){
+    if (tr.b > pb.bottom - 10) panel.scrollTop += tr.b - pb.bottom + 14;
+    const tr2 = tourTargetRect(st); if (tr2 && tr2.t < pb.top + 8) panel.scrollTop -= pb.top - tr2.t + 10;
+  }
+  tourEl('tourStepNo').textContent = 'Step ' + (tourIdx + 1) + ' of ' + TOUR_STEPS.length;
+  tourEl('tourTitle').textContent = st.title;
+  tourEl('tourText').textContent = st.text;
+  tourEl('tourDemoRow').style.display = st.demo ? '' : 'none';
+  tourEl('tourBack').style.visibility = tourIdx === 0 ? 'hidden' : 'visible';
+  tourEl('tourNext').textContent = tourIdx === TOUR_STEPS.length - 1 ? 'Finish' : 'Next';
+  tourRefresh();
+  requestAnimationFrame(() => { tourPosition(); const n = tourEl('tourNext'); if (!n.disabled) n.focus({ preventScroll: true }); });
+}
+function startTour(){
+  if (tourOn) return;
+  closeHelp();
+  if (checkScreenGate()) return;
+  tourOn = true; tourIdx = 0;
+  tourSnap = { disp: {}, opened: [], ui: uiMode }; // ui: the saved Simple/Advanced choice, because pressing the real Negative space button during a demo makes the app switch (and save) Advanced
+  for (const id of ['decisionStage', 'exploreExtras', 'sectionRow']){ const el = tourEl(id); if (el) tourSnap.disp[id] = el.style.display; }
+  tourEl('tourLayer').classList.add('show');
+  window.addEventListener('resize', tourPosition);
+  tourTimer = setInterval(tourRefresh, 300);
+  tourRender();
+}
+function endTour(){
+  if (!tourOn) return;
+  tourOn = false; clearInterval(tourTimer); window.removeEventListener('resize', tourPosition);
+  tourEl('tourLayer').classList.remove('show');
+  const snap = tourSnap; tourSnap = null;
+  if (snap){
+    snap.opened.forEach(d => { d.open = false; });
+    if (uiMode !== snap.ui) setUiMode(snap.ui); // hand the saved choice back (a no-op unless a demo changed it)
+    tourEl('advancedCutawayControls').style.display = uiMode === 'advanced' ? 'flex' : 'none';
+    if (tourComputed()) showPostComputeUI(); // a compute happened (or already had): the app decides which panel to show
+    else for (const [id, v] of Object.entries(snap.disp)) tourEl(id).style.display = v; // nothing computed: put the panel back exactly as it was
+  }
+  try { localStorage.setItem(TOUR_KEY, '1'); } catch (e){}
+}
+tourEl('tourNext').addEventListener('click', () => { if (tourIdx >= TOUR_STEPS.length - 1) endTour(); else { tourIdx++; tourRender(); } });
+tourEl('tourBack').addEventListener('click', () => { if (tourIdx > 0){ tourIdx--; tourRender(); } });
+tourEl('tourSkip').addEventListener('click', endTour);
+tourEl('tourDemoBtn').addEventListener('click', () => {
+  const d = TOUR_STEPS[tourIdx].demo; if (!d) return;
+  if (d.undo && d.isOn && d.isOn()) d.undo(); else d.run();
+  setTimeout(tourRefresh, 150);
+});
+tourEl('tourReplayBtn').addEventListener('click', startTour);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && tourOn && !helpOverlay.classList.contains('show')) endTour(); });
+
+// v3.4.150: header Tour button.
+tourEl('tourToggle').addEventListener('click', startTour);
+/* ---- Exercises (v3.4.150): five self-checking tasks, graded live against the app's own state; nothing is saved ---- */
+const exOk = msg => ({ ok: true, msg });
+const exNo = msg => ({ ok: false, msg });
+const EXERCISES = [
+  { title: 'Show both layers', task: 'Turn on Buildings and Negative space together, to compare the carve with the real buildings.',
+    check: () => { const b = tourBtnOn('viewSolid'), n = tourBtnOn('viewNegative'); return b && n ? exOk('Both layers are showing.') : exNo(!n ? 'Negative space is off.' : 'Buildings is off.'); } },
+  { title: 'Cut at about 100 m', task: 'Set the Height cut to about 100 m (anything from 85 to 115 m).',
+    check: () => { const h = Math.round(sectionPlane.constant); return h >= 85 && h <= 115 ? exOk('Height cut is ' + h + ' m.') : exNo('Height cut is ' + h + ' m; aim for about 100 m.'); } },
+  { title: 'A third of the way across', task: 'Move the X cutaway about a third of the way across the site (between a quarter and 40% of the slider).',
+    check: () => { const el = tourEl('xClipSlider'), lo = +el.min, hi = +el.max, f = hi > lo ? (+el.value - lo) / (hi - lo) : 0; return f >= 0.25 && f <= 0.4 ? exOk('X is ' + Math.round(f * 100) + '% across.') : exNo('X is ' + Math.round(f * 100) + '% across; aim for about 33%.'); } },
+  { title: 'Flip the corner', task: 'Flip X so the opposite corner is carved away.',
+    check: () => flipXCutaway ? exOk('X is flipped.') : exNo('Flip X is off.') },
+  { title: 'A West section', task: 'Draw a section box and open its West elevation.',
+    check: () => { const w = tourEl('currentViewLabel').textContent === 'West Elevation'; return activeSectionBox && w ? exOk('A box is drawn and you are looking West.') : exNo(!activeSectionBox ? 'No section box yet: click Draw section box.' : 'Box drawn; now pick W for the West elevation.'); } }
+];
+function exBuild(){
+  const list = tourEl('exList');
+  list.innerHTML = '';
+  EXERCISES.forEach((ex, i) => {
+    const row = document.createElement('div'); row.className = 'exRow'; row.id = 'exRow' + i;
+    const t = document.createElement('p'); t.className = 'exTitle'; t.textContent = (i + 1) + '. ' + ex.title;
+    const k = document.createElement('p'); k.className = 'exTask'; k.textContent = ex.task;
+    const m = document.createElement('p'); m.className = 'exMsg';
+    row.append(t, k, m); list.appendChild(row);
+  });
+}
+function exRefresh(){
+  let done = 0;
+  EXERCISES.forEach((ex, i) => {
+    let r; try { r = ex.check(); } catch (e){ r = exNo(''); }
+    const row = tourEl('exRow' + i); if (!row) return;
+    row.classList.toggle('done', !!r.ok); row.querySelector('.exMsg').textContent = r.msg;
+    if (r.ok) done++;
+  });
+  tourEl('exCount').textContent = '(' + done + '/' + EXERCISES.length + ')';
+  return done;
+}
+exBuild();
+setInterval(() => { if (tourEl('exercisesAccordion').open) exRefresh(); }, 500);
+tourEl('exercisesAccordion').addEventListener('toggle', exRefresh);
+tourEl('exCheckBtn').addEventListener('click', () => { const n = exRefresh(); toast(n === EXERCISES.length ? 'All ' + n + ' exercises done' : n + ' of ' + EXERCISES.length + ' done: the grey ones say what is missing'); });
+exRefresh();
+function maybeAutoStartTour(){
+  try { if (localStorage.getItem(TOUR_KEY) === '1') return; } catch (e){ return; } // storage blocked: do not nag on every load
+  const q = new URLSearchParams(location.search);
+  if (['h', 'x', 'y', 'l', 'fx', 'fy'].some(k => q.has(k))) return; // someone shared a configured view: do not interrupt it
+  setTimeout(startTour, 900);
+}
 
 /* ================= Small-screen gate ================= */
 const SMALL_SCREEN_THRESHOLD = 760;
@@ -8527,6 +8801,7 @@ document.getElementById('fullWidthBtn').addEventListener('click', clearActiveSec
   }
   try {
     await applyUrlState(); // v3.4.104: was an unconditional loadData(NEIGHBORHOODS[0].id) -- now honors a shared link's district/cutaway/layer state if one is present in the URL, falling back to the same default otherwise
+    maybeAutoStartTour(); // v3.4.149
   } catch (e) {
     toast('Could not load geojson data — check the data/ folder is next to index.html');
     console.error(e);

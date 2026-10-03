@@ -1,4 +1,19 @@
-# Negative Space -- handoff for a new chat (v3.4.148, 2026-10-03)
+# Negative Space -- handoff for a new chat (v3.4.150, 2026-10-03)
+
+## v3.4.150 -- READ FIRST
+- Added (after Joe compared with SPIRA's Tour button + Exercises): a header **Tour** pill next to ? (starts/replays the guided tour) and an **Exercises** accordion in the side panel (below Display, above Export; appears once the site is computed). Five tasks graded live from page state, nothing saved: both layers on; Height cut 85-115 m; X 25-40% across; Flip X; drawn box + West elevation. "Check my work" toasts the count. See CHANGELOG.md v3.4.150. The 3.4.149 tour notes below still apply.
+- Not done: exercises for Terrain/Export/DXF, per-exercise hints, SPIRA-style glossary tooltips. The exercise-5 path (a real box drag) is not in the autotest; Joe should try it.
+- Test pieces (5-minute tool limit): `--tour-only` (now includes the header button and Exercises checks), `--no-terrain --skip-caps`, `--caps-only`, `--terrain-only`, `--caps-only --skip-caps --smoke`. audit_deploy.js 412/412 on 3.4.150. ALL pieces were re-run on 3.4.150 by Claude and pass: audit 412/412, --tour-only 36/36, --no-terrain --skip-caps 66/66, --caps-only 17/17, --terrain-only 21/21, smoke 324/0 (OFF 154, ON 170). Not run: Joe's own machine, the real box drag for exercise 5, deploy.
+
+# (v3.4.149 notes below)
+
+## v3.4.149 -- READ FIRST
+- NEW guided tour (8 steps) + refreshed help window, modelled on SPIRA's tour. Joe chose: starts on a FIRST VISIT ONLY (ns_tourDone), replay from the ? help window ("Take the guided tour"). Details and the exact rules: CHANGELOG.md v3.4.149. It does NOT start when the URL carries shared cut state (h/x/y/l/fx/fy) or on a small screen. The only thing it saves is ns_tourDone; endTour() puts the side panel, the Export section and the saved Simple/Advanced choice back (SPIRA's tour once left Advanced stuck on after Skip: do not regress this).
+- Joe still needs to: (1) clear the site's saved data (or run `localStorage.removeItem('ns_tourDone')`) and reload to see the first-visit tour on his own machine, (2) judge the wording and look (the step-4 "Show me a cut" is subtle from the default south view: the removed corner is the far north-east one; a more visible demo would flip Y or orbit the camera), (3) the previous 3.4.148 checks he hasn't finished: cut DXF in CAD, deploy.
+- Tests: autotest has a new `--tour-only` section (22 checks: starts by itself, spotlight on the right control, compute gate, each Show me and its undo, panel restored on Skip, replay, Esc, no restart after reload, no tour on a shared link). The harness marks the tour done on every page unless a test passes {tour:true}; smoke_test.js marks it done and dismisses a running tour (a first visit would otherwise start it mid-smoke). Run pieces (5-minute tool limit): `--tour-only`, `--no-terrain --skip-caps`, `--caps-only`, `--terrain-only`, `--caps-only --skip-caps --smoke` (smoke only, prints failed check names).
+- Ideas not done: SPIRA-style glossary tooltips and self-checking exercises; real-drag Draw-box and Terrain steps; EXTENDED.md was not audited against the new features.
+
+# (v3.4.148 notes below)
 
 ## v3.4.148 -- READ FIRST
 - Joe confirmed 3.4.147 DXFs in his CAD program: Plan street names and Perspective 3D heights look good. He tabled the pier teeth (A/B/C) and the X/Y default start (both unchanged).
