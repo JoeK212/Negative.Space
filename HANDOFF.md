@@ -1,4 +1,19 @@
-# Negative Space -- handoff for a new chat (v3.4.145, 2026-10-03)
+# Negative Space -- handoff for a new chat (v3.4.147, 2026-10-03)
+
+## v3.4.147 -- READ FIRST
+- DXF export fixes from Joe's testing: Plan/Perspective now include STREET_NAMES TEXT; Perspective also exports 3D masses with real Z (BUILDINGS_3D and/or NEGATIVE_SPACE_3D as 3DFACE, quad-merged; 13 MB buildings / 30 MB both in Midtown; whole solids, cutaway NOT applied). Plan stays 2D. A call-stack overflow in the DXF assembler (found by the headless tests) is fixed. See CHANGELOG.md v3.4.147.
+- Joe still needs to open the DXFs in his CAD program and say: names readable/placed OK? heights right? wants cutaway applied / height text / a lighter option?
+- Tests: audit_deploy.js 407/407; autotest 58/58 (--no-terrain) + 21/21 (--terrain-only) on 3.4.147. Claude can run them in its sandbox (see v3.4.146 note below); the sandbox tool limit is 5 min per command, so run the two halves separately.
+
+# (v3.4.146 notes below)
+
+## v3.4.146 -- READ FIRST
+- NEW autotest/ folder (headless Chromium suite, 60 checks) + the app unchanged from 3.4.145. Run: `cd autotest && npm install && npm test` (add `npm run test:smoke` for smoke_test.js). Claude CAN run it in its own sandbox (bundled @sparticuz/chromium + software WebGL, unpkg mapped to local npm copies, elevation tiles faked): after any change run audit_deploy.js AND this suite. See autotest/README.md and CHANGELOG.md v3.4.146.
+- Result on v3.4.145: 60/60, smoke 324/0, no app defects found in 137-145. Not covered: flicker while zooming, visual judgement, other browsers, real GPU, live elevation service.
+- Joe still needs to: eyeball 137-146 live (see VERIFY_v3.4.145.md; the automated suite now covers much of it), try the Windows route (CHROME_PATH) if he wants to run the suite himself, deploy (Netlify was on 135), and answer the open decisions (pier teeth A/B/C, X/Y default start, two tiny specks).
+- Ideas not done: vendor three/manifold locally (unpkg is a single point of failure), Safari/Firefox pass, in-app help text for X/Y values / Export image / Export DXF, exact cut linework + street edges in the DXF.
+
+# (v3.4.145 notes below)
 
 ## v3.4.145 -- READ FIRST (not yet confirmed on Joe's reload)
 - NEW Export DXF (CAD) in the Export accordion: elevation -> SKYLINE/POCHE/GROUND/EARTH polylines (x mirrored to screen-right, y = height); Plan/Perspective -> BUILDINGS/STREETS/SECTION_BOX. R12 ASCII, meters 1:1. Writer verified with ezdxf; app wiring never run in a browser: Joe must test (Plan, elevation flat + Terrain on; open in a CAD tool; check orientation/scale). Skyline is the bbox ENVELOPE, not exact cross-section; street widths/names not exported. Possible next: exact cut linework, offset street edges, model-scale option, SVG. See CHANGELOG.md v3.4.145.

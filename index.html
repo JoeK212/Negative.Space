@@ -867,7 +867,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan or Perspective it exports the plan: BUILDINGS (footprints), STREETS (centrelines) and SECTION_BOX (if drawn). Street widths and names are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing; the whole solids, the cutaway is not applied; large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -952,7 +952,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.145'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.147'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4505,9 +4505,19 @@ function dxfNew(){
     for (const [x, y] of pts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n0.0');
     ents.push('0\nSEQEND\n8\n' + layer);
   };
+  const f2 = v => (+v).toFixed(2);
+  // v3.4.147: TEXT (centre-aligned, rotated along the street) and 3DFACE (triangle or quad) for 3D masses
+  const label = (layer, x, y, z, h, str, rot) => {  // (named label, not text: the returned object's text() assembles the whole file)
+    const t = String(str).replace(/[\r\n]+/g, ' ');
+    ents.push('0\nTEXT\n8\n' + layer + '\n10\n' + f2(x) + '\n20\n' + f2(y) + '\n30\n' + f2(z) + '\n40\n' + f2(h) + '\n1\n' + t + '\n50\n' + (+rot).toFixed(1) + '\n72\n1\n11\n' + f2(x) + '\n21\n' + f2(y) + '\n31\n' + f2(z));
+  };
+  const face = (layer, a, b, c, d) => {
+    const q = d || c;
+    ents.push('0\n3DFACE\n8\n' + layer + '\n10\n' + f2(a[0]) + '\n20\n' + f2(a[1]) + '\n30\n' + f2(a[2]) + '\n11\n' + f2(b[0]) + '\n21\n' + f2(b[1]) + '\n31\n' + f2(b[2]) + '\n12\n' + f2(c[0]) + '\n22\n' + f2(c[1]) + '\n32\n' + f2(c[2]) + '\n13\n' + f2(q[0]) + '\n23\n' + f2(q[1]) + '\n33\n' + f2(q[2]));
+  };
   return {
     layer(name, color){ layers.set(name, color); },
-    poly,
+    poly, label, face,
     count(){ return ents.length; },
     text(){
       const L = [];
@@ -4518,7 +4528,7 @@ function dxfNew(){
       for (const [name, color] of layers) L.push('0\nLAYER\n2\n' + name + '\n70\n0\n62\n' + color + '\n6\nCONTINUOUS');
       L.push('0\nENDTAB\n0\nENDSEC');
       L.push('0\nSECTION\n2\nENTITIES');
-      L.push(...ents);
+      for (const e of ents) L.push(e); // a loop, not a spread: spreading >~120k entries into push() overflows the call stack (found by the headless tests with Buildings + Negative space both showing)
       L.push('0\nENDSEC\n0\nEOF');
       return L.join('\n') + '\n';
     },
@@ -4578,10 +4588,70 @@ function exportDxfElevation(){
   dxfDownload(dxf, dxfBaseName() + '.dxf');
   toast('Saved DXF section (meters, 1:1)');
 }
-async function exportDxfPlan(){
+// 3D masses: every triangle of a mesh as 3DFACE, with coplanar neighbouring triangle pairs that form a convex quad merged into one 4-sided face
+// (extruded walls are two triangles each, so this about halves the wall faces). Positions are the mesh's own world coordinates, so Z carries the real
+// heights (and the terrain base when Terrain is on). Non-indexed geometry, identity transforms (checked against the live scene).
+function dxfMeshFaces(dxf, layer, mesh){
+  const pos = mesh.geometry.attributes.position, idx = mesh.geometry.index;
+  const triCount = idx ? idx.count / 3 : pos.count / 3;
+  const P = k => { const i = idx ? idx.getX(k) : k; return [pos.getX(i), pos.getY(i), pos.getZ(i)]; };
+  const nrm = (a, b, c) => { const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2], vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2]; const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx, l = Math.hypot(nx, ny, nz) || 1; return [nx/l, ny/l, nz/l]; };
+  const same = (a, b) => Math.abs(a[0]-b[0]) < 1e-4 && Math.abs(a[1]-b[1]) < 1e-4 && Math.abs(a[2]-b[2]) < 1e-4;
+  let faces = 0;
+  for (let t = 0; t < triCount; t++){
+    const p = [P(3*t), P(3*t+1), P(3*t+2)];
+    if (t + 1 < triCount){
+      const q = [P(3*t+3), P(3*t+4), P(3*t+5)];
+      const n1 = nrm(p[0], p[1], p[2]), n2 = nrm(q[0], q[1], q[2]);
+      if (Math.abs(n1[0]-n2[0]) < 1e-4 && Math.abs(n1[1]-n2[1]) < 1e-4 && Math.abs(n1[2]-n2[2]) < 1e-4){
+        let ei = -1, D = null;
+        for (let i = 0; i < 3 && ei < 0; i++){
+          const a = p[i], b = p[(i + 1) % 3];
+          const ia = q.findIndex(v => same(v, a)), ib = q.findIndex(v => same(v, b));
+          if (ia >= 0 && ib >= 0){ ei = i; D = q.find((v, k) => k !== ia && k !== ib); }
+        }
+        if (ei >= 0 && D){
+          const quad = [p[ei], D, p[(ei + 1) % 3], p[(ei + 2) % 3]];
+          let sg = 0, ok = true; // convex: all corner cross products point the same way along the face normal
+          for (let i = 0; i < 4 && ok; i++){
+            const a = quad[i], b = quad[(i + 1) % 4], c = quad[(i + 2) % 4];
+            const cr = nrm(a, b, c).reduce((acc, v, k) => acc + v * n1[k], 0);
+            if (Math.abs(cr) < 1e-6) { ok = false; break; }
+            const sgn = cr > 0 ? 1 : -1; if (sg === 0) sg = sgn; else if (sg !== sgn) ok = false;
+          }
+          if (ok){ dxf.face(layer, quad[0], quad[1], quad[2], quad[3]); faces++; t++; continue; }
+        }
+      }
+    }
+    dxf.face(layer, p[0], p[1], p[2]); faces++;
+  }
+  return faces;
+}
+// Street-name TEXT: same placement as the on-screen labels (one per name, at the midpoint of that name's longest part), rotated along the street.
+function dxfStreetNames(dxf, raw, textH){
+  const byName = new Map();
+  for (const row of raw) for (const part of row.p){
+    if (part.length < 2) continue;
+    let len = 0;
+    for (let i = 0; i < part.length - 1; i++){ const [x1, y1] = project(part[i][0], part[i][1]), [x2, y2] = project(part[i+1][0], part[i+1][1]); len += Math.hypot(x2 - x1, y2 - y1); }
+    const ex = byName.get(row.n); if (!ex || len > ex.len) byName.set(row.n, { part, len });
+  }
+  let n = 0;
+  for (const [name, { part }] of byName){
+    const i = Math.floor((part.length - 1) / 2);
+    const [x, y] = project(part[i][0], part[i][1]);
+    const [x2, y2] = project(part[Math.min(i + 1, part.length - 1)][0], part[Math.min(i + 1, part.length - 1)][1]);
+    const [x0, y0] = project(part[Math.max(i - 1, 0)][0], part[Math.max(i - 1, 0)][1]);
+    let ang = Math.atan2((x2 === x && y2 === y) ? y - y0 : y2 - y, (x2 === x && y2 === y) ? x - x0 : x2 - x) * 180 / Math.PI;
+    if (ang > 90) ang -= 180; else if (ang < -90) ang += 180; // keep the text readable (never upside down)
+    dxf.label('STREET_NAMES', x, y, terrainData ? terrainZ(x, y) : 0, textH, name, ang); n++;
+  }
+  return n;
+}
+async function exportDxfPlan(mode3d){
   if (!buildingsGeo){ toast('No buildings loaded yet'); return; }
   const dxf = dxfNew();
-  dxf.layer('BUILDINGS', 7); dxf.layer('STREETS', 5); dxf.layer('SECTION_BOX', 1);
+  dxf.layer('BUILDINGS', 7); dxf.layer('STREETS', 5); dxf.layer('STREET_NAMES', 3); dxf.layer('SECTION_BOX', 1);
   let nb = 0;
   for (const f of buildingsGeo.features){
     const g = f.geometry;
@@ -4592,23 +4662,30 @@ async function exportDxfPlan(){
       dxf.poly('BUILDINGS', pts, true); nb++;
     }
   }
-  let ns = 0;
+  let ns = 0, nt = 0;
   try {
     const res = await fetch(`data/${currentNeighborhoodId}/streets.json`);
     if (res.ok){
       const raw = await res.json();
       for (const row of raw) for (const part of row.p){ if (part.length < 2) continue; dxf.poly('STREETS', part.map(([lon, lat]) => project(lon, lat)), false); ns++; }
+      nt = dxfStreetNames(dxf, raw, 6); // 6 m letters at 1:1
     }
   } catch (e){ console.warn('DXF: streets not included', e); }
   if (activeSectionBox){
     const b = activeSectionBox;
     dxf.poly('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
   }
-  dxfDownload(dxf, dxfBaseName() + '-plan.dxf');
-  toast(`Saved DXF plan: ${nb} footprint outlines, ${ns} street lines (meters, 1:1)`);
+  let nf = 0, nn = 0;
+  if (mode3d){
+    // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
+    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh) nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o); }); }
+    if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh) nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o); }); }
+  }
+  dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
+  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` : '') + ' (meters, 1:1)');
 }
 document.getElementById('exportDxfBtn').addEventListener('click', () => {
-  try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(); }
+  try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(!isPlanViewActive); }
   catch (e){ console.error('exportDxf failed', e); toast('DXF export failed'); }
 });
 document.getElementById('copyLinkBtn').addEventListener('click', async () => {

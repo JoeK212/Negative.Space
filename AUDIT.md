@@ -1872,3 +1872,9 @@ Joe reported GCT missing; it was dropped by the v3.4.134 rule (411 m of Park Ave
 
 ### v3.4.145 (2026-10-03)
 - Export DXF: dxfNew() R12 writer verified with ezdxf; exportDxfElevation()/exportDxfPlan() not browser-tested. Envelope (bbox) skyline, not exact cross-section.
+
+### v3.4.146 (2026-10-03)
+- autotest/ (headless suite) added; 60/60 on v3.4.145 and smoke 324/0 in headless Chromium. No app logic change. First run's 3 failures were test thresholds (light-pixel colour, sloped skyline segments), not app defects.
+
+### v3.4.147 (2026-10-03)
+- DXF: label() TEXT street names (Plan + Perspective), 3DFACE masses in Perspective via dxfMeshFaces (quad-merged), Plan stays 2D. Fixed a call-stack overflow in the file assembler (push(...ents)) found by the headless tests. ezdxf strict read OK; autotest 58/58 (no terrain) + 21/21 (terrain). Not verified in Joe's CAD tool.
