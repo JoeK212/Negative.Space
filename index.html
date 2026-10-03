@@ -849,6 +849,26 @@
           <span class="info-badge" tabindex="0">?<span class="tip">Exports whichever layer is currently showing (Buildings or Negative space) as a binary STL, converted from real-world meters to millimeters at this scale — 1:500 is a standard architectural-model size. Negative space must be computed first.</span></span>
         </div>
         <button class="btn secondary" id="exportStlBtn">Export STL</button>
+        <!-- v3.4.144: Joe -- "we need a export image option in Export." Saves the current 3D view (whatever the canvas shows: Plan, Perspective, N/S/E/W, box section, layers, terrain) as a PNG at 1x/2x/4x the on-screen resolution. -->
+        <div style="display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap;">
+          <span style="font-family:var(--font-ui); font-size:13px; color:var(--ink-soft); white-space:nowrap;">Image size</span>
+          <select id="exportImageScale" style="font-family:var(--font-ui); font-size:13px; padding:5px 8px; border-radius:6px; border:1.5px solid var(--ink); background:var(--card); color:var(--ink);">
+            <option value="1">1× (screen)</option>
+            <option value="2" selected>2×</option>
+            <option value="4">4×</option>
+          </select>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px;">
+            <input type="checkbox" id="exportImageWhite">
+            White background
+          </label>
+          <span class="info-badge" tabindex="0">?<span class="tip">Saves what the 3D view is showing right now (Plan, Perspective, or a North/South/East/West elevation, with the layers, cutaway and terrain as set) as a PNG. The model panels, compass and View cube are not included. 2× and 4× render the same view at higher resolution, up to the largest size your graphics card allows. White background suits printing; the default keeps the current dark or light background.</span></span>
+        </div>
+        <button class="btn secondary" id="exportImageBtn" style="margin-top:2px;">Export image (PNG)</button>
+        <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
+        <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+          <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan or Perspective it exports the plan: BUILDINGS (footprints), STREETS (centrelines) and SECTION_BOX (if drawn). Street widths and names are not included.</span></span>
+        </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
         district/cutaway/layer state changes (syncUrlFromState()); this is
@@ -927,9 +947,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'; // v3.4.82: buildings' own poché needs one continuous geometry to run the existing stencil-cap technique against -- solidGroup is thousands of separate per-building meshes, this merges them into one, once per district load
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'; // v3.4.139: fixed-screen-width lines (1-px hairlines shimmer at High detail's 3x pixel ratio)
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.135'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.145'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -1353,6 +1376,22 @@ function buildCutLineMeshes(geometry){
 // see buildAxisHeightProfile() above) -- so no new geometry computation was
 // needed, only a new way to draw the same data as a stepped line instead of
 // sampling it in a shader.
+// v3.4.139: Joe -- with High detail on, the cut edges flicker while zooming. Confirmed live (hiding every Line removed the flicker): the 1-device-pixel red skyline / ground lines become a third of a CSS pixel at the 3x pixel ratio and drop out or shimmer. Fix: each hairline LineSegments keeps its role as the data carrier (smoke_test reads its geometry and colour) but its own material is switched off, and a LineSegments2 child draws the same segments at a fixed 1.5 CSS px. Resolution is the CSS size, so the width is the same at any pixel ratio.
+const _thickSize = new THREE.Vector2();
+function addThickOverlay(parent, color, cssPx){
+  const g = new LineSegmentsGeometry();
+  g.setPositions(parent.geometry.attributes.position.array);
+  const m = new LineMaterial({ color, linewidth: cssPx, depthTest: false, worldUnits: false });
+  const t = new LineSegments2(g, m);
+  t.renderOrder = parent.renderOrder; t.frustumCulled = false;
+  t.onBeforeRender = (r) => { r.getSize(_thickSize); m.resolution.set(_thickSize.x, _thickSize.y); };
+  parent.material.visible = false;
+  parent.add(t);
+  return parent;
+}
+function disposeThickOverlay(parent){
+  for (const c of parent.children){ disposeThickOverlay(c); if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); }
+}
 let skylineProfileLine = null;
 function buildSkylineProfileLine(profileArr, lo, hi, axisIsX, planeCoord){
   const bins = profileArr.length;
@@ -1373,14 +1412,14 @@ function buildSkylineProfileLine(profileArr, lo, hi, axisIsX, planeCoord){
   const mat = new THREE.LineBasicMaterial({ color: 0xFF0000, depthTest: false }); // same look as the existing cut-lines
   const mesh = new THREE.LineSegments(geo, mat);
   mesh.renderOrder = 12;
-  return mesh;
+  return addThickOverlay(mesh, 0xFF0000, 1.5);
 }
 // Rebuilds (or hides) the skyline silhouette for whichever axis is
 // currently active, and hides the old per-building loops in section mode
 // -- called from applySectionMode() below, same place that already knows
 // which axis is active and what the current cut-plane position is.
 function updateSkylineProfileLine(axis){
-  if (skylineProfileLine){ scene.remove(skylineProfileLine); skylineProfileLine.geometry.dispose(); skylineProfileLine.material.dispose(); skylineProfileLine = null; }
+  if (skylineProfileLine){ scene.remove(skylineProfileLine); disposeThickOverlay(skylineProfileLine); skylineProfileLine.geometry.dispose(); skylineProfileLine.material.dispose(); skylineProfileLine = null; }
   if (axis === 'x' && negHeightProfileY){
     const { plotLo, plotHi } = getSectionRanges('x'); // v3.4.0: matches whatever range the profile array itself was just built over (full site or an active box crop) -- see getSectionRanges()
     skylineProfileLine = buildSkylineProfileLine(negHeightProfileY, plotLo, plotHi, false, xThreshold);
@@ -1747,19 +1786,23 @@ function buildSectionProfile(axis, lo, hi, capHeight, slabLo, slabHi, bins = 204
   // v3.4.133: with terrain on, the open gaps (streets) sit at the GROUND height of the cut, not at 0. Ground per bin = the highest terrain
   // seen across the slab (a few samples through its depth), so the skyline line and the roof/building discard tests follow the terrain.
   if (terrainData){
-    const slabN = Math.max(1, Math.min(6, Math.ceil((slabHi - slabLo) / 40)));
     for (let i = 0; i < bins; i++){
-      const v = lo + (i + 0.5) * binW;
-      let g = 0;
-      for (let s = 0; s <= slabN; s++){
-        const c = slabLo + (slabHi - slabLo) * (s / slabN);
-        const t = axis === 'x' ? terrainZ(v, c) : terrainZ(c, v);
-        if (t > g) g = t;
-      }
+      const g = terrainGroundAcrossSlab(axis, lo + (i + 0.5) * binW, slabLo, slabHi);
       if (g > arr[i]) arr[i] = g;
     }
   }
   return arr;
+}
+// v3.4.143: the one ground-height function for a section: highest terrain across the slab (a few samples through its depth) at plotted coordinate v. `axis` = the PLOTTED axis ('x' for N/S views, 'y' for E/W views), as in buildSectionProfile. Shared by the skyline profile (open gaps) and the earth strip + ground line, so they always meet. With a drawn box the slab is the box's full depth on the cut axis (v3.4.116), so this is the terrain silhouette seen beyond the cut, like a real elevation.
+function terrainGroundAcrossSlab(axis, v, slabLo, slabHi){
+  const slabN = Math.max(1, Math.min(6, Math.ceil((slabHi - slabLo) / 40)));
+  let g = 0;
+  for (let s = 0; s <= slabN; s++){
+    const c = slabLo + (slabHi - slabLo) * (s / slabN);
+    const t = axis === 'x' ? terrainZ(v, c) : terrainZ(c, v);
+    if (t > g) g = t;
+  }
+  return g;
 }
 // Rebuilds the skyline line + sky-discard texture for whichever axis is
 // currently active, using the REAL current cut position -- called once when
@@ -1783,6 +1826,64 @@ function makeHeightTexture(arr){
   tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
   return tex;
+}
+/* v3.4.136 -- earth under the ground line in a section. Joe's open item: with terrain on, an elevation showed the ground only as the red skyline
+   line. updateEarthSection() builds a thin vertical strip on the cut plane (the terrain height AT the cut, from the plot range's low end to its high end,
+   filled down to the datum z=0) in an earth tone, shown only in a locked elevation. It is its own mesh with its own material -- it does not touch the
+   skyline LineSegments or the poche materials (adding a ground segment to the skyline made the poche pale in v3.4.127). Opaque, drawn first, pushed back
+   by polygonOffset, so every cap/outline sits over it. */
+let earthSectionMesh = null;
+const EARTH_SECTION_COLOR = 0x6b5b3e;
+function disposeEarthSection(){
+  if (!earthSectionMesh) return;
+  scene.remove(earthSectionMesh); disposeThickOverlay(earthSectionMesh); earthSectionMesh.geometry.dispose(); earthSectionMesh.material.dispose(); earthSectionMesh = null;
+}
+function updateEarthSection(){
+  disposeEarthSection();
+  if (sectionModeAxis === null) return;
+  const { plotLo, plotHi, slabLo, slabHi } = getSectionRanges(sectionModeAxis);
+  if (!(plotHi > plotLo)) return;
+  const c = sectionModeAxis === 'x' ? xThreshold : yThreshold;
+  if (!terrainData){ // v3.4.137: flat site -- one continuous ground line at grade (z=0) across the full plot width. Own mesh (not part of the skyline line or poche), unlit, so it cannot change the poche colour (cf. v3.4.127).
+    const a = sectionModeAxis === 'x' ? new THREE.Vector3(c, plotLo, 0) : new THREE.Vector3(plotLo, c, 0);
+    const b = sectionModeAxis === 'x' ? new THREE.Vector3(c, plotHi, 0) : new THREE.Vector3(plotHi, c, 0);
+    const lg = new THREE.BufferGeometry().setFromPoints([a, b]);
+    earthSectionMesh = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xe8e0d0, depthTest: false }));
+    earthSectionMesh.renderOrder = 11;
+    earthSectionMesh.frustumCulled = false;
+    addThickOverlay(earthSectionMesh, 0xe8e0d0, 1.5); // v3.4.139
+    earthSectionMesh.visible = inLockedElevation();
+    scene.add(earthSectionMesh);
+    return;
+  }
+  const n = Math.max(2, Math.min(800, Math.ceil((plotHi - plotLo) / 6)));
+  const pos = new Float32Array((n + 1) * 2 * 3), idx = new Uint32Array(n * 6);
+  for (let i = 0; i <= n; i++){
+    const u = plotLo + (plotHi - plotLo) * i / n;
+    const x = sectionModeAxis === 'x' ? c : u, y = sectionModeAxis === 'x' ? u : c;
+    const t = 2 * i * 3;
+    pos[t] = x; pos[t + 1] = y; pos[t + 2] = terrainGroundAcrossSlab(sectionModeAxis === 'x' ? 'y' : 'x', u, slabLo, slabHi); // v3.4.143: same ground as the skyline profile (was the terrain at the cut plane only, which left a gap under the red base when the slab is deep)
+    pos[t + 3] = x; pos[t + 4] = y; pos[t + 5] = 0;
+  }
+  for (let i = 0; i < n; i++){ const a = 2 * i, b = a + 1, d = a + 2, e = a + 3; idx.set([a, b, e, a, e, d], i * 6); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  const mat = new THREE.MeshBasicMaterial({ color: EARTH_SECTION_COLOR, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 });
+  earthSectionMesh = new THREE.Mesh(geo, mat);
+  earthSectionMesh.renderOrder = -10;
+  earthSectionMesh.frustumCulled = false;
+  // v3.4.143: the terrain ground LINE (same light line as the flat site's) along the strip's top edge -- Joe: terrain elevations looked off: the buildings' blue read as floating above a detached tan strip, because only flat sites had a ground line. Hairline carrier + fixed-width overlay (v3.4.139), own child of the strip.
+  const tl = [];
+  for (let i = 0; i < n; i++){ const t = 2 * i * 3, u2 = t + 6; tl.push(pos[t], pos[t + 1], pos[t + 2], pos[u2], pos[u2 + 1], pos[u2 + 2]); }
+  const tgeo = new THREE.BufferGeometry();
+  tgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tl), 3));
+  const topLine = new THREE.LineSegments(tgeo, new THREE.LineBasicMaterial({ color: 0xe8e0d0, depthTest: false }));
+  topLine.renderOrder = 11; topLine.frustumCulled = false;
+  addThickOverlay(topLine, 0xe8e0d0, 1.5);
+  earthSectionMesh.add(topLine);
+  earthSectionMesh.visible = inLockedElevation();
+  scene.add(earthSectionMesh);
 }
 function terrainGroundClipPlanes(axis){ // v3.4.133
   const planes = (activeSectionBox && axis !== null) ? getPlanBoxClipPlanes().slice(1) : [];
@@ -1827,6 +1928,7 @@ function refreshActiveSectionProfile(){
     if (activeQuadMat.userData.skyUniforms) activeQuadMat.userData.skyUniforms.uSkyHeightTex.value = tex;
   }
   updateSkylineProfileLine(sectionModeAxis);
+  updateEarthSection(); // v3.4.136: earth under the ground line
   // v3.4.15: real bug, found live on Joe's own reload -- `applySectionMode()`
   // already calls `syncSectionSkyUniforms(axis)` once when the axis first
   // changes, but THIS function is also called on every subsequent threshold
@@ -2951,12 +3053,29 @@ function onResize(){
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+// v3.4.142: Joe -- at X 0 / Y 0 / Height 0 (far corner of all three sliders) only a hairline sliver of the negative-space solid is left, and its void walls read as stray dark blocks along the cut ("hide it"). Confirmed live: negativeMesh.visible=false removed them. Rule: in Perspective/Plan/octant views (no locked elevation, no drawn box), hide the negative-space solid's material while the KEPT slab is thinner than NEGATIVE_SLIVER_M on ALL three axes (the octant carve keeps a point if ANY axis keeps it, so a thick kept slab on one axis always shows). X/Y thickness is measured exactly as the displayed values (v3.4.141: from the slider's low end, or the high end when flipped); Height is the cut height. Elevations and box sections never hit this rule.
+const NEGATIVE_SLIVER_M = 5;
+let _sliverXEl = null, _sliverYEl = null, _sliverHidden = false;
+function updateNegativeSliverHide(){
+  if (!negativeMesh){ _sliverHidden = false; return; }
+  let hide = false;
+  if (sectionModeAxis === null && !activeSectionBox){
+    if (!_sliverXEl){ _sliverXEl = document.getElementById('xClipSlider'); _sliverYEl = document.getElementById('yClipSlider'); }
+    const tx = flipXCutaway ? Number(_sliverXEl.max) - xThreshold : xThreshold - Number(_sliverXEl.min);
+    const ty = flipYCutaway ? Number(_sliverYEl.max) - yThreshold : yThreshold - Number(_sliverYEl.min);
+    hide = tx < NEGATIVE_SLIVER_M && ty < NEGATIVE_SLIVER_M && sectionPlane.constant < NEGATIVE_SLIVER_M;
+  }
+  // negativeMesh is a Group whose own .visible is also driven by the Negative-space toggle and the locked-elevation rules, so this only forces it OFF while the sliver rule holds and, on the frame the rule stops holding, hands it back to the toggle (showNegative) once.
+  if (hide){ negativeMesh.visible = false; _sliverHidden = true; }
+  else if (_sliverHidden){ _sliverHidden = false; const shouldShow = showNegative && !isPlanViewActive && sectionModeAxis === null; negativeMesh.visible = shouldShow; }
+}
 function animate(){
   requestAnimationFrame(animate);
   if (checkScreenGate()) return; // skip render work while gated, but keep the RAF loop alive
   controls.update(); // updates whichever camera is currently controls.object -- see setOrthogonalView()/recenterCamera()
   updateBoroughLabelScales(); // v3.2.37 -- keeps borough name labels from growing oversized as the perspective camera zooms in past their designed viewing distance
   updatePendingPlanBoxOverlay(); // v3.4.18 -- keeps the drawn-box outline anchored to its real world position while the direction picker is up; see the function's own comment
+  updateNegativeSliverHide(); // v3.4.142
   enforceSectionRenderState(); // v3.4.45 -- see its own comment; closes the whole class of "a deferred write landed on a uniforms object that got replaced" bugs this file has chased since v3.4.11
   renderer.render(scene, activeCamera);
   updateViewCube(); // v3.4.119
@@ -3305,6 +3424,7 @@ function buildTerrainGroundGeometry(){
   return geo;
 }
 function applyTerrainGround(){
+  if (!terrainData) updateEarthSection(); // v3.4.136/137: rebuild as the flat ground line
   if (!groundMesh) return;
   if (!groundPlaneGeo) groundPlaneGeo = groundMesh.geometry;
   if (terrainGroundGeo){ terrainGroundGeo.dispose(); terrainGroundGeo = null; }
@@ -3400,6 +3520,9 @@ const TRANSIT_STREET_DROP_M = 50;
 // real buildings are exempt (id = Overture building id). Add an id here to bring a dropped footprint back.
 const TRANSIT_KEEP_IDS = new Set([
   '76fa88dd-a26d-4716-9261-ffd8ba2a9a0c', // Grand Central Terminal (district-5, Midtown), 45.8 m
+  'f78c98b4-98a0-4150-a581-2d61d19da302', // v3.4.140: Port Authority Bus Terminal (district-4), 38.6 m -- a whole footprint
+  '66393436-3535-3332-B461-373236373361', // v3.4.140: Park Ave station-complex PART, 150 m (district-5; parent building 8f543471-12a0-4d32-a077-f23eb8da3bc3) -- part ids are matched too
+  '34623232-6235-3230-B835-363535346665', // v3.4.140: Park Ave station-complex PART, 65 m (district-5, same parent)
 ]);
 let droppedTransit = [];
 function isTransitFootprint(p){ return p && p.class !== 'bridge_structure' && (p.class === 'train_station' || p.subtype === 'transportation'); }
@@ -3444,6 +3567,7 @@ async function dropTransitOverStreets(neighborhoodId){
       // A station/transport COMPLEX that has parts is drawn from its parts (the whole footprint is never extruded), so judge each part on its
       // own: a part that sits on the street goes, the rest (platform buildings, towers over the station) stay.
       for (const p of parts){
+        if (TRANSIT_KEEP_IDS.has(p.properties.id)) continue; // v3.4.140: exempt individual parts
         const m = streetMetresUnder(p.geometry);
         if (m > TRANSIT_STREET_DROP_M){ dropParts.add(p); droppedTransit.push({ id: p.properties.id, of: id, kind: 'part', class: f.properties.class || null, height: p.properties.height ?? null, streetMetres: Math.round(m) }); }
       }
@@ -4323,6 +4447,170 @@ function exportSTL(){
     : `Exported ${triCount.toLocaleString()} triangles at 1:${scaleDenominator}`);
 }
 document.getElementById('exportStlBtn').addEventListener('click', exportSTL);
+// v3.4.144: Export image (PNG). Re-renders the CURRENT view at k x the on-screen pixel ratio (capped by the GPU's max render size), grabs the canvas in the same task as the render (the WebGL buffer is only valid until the browser composites), then puts the size back and repaints. Fixed-width overlays (skyline, ground line) keep their CSS-pixel width, so they scale with the image; the 1-device-pixel hairlines (cut-plane lines, poche outline) do not and read thinner at 2x/4x.
+function exportImage(){
+  if (!renderer || !activeCamera){ toast('Nothing to export yet'); return; }
+  const canvas = renderer.domElement;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h){ toast('The view is not visible'); return; }
+  const k = Math.max(1, Number(document.getElementById('exportImageScale').value) || 2);
+  const white = document.getElementById('exportImageWhite').checked;
+  const gl = renderer.getContext();
+  const maxDim = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096, 8192);
+  const basePR = renderer.getPixelRatio();
+  const pr = Math.min(basePR * k, maxDim / Math.max(w, h));
+  const outW = Math.round(w * pr), outH = Math.round(h * pr);
+  const prevBg = scene.background;
+  const nb = NEIGHBORHOODS.find(n => n.id === currentNeighborhoodId);
+  const viewLabel = (document.getElementById('currentViewLabel')?.textContent || 'view').trim();
+  const fname = `${(nb ? nb.name : 'negative-space').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${viewLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${outW}x${outH}.png`;
+  let started = false;
+  try {
+    if (white) scene.background = new THREE.Color(0xffffff);
+    renderer.setPixelRatio(pr);
+    renderer.setSize(w, h);
+    renderer.render(scene, activeCamera);
+    canvas.toBlob(blob => {
+      if (!blob){ toast('Image export failed'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 8000);
+      toast(`Saved ${outW} × ${outH} px image` + (pr < basePR * k - 0.01 ? ' (limited by graphics card)' : ''));
+    }, 'image/png');
+    started = true;
+  } catch (e){
+    console.error('exportImage failed', e);
+    toast('Image export failed');
+  } finally {
+    scene.background = prevBg;
+    renderer.setPixelRatio(basePR);
+    renderer.setSize(w, h);
+    renderer.render(scene, activeCamera);
+  }
+  if (!started) return;
+}
+document.getElementById('exportImageBtn').addEventListener('click', exportImage);
+/* ================= v3.4.145: Export DXF (CAD) =================
+   Joe: "would we be able to export this as vector information for a CAD program?" -- yes: an ASCII DXF (R12 / AC1009, the most widely readable
+   flavour: AutoCAD, Rhino, LibreCAD, Revit link, Illustrator via import) written by hand, no library. Only POLYLINE/VERTEX/SEQEND entities on named
+   layers; real-world meters at 1:1 in this district's local coordinates. A locked N/S/E/W elevation exports the section (2D: x = screen-right
+   position, y = height); Plan/Perspective exports the plan (footprints, street centrelines, section box). */
+function dxfNew(){
+  const layers = new Map(), ents = [];
+  const poly = (layer, pts, closed) => {
+    if (!pts || pts.length < 2) return;
+    ents.push('0\nPOLYLINE\n8\n' + layer + '\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n70\n' + (closed ? 1 : 0));
+    for (const [x, y] of pts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n0.0');
+    ents.push('0\nSEQEND\n8\n' + layer);
+  };
+  return {
+    layer(name, color){ layers.set(name, color); },
+    poly,
+    count(){ return ents.length; },
+    text(){
+      const L = [];
+      L.push('0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n6\n0\nENDSEC');
+      L.push('0\nSECTION\n2\nTABLES');
+      L.push('0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n0\nENDTAB');
+      L.push('0\nTABLE\n2\nLAYER\n70\n' + layers.size);
+      for (const [name, color] of layers) L.push('0\nLAYER\n2\n' + name + '\n70\n0\n62\n' + color + '\n6\nCONTINUOUS');
+      L.push('0\nENDTAB\n0\nENDSEC');
+      L.push('0\nSECTION\n2\nENTITIES');
+      L.push(...ents);
+      L.push('0\nENDSEC\n0\nEOF');
+      return L.join('\n') + '\n';
+    },
+  };
+}
+function dxfDownload(dxf, name){
+  const blob = new Blob([dxf.text()], { type: 'application/dxf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+function dxfBaseName(){
+  const nb = NEIGHBORHOODS.find(n => n.id === currentNeighborhoodId);
+  const view = (document.getElementById('currentViewLabel')?.textContent || 'view').trim();
+  const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug(nb ? nb.name : 'negative-space') + '-' + slug(view);
+}
+function exportDxfElevation(){
+  const axisMode = sectionModeAxis;
+  const arr = axisMode === 'x' ? negHeightProfileY : negHeightProfileX;
+  if (!arr || !arr.length){ toast('Compute negative space first'); return; }
+  const { plotLo, plotHi, slabLo, slabHi } = getSectionRanges(axisMode);
+  const bins = arr.length, binW = (plotHi - plotLo) / bins;
+  // screen-right direction of the current elevation camera along the plotted axis (E/W plot Y, N/S plot X); mirrors the coordinate so the DXF reads like the screen
+  const r = new THREE.Vector3().setFromMatrixColumn(activeCamera.matrixWorld, 0);
+  const sign = (axisMode === 'x' ? Math.sign(r.y) : Math.sign(r.x)) || 1;
+  const X = u => sign * u;
+  const dxf = dxfNew();
+  dxf.layer('SKYLINE', 1); dxf.layer('GROUND', 7); dxf.layer('POCHE', 1); dxf.layer('EARTH', 8);
+  // SKYLINE: stepped envelope, consecutive equal bins merged
+  const sky = [];
+  for (let i = 0; i < bins; i++){
+    const u0 = plotLo + i * binW, h = arr[i];
+    if (i === 0) sky.push([X(u0), h]);
+    else if (Math.abs(h - arr[i - 1]) > 0.005){ sky.push([X(u0), arr[i - 1]]); sky.push([X(u0), h]); }
+  }
+  sky.push([X(plotHi), arr[bins - 1]]);
+  dxf.poly('SKYLINE', sky, false);
+  // POCHE: the negative-space fill = region between the skyline and the local ceiling (only when the negative-space layer is the one showing)
+  const ceiling = localCeilingPlane.constant;
+  if (showNegative && ceiling > 0){
+    dxf.poly('POCHE', [...sky, [X(plotHi), ceiling], [X(plotLo), ceiling]], true);
+  }
+  // GROUND (+ EARTH with terrain): the same ground the skyline floor uses (terrainGroundAcrossSlab)
+  if (terrainData){
+    const n = Math.max(2, Math.min(800, Math.ceil((plotHi - plotLo) / 6)));
+    const plotAxis = axisMode === 'x' ? 'y' : 'x';
+    const g = [];
+    for (let i = 0; i <= n; i++){ const u = plotLo + (plotHi - plotLo) * i / n; g.push([X(u), terrainGroundAcrossSlab(plotAxis, u, slabLo, slabHi)]); }
+    dxf.poly('GROUND', g, false);
+    dxf.poly('EARTH', [...g, [X(plotHi), 0], [X(plotLo), 0]], true);
+  } else {
+    dxf.poly('GROUND', [[X(plotLo), 0], [X(plotHi), 0]], false);
+  }
+  dxfDownload(dxf, dxfBaseName() + '.dxf');
+  toast('Saved DXF section (meters, 1:1)');
+}
+async function exportDxfPlan(){
+  if (!buildingsGeo){ toast('No buildings loaded yet'); return; }
+  const dxf = dxfNew();
+  dxf.layer('BUILDINGS', 7); dxf.layer('STREETS', 5); dxf.layer('SECTION_BOX', 1);
+  let nb = 0;
+  for (const f of buildingsGeo.features){
+    const g = f.geometry;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    for (const rings of polys) for (const ring of rings){
+      const pts = ring.map(([lon, lat]) => project(lon, lat));
+      if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop(); // closed flag replaces the repeated last vertex
+      dxf.poly('BUILDINGS', pts, true); nb++;
+    }
+  }
+  let ns = 0;
+  try {
+    const res = await fetch(`data/${currentNeighborhoodId}/streets.json`);
+    if (res.ok){
+      const raw = await res.json();
+      for (const row of raw) for (const part of row.p){ if (part.length < 2) continue; dxf.poly('STREETS', part.map(([lon, lat]) => project(lon, lat)), false); ns++; }
+    }
+  } catch (e){ console.warn('DXF: streets not included', e); }
+  if (activeSectionBox){
+    const b = activeSectionBox;
+    dxf.poly('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
+  }
+  dxfDownload(dxf, dxfBaseName() + '-plan.dxf');
+  toast(`Saved DXF plan: ${nb} footprint outlines, ${ns} street lines (meters, 1:1)`);
+}
+document.getElementById('exportDxfBtn').addEventListener('click', () => {
+  try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(); }
+  catch (e){ console.error('exportDxf failed', e); toast('DXF export failed'); }
+});
 document.getElementById('copyLinkBtn').addEventListener('click', async () => {
   if (siteCapHeight === undefined) { toast('Compute negative space first'); return; }
   try {
@@ -6312,7 +6600,8 @@ function updateStreetLabelScale(){
     const vFOV = cam.fov * Math.PI / 180;
     visibleWidth = 2 * dist * Math.tan(vFOV / 2) * cam.aspect;
   }
-  const worldWidth = Math.max(10, visibleWidth * 0.045);
+  // v3.4.137: Joe -- label text looked smaller and smaller against the map when zoomed in (a constant screen fraction never grows while streets and buildings do). Now: 4.5% of the view when zoomed out (unchanged), a fixed ~120 m world size through mid zoom so labels grow with the map, capped at 3x the default screen size (13.5%) so a tight zoom (v3.4.79) never gives overlapping giant text.
+  const worldWidth = Math.max(10, Math.min(Math.max(visibleWidth * 0.045, 120), visibleWidth * 0.135));
   const worldHeight = worldWidth * (128 / 512); // same canvas aspect ratio makeStreetLabel's own scale.set uses
   for (const child of streetsGroup.children){
     if (!(child instanceof THREE.Sprite)) continue;
@@ -6365,7 +6654,9 @@ function inLockedElevation(){
 function updateContextLayerVisibility(){
   if (boroughsGroup) boroughsGroup.visible = showBoroughs && !inLockedElevation();
   // v3.4.129: the tan ground plate is what the Manhattan-context layer replaces (zoomToBoroughContext() hides it), so it must come back whenever the context layer is NOT showing -- in particular in a locked elevation with Manhattan context toggled on, where it used to stay hidden and left the section with no base at all (Joe: "street graphic cut off?"; a section needs grade under it).
-  if (groundMesh && boroughsGroup) groundMesh.visible = !boroughsGroup.visible || !!terrainData; // v3.4.133: the terrain surface stays when terrain is on
+  // v3.4.138: flat site in a locked elevation -- the tan plate drew a ~12 m band inside the buildings (Joe, Midtown W, confirmed: groundMesh.visible=false removed it). The ground line (v3.4.137) is the grade there. Plan/Home/perspective unchanged.
+  if (groundMesh && boroughsGroup) groundMesh.visible = inLockedElevation() ? false : (!boroughsGroup.visible || !!terrainData); // v3.4.138: flat plate hidden in a locked elevation; v3.4.143: so is the terrain surface (the earth strip + ground line are the ground there); v3.4.133: the terrain surface stays in the other views
+  if (earthSectionMesh) earthSectionMesh.visible = inLockedElevation(); // v3.4.136/137 (flat: ground line; terrain: earth strip)
 }
 function updateStreetLabelVisibility(){
   if (!streetsGroup) return;
@@ -6849,10 +7140,16 @@ const unitsImperialBtn = document.getElementById('unitsImperial');
 // type="number"> elements rather than text labels.
 function metersToDisplayNumber(meters){ return unitsImperial ? Math.round(meters * 3.28084) : Math.round(meters); }
 function displayNumberToMeters(display){ return unitsImperial ? display / 3.28084 : display; }
+// v3.4.141: Joe -- "I would expect X Y 0 to be all the way to the left." X/Y cutaway values are internal metres from the district's projection origin (centre), so 0 sat mid-slider. DISPLAY ONLY: the X/Y number inputs and the slider end labels now read distance from the slider's low end (X from the west edge, Y from the south edge), so 0 is at the left like Height. xThreshold/yThreshold, the slider values, the URL ?x=&y= and every section calculation stay in the original coordinates.
+const CUTAWAY_DISPLAY_SLIDER = { xClipValueInput: 'xClipSlider', yClipValueInput: 'yClipSlider' };
+function cutawayDisplayOffset(inputId){
+  const sid = CUTAWAY_DISPLAY_SLIDER[inputId];
+  return sid ? Number(document.getElementById(sid).min) || 0 : 0;
+}
 function updateValueInput(id, meters){
   const el = document.getElementById(id);
   if (document.activeElement === el) return; // don't overwrite what the user is actively typing
-  el.value = metersToDisplayNumber(meters);
+  el.value = metersToDisplayNumber(meters - cutawayDisplayOffset(id));
 }
 function refreshUnitLabels(){
   updateValueInput('sectionValueInput', sectionPlane.constant);
@@ -6874,8 +7171,9 @@ function refreshUnitLabels(){
   // copy of the site bounds in these labels' own state.
   const rangeLabel = (sliderId, minEl, maxEl) => {
     const slider = document.getElementById(sliderId);
-    document.getElementById(minEl).textContent = metersToDisplayNumber(Number(slider.min)) + unitText;
-    document.getElementById(maxEl).textContent = metersToDisplayNumber(Number(slider.max)) + unitText;
+    const off = (sliderId === 'xClipSlider' || sliderId === 'yClipSlider') ? Number(slider.min) : 0; // v3.4.141: X/Y read from the low end (0 at the left)
+    document.getElementById(minEl).textContent = metersToDisplayNumber(Number(slider.min) - off) + unitText;
+    document.getElementById(maxEl).textContent = metersToDisplayNumber(Number(slider.max) - off) + unitText;
   };
   rangeLabel('sectionSlider', 'sectionMinLabel', 'sectionMaxLabel');
   rangeLabel('xClipSlider', 'xClipMinLabel', 'xClipMaxLabel');
@@ -7186,7 +7484,7 @@ function wireValueInput(inputId, setter){
   const el = document.getElementById(inputId);
   el.addEventListener('change', () => {
     const n = Number(el.value);
-    if (Number.isFinite(n)) setter(displayNumberToMeters(n));
+    if (Number.isFinite(n)) setter(displayNumberToMeters(n) + cutawayDisplayOffset(inputId)); // v3.4.141: X/Y typed values are distance from the low end
   });
   el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); }); // blur triggers 'change' above
 }

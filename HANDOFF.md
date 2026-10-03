@@ -1,7 +1,74 @@
-# Negative Space -- handoff for a new chat (v3.4.135, 2026-10-02)
+# Negative Space -- handoff for a new chat (v3.4.145, 2026-10-03)
+
+## v3.4.145 -- READ FIRST (not yet confirmed on Joe's reload)
+- NEW Export DXF (CAD) in the Export accordion: elevation -> SKYLINE/POCHE/GROUND/EARTH polylines (x mirrored to screen-right, y = height); Plan/Perspective -> BUILDINGS/STREETS/SECTION_BOX. R12 ASCII, meters 1:1. Writer verified with ezdxf; app wiring never run in a browser: Joe must test (Plan, elevation flat + Terrain on; open in a CAD tool; check orientation/scale). Skyline is the bbox ENVELOPE, not exact cross-section; street widths/names not exported. Possible next: exact cut linework, offset street edges, model-scale option, SVG. See CHANGELOG.md v3.4.145.
+- Also in this package: v3.4.144 Export image (PNG) and the shared terrain ground function (E/W gap fix) -- both untested by Joe.
+- Pending: smoke on 140-145 (last run 139: 324/0); visual sign-off 137-145; deploy (Netlify was on 135); open questions: pier teeth on the Manhattan slab (A/B/C), X/Y default start, two tiny specks near the far corner.
+
+# (v3.4.144 notes below)
+
+## v3.4.144 -- READ FIRST (not yet confirmed on Joe's reload)
+- NEW Export image (PNG) in the Export accordion: size 1x/2x/4x, White background, button. Re-renders the current view at higher pixel ratio (GPU-capped), toBlob in the same task as the render, then restores. Never run in a browser by Claude: Joe must test (all three sizes, Plan/Perspective/an elevation, White background on/off, and that the on-screen view is unchanged afterwards). Hairline lines (cut planes, poche outline) read thinner at 2x/4x; skyline/ground lines scale. See CHANGELOG.md v3.4.144.
+- E/W gap under the red base with Terrain on (UWS, box W 81-82 St): fixed by one shared ground function (terrainGroundAcrossSlab) for the skyline floor and the earth strip + ground line. Needs Joe's check in UWS and Murray Hill.
+- Pending: Joe's smoke on 140-144 (last run 139: 324/0; load via the script-tag command, then `await runSmokeBothSides('name')`; click Terrain + Compute first to cover terrain); visual sign-off 137-144; deploy (Netlify was on 135); open questions: river pier teeth on the Manhattan slab (A/B/C), X/Y default start, two tiny specks near the far corner.
+
+# (v3.4.143 notes below)
+
+## v3.4.143 -- READ FIRST (not yet confirmed on Joe's reload)
+- Terrain on, locked E/W/N/S: new light ground line along the earth strip top; the terrain surface (and flat plate) is hidden in every locked elevation. Joe's Murray Hill screenshots (W overlap, E detached strip) and console readout drove it (strip z 0..9.4, red skyline 24.3..173: the red base is the lowest building roof, not a bug). See CHANGELOG.md v3.4.143. If W still shows tan above the red base, the surface was not the only cause: ask for the same readout in W.
+- Joe's console hides console.table output (Info level filtered); return strings instead of console.table when asking him for readouts.
+- Still pending: Joe's visual sign-off on 137-143; smoke last run on 139 (324/0); deploy (Netlify was on 135); open questions to Joe: river pier teeth on the Manhattan slab (options A/B/C, undecided), X/Y default start, two tiny specks near the far corner.
+
+# (v3.4.142 notes below)
+
+## v3.4.142 -- READ FIRST (not yet confirmed on Joe's reload)
+- Negative-space solid hidden when X, Y and Height are all within 5 m of their sliders' kept-slab minimum (the far corner), Perspective/Plan/octant views only. Cause of the dark blocks diagnosed live (negativeMesh). Rule is in updateNegativeSliverHide() (animate). See CHANGELOG.md v3.4.142.
+- Two tiny dark specks near the far corner remain (other source, unidentified). River pier teeth on the Manhattan context slab are a separate thing (options A/B/C offered; Joe wants no regression, undecided, nothing changed).
+- Joe asked about X/Y default start (centre, reads ~614/~2111): unchanged, no answer.
+- Smoke last run on 139 (324/0). Not run on 140-142. Joe runs it: load with `const s=document.createElement('script');s.src='/smoke_test.js?'+Date.now();s.onload=()=>console.log('loaded:',typeof runSmokeBothSides);document.head.appendChild(s)` then `await runSmokeBothSides('name')`. Deploy (GitHub/Netlify) is Joe's; Netlify was on 135.
+
+# (v3.4.141 notes below)
+
+## v3.4.141 -- READ FIRST (not yet confirmed on Joe's reload)
+- X/Y cutaway inputs and end labels now show distance from the slider's low end (0 at the left, like Height). Display only; internal coords, URL ?x=&y= and smoke unchanged. See CHANGELOG.md v3.4.141.
+- Open question to Joe: should the DEFAULT cutaway start at the left end (0, hides everything) instead of the centre (now reads ~614 / ~2111)? Left as centre.
+- Still awaiting Joe's visual sign-off on 137-141 and his smoke run on 140/141 (139 passed 324/0). Deploy is Joe's (Netlify was on 135).
+
+# (v3.4.140 notes below)
+
+## v3.4.140 -- READ FIRST (not yet confirmed on Joe's reload)
+- TRANSIT_KEEP_IDS now also holds Port Authority (f78c98b4-98a0-4150-a581-2d61d19da302) and the two Park Ave parts (66393436-..., 34623232-...); parts are exempted by their own id. Needs a visual check in Midtown / district-4. See CHANGELOG.md v3.4.140.
+- Smoke on v3.4.139, Joe's Midtown, Terrain off: 324 passed, 0 failed. Baseline was 327 (158 + 169); the 3-check gap is unexplained (ask Joe to expand the off/on result objects). Two setPointerCapture NotFoundError console errors came from the test's fake pointer events (OrbitControls), no check failed.
+- Flicker fix (139) and label growth (137) still need Joe's visual sign-off. Deploy (GitHub/Netlify) is Joe's; Netlify was on 135.
+
+# (v3.4.139 notes below)
+
+## v3.4.139 -- READ FIRST (not yet confirmed on Joe's reload)
+- High detail flicker on cut edges in elevations: skyline + flat ground line now drawn as LineSegments2 at 1.5 CSS px (child of the hairline, which stays as data carrier with its material off; smoke's skylineMaxZ still works). Cause confirmed by Joe's console test. See CHANGELOG.md v3.4.139.
+- Joe confirmed v3.4.138 live on Midtown W: tan band gone. 137 items (ground line, label growth) and 139 still need his visual sign-off. Smoke has NOT been run on 137-139; Joe runs it (`await runSmokeBothSides('name')`).
+- Not changed: Plan/3D cut-plane lines and poche outline are still hairlines.
+
+# (v3.4.138 notes below)
+
+## v3.4.138 -- READ FIRST (not yet confirmed on Joe's reload)
+- Tan ground plate hidden in locked elevations on a flat site (Terrain off). It drew a band inside the buildings in Midtown and Harlem W; console `__NS.groundMesh.visible=false` confirmed the cause. Plan/Home/Terrain-ON unchanged. Check with Manhattan context ON too (section base is now the ground line only). See CHANGELOG.md v3.4.138.
+- v3.4.137 items (ground line, label growth) are also still awaiting Joe's visual sign-off; smoke has not been run on 137/138.
+
+# (v3.4.137 notes below)
+
+## v3.4.137 -- READ FIRST (not yet confirmed on Joe's reload)
+- Flat-site ground line in N/S/E/W (Terrain off): own light line at z=0 across the full width. Terrain ON still uses the 136 earth strip.
+- Street labels: min(max(4.5% of view, 120 m), 13.5% of view). Joe asked after zoomed-in Plan looked tiny; if still small, raise the 120 / cap or fill the sprite. See CHANGELOG.md v3.4.137.
+- `audit_deploy.js` 398/398. Hosted Netlify build was v3.4.135 when last seen; GitHub deploy is Joe's. Claude cannot read the GitHub repo (404, likely private).
+- Still pending if Joe asks: add Port Authority (district-4 f78c98b4) and the two Park Ave parts (district-5 66393436, 34623232) to TRANSIT_KEEP_IDS.
+
+# (earlier handoff, v3.4.136)
 
 ## What this package is
 Full project zip, v3.4.132. `audit_deploy.js` 380/380. v3.4.131 (Home -> N/S/E/W context/streets fix) passed `runSmokeBothSides()` 327/327 on Joe's localhost (context OFF 158, ON 169, incl. Phase 10). v3.4.130 (before this fix) passed `runSmokeBothSides()` 295/295 and `runSoakTest({cycles:300})` 0 violations (no box, and with a drawn box + Manhattan context ON) on district-1, in Joe's own foreground tab. v3.4.131 itself has NOT been run through smoke/soak or confirmed on Joe's reload; its fix was checked live only by patching the same two lines into the served v3.4.130 HTML in memory.
+
+## v3.4.136 -- earth fill under the ground line (terrain sections)
+`updateEarthSection()` draws a thin earth-tone strip on the cut plane under the ground line in a locked elevation with terrain on. Own mesh, own material; poche untouched. See CHANGELOG.md v3.4.136.
 
 ## v3.4.135 -- Grand Central Terminal exempted
 `TRANSIT_KEEP_IDS` (index.html) lists Overture building ids the street rule never drops; it has Grand Central only. Joe may want Port Authority (district-4 f78c98b4) and the two Park Ave parts (district-5 66393436, 34623232) added. See CHANGELOG.md v3.4.135.
@@ -11,12 +78,12 @@ Midtown showed building masses where streets should be. Cause: Overture `train_s
 
 ## STATUS v3.4.133 (Terrain) -- read first
 New **Terrain** toggle (Display, off by default). Full details in CHANGELOG.md v3.4.133. Verified on Joe's localhost ONLY by patching the same edits into the served v3.4.132 page in memory (hidden Claude-in-Chrome tab): Terrain on for district-1 (TriBeCa/FiDi) and Inwood, compute with terrain (143k / 243k triangles), N/S/E/W with the terrain-following skyline, `runSmokeBothSides` on Inwood WITH terrain on: 153/153 (context OFF) + 169/169 (context ON). NOT yet confirmed on Joe's own reload, not yet run in a foreground tab, and no visual sign-off.
-Known gaps: no earth poche under the ground line in sections (the red line is the ground); ~16 m grid; terrain compute is slower than flat; stage timings are in window.__tt after each compute.
+Known gaps: ~16 m grid; terrain compute is slower than flat; stage timings are in window.__tt after each compute.
 Grid-rotation bug FIXED in 133 (GRID_COS/GRID_SIN now follow each district's angle; every district other than ~28.96deg is rotated slightly differently than in 132, streets now axis-aligned). Check a couple of districts visually.
 Test with terrain: click Terrain, (wait), Compute, then `await runSmokeBothSides('x')` -- smoke does not click the Terrain button itself.
 
-## Known pre-existing test finding (not caused by 133)
-Greenwich Village, context ON, smoke Phase 6 "gap box, stale threshold, compass nav*": `section is not empty (skyline maxZ > 0) -- maxZ=0` (4 distinct checks, 5 failures). Reproduced identically on the UNFIXED served v3.4.132 (A/B), so it predates the grid-rotation fix and terrain. Context OFF passes 158/158 there. Cause not investigated: most likely the "gap midpoint" box lands in a stretch with no buildings in that district (a legitimate empty section, a test-premise problem) -- but if the app should still show something in that case, it is a real "stranded user" bug. Other districts (district-1, Midtown, Upper East Side, Inwood, Chelsea) pass 158 + 169.
+## Resolved in 136: Greenwich Village context-ON smoke failures
+Were a test bug (stale pixel projection in smoke Phase 6 after the Draw-box click re-framed Plan). Fixed in smoke_test.js; Greenwich ON passes 175/175. See CHANGELOG.md v3.4.136.
 
 ## What to do first (Joe)
 1. Extract the zip, swap it into the folder served at http://localhost:8888/ , hard-refresh. Footer must read **v3.4.132**.

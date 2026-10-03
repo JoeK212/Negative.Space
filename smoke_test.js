@@ -295,13 +295,19 @@ async function runSmokeTest(label, opts = {}){
     console.log('  (no gap-midpoint box found near the center of this district -- Phase 6 skipped, not failed)');
   } else {
     await goPlan();
+    // v3.4.136: enter box-draw mode BEFORE reading the camera. Clicking #drawBoxBtn re-runs setOrthogonalView('plan'), which re-frames Plan
+    // (with Manhattan context ON it drops the zoom goPlan() just set), so pixel coordinates computed first were stale: in Greenwich Village the
+    // drag landed ~7x too far out, in empty space, and four "section is not empty" checks failed. Phase 5/7 already did it in this order. (Test bug,
+    // not an app bug -- it also failed identically on v3.4.132.)
+    await setMode('viewNegative');
+    if (!NS.boxDrawMode) click('drawBoxBtn'); await wait(100);
     const cam2 = NS.activeCamera; cam2.updateMatrixWorld();
     const toPx2 = (x, y) => { const v = new THREE.Vector3(x, y, 0).project(cam2); return [rect.left + (v.x + 1) / 2 * rect.width, rect.top + (1 - v.y) / 2 * rect.height]; };
     const [gx0, gy0] = toPx2(gap.cx - 90, gap.cy + 90), [gx1, gy1] = toPx2(gap.cx + 90, gap.cy - 90);
-    await setMode('viewNegative');
-    if (!NS.boxDrawMode) click('drawBoxBtn'); await wait(100);
     drag(gx0, gy0, gx1, gy1, 0); await wait(200);
     check('gap-midpoint box drawn', !!NS.pendingPlanBox);
+    // v3.4.136: the drawn box must be where we aimed (guards against a stale projection like the one above)
+    if (NS.pendingPlanBox){ const pb = NS.pendingPlanBox; check('gap-midpoint box landed on the gap (centre within 40 m)', Math.hypot((pb.xMin + pb.xMax) / 2 - gap.cx, (pb.yMin + pb.yMax) / 2 - gap.cy) < 40, 'centre ' + Math.round((pb.xMin + pb.xMax) / 2) + ',' + Math.round((pb.yMin + pb.yMax) / 2) + ' vs ' + Math.round(gap.cx) + ',' + Math.round(gap.cy)); }
     if (NS.pendingPlanBox){
       click('boxViewW'); await wait(400);
       // A fresh session starts every threshold at 0, which is OUTSIDE almost

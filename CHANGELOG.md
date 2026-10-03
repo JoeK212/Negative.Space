@@ -1,3 +1,93 @@
+v3.4.145 - 2026-10-03 - Export DXF (CAD).
+
+Joe: "would we be able to export this as vector information for a CAD program?" -> yes, DXF. New "Export DXF (CAD)" button in the Export accordion (with a ? tooltip). ASCII DXF R12 (AC1009; most widely readable: AutoCAD, Rhino, LibreCAD, Revit link), written by hand with POLYLINE/VERTEX/SEQEND entities, LTYPE + LAYER tables, $INSUNITS = meters. Real-world meters at 1:1 in the district's local coordinates (north = +Y in Plan). The button follows the current view:
+- Locked N/S/E/W elevation -> section, 2D (x = screen-right position, mirrored from the camera so it reads like the screen; y = height). Layers SKYLINE (the red envelope profile, equal bins merged; built from building bounding boxes, so rotated blocks read at their bounding width), POCHE (closed: skyline to the local ceiling, only when the negative-space layer is showing), GROUND (flat z=0 line, or with Terrain the same terrainGroundAcrossSlab ground the skyline floor uses), EARTH (Terrain only, closed strip down to z=0). Needs negative space computed.
+- Plan / Perspective -> plan. Layers BUILDINGS (every footprint ring incl. holes, closed), STREETS (centrelines from data/<district>/streets.json), SECTION_BOX (rectangle, if a box is drawn). Street widths and names are not exported; exact cross-section cut linework (instead of the envelope) and offset street edges are possible later additions.
+Verified here: the DXF writer's output was read back with ezdxf (strict read OK, 0 errors/fixes, layers, open/closed flags and vertices correct). The app side (button wiring, real profile/terrain/streets data) is NOT run in a browser; Joe must test.
+Not yet confirmed on Joe's reload. Needs: export a DXF from Plan, from an elevation (flat + Terrain on), open in CAD / LibreCAD / Rhino: layers present, scale in meters, elevation not mirrored, plan north-up, footprints/streets line up.
+
+`audit_deploy.js`: 1 new check (405/405), version 3.4.145. Includes 3.4.144 (Export image PNG, shared ground function). Smoke not run on 140-145.
+
+v3.4.144 - 2026-10-03 - Export image (PNG); terrain ground in elevations uses the same ground as the skyline.
+
+1) Export image. Joe: "we need a export image option in Export." New controls in the Export accordion: Image size (1x screen / 2x default / 4x), White background checkbox, and an Export image (PNG) button. exportImage() re-renders the CURRENT view (Plan, Perspective, N/S/E/W, box section, layers, cutaway, terrain) at k x the on-screen pixel ratio, capped by the GPU's MAX_RENDERBUFFER_SIZE / MAX_TEXTURE_SIZE (and 8192 px), calls canvas.toBlob in the same task as the render (WebGL buffer is only valid until the browser composites), then restores pixel ratio, size and background and repaints. File name: <neighborhood>-<view>-<W>x<H>.png. The panels, compass and View cube are not part of the canvas, so they are not in the image. Fixed-width overlays (skyline, ground lines, 1.5 CSS px) scale with the image; the 1-device-pixel hairlines (cut-plane lines, poche outline) do not and read thinner at 2x/4x. No transparent option (the canvas has no alpha). Toast says if the size was limited by the graphics card.
+2) E/W gap under the red base (Joe, Upper West Side, Terrain on, box W 81-82 St, v3.4.143 E and W screenshots: ~36 px blue gap between the red base and the ground line, both sloping together). Cause: the skyline floor used the HIGHEST terrain across the section's slab depth (a drawn box makes that the whole box depth, v3.4.116) while the earth strip/ground line used the terrain at the cut plane only. New terrainGroundAcrossSlab(axis, v, slabLo, slabHi) is the single ground function: buildSectionProfile (open gaps) and updateEarthSection (strip top + ground line) both call it, so they always meet. Negative-space cutting is unchanged. In an elevation this is also the right picture: the ground silhouette is the highest terrain beyond the cut. The Murray Hill gap (red base 24.3 vs strip 9.4) had the same cause; it was first misread as a low roof.
+Not yet confirmed on Joe's reload. Needs: UWS (and Murray Hill) E and W, Terrain on: earth reaches the red base, no blue gap; Terrain off unchanged. Export image: 1x/2x/4x in Plan, Perspective and an elevation, with and without White background; check the PNG opens and matches the view; check the view is unchanged afterwards (size, High detail).
+
+`audit_deploy.js`: 1 new check (404/404), 1 rewritten (ground gaps use the shared function), version 3.4.144. Smoke not run on 140-144.
+
+v3.4.143 - 2026-10-03 - Terrain elevations: ground line along the earth strip; terrain surface hidden in locked elevations.
+
+Joe, v3.4.142, Murray Hill with Terrain on: "tan terrain looks off for E and W views." W showed a tan band overlapping the red outline's base; E showed a thin tan strip with a blue gap above it. Diagnosed live: `__NS.groundMesh.visible = false` removed the overlapping tan band (the terrain surface seen from the side); what remained was the earth strip, with the red skyline base 24.3 m and the strip 0..9.4 m (his console readout: poche quad, skyline z 24.3..173.0, earth strip z 0..9.4). The 24.3 m red base is the lowest building roof in that section, not an error; the blue between it and the strip is the building mass. It only looked detached because terrain sites had no ground line (flat sites do, v3.4.137).
+Fix: (1) updateEarthSection() terrain branch adds the same light ground line (0xe8e0d0, 1.5 CSS px via addThickOverlay, hairline LineSegments carrier as a child of the strip) along the strip's top edge; disposeThickOverlay() now recurses. (2) updateContextLayerVisibility(): groundMesh (flat plate or terrain surface) is hidden in EVERY locked elevation; otherwise visible when the context layer is off or terrain is on, as before. Plan/Home/perspective unchanged. Supersedes the v3.4.138 rule (flat only) and the v3.4.133 "terrain surface stays" rule for elevations.
+Not yet confirmed on Joe's reload. Needs: Murray Hill, Terrain on, E and W (and N/S) with and without a box: light line along the top of the earth strip, no tan band overlapping the red base; back to Plan/Home: terrain surface returns; Terrain off: flat ground line as in 137/138. If W still shows tan above the red base, the surface was not the only cause.
+
+`audit_deploy.js`: 1 new check (403/403), 1 rewritten (ground-plate rule), version 3.4.143.
+
+v3.4.142 - 2026-10-03 - Negative-space sliver hidden at the far corner of all three sliders.
+
+Joe (Midtown, Perspective, X 0 / Y 0 / Height 0): small dark-blue block shapes along the cut line near the corner. Diagnosed live: `__NS.negativeMesh.visible = false` removed the nearby ones (solidGroup hidden alone did not; boroughsGroup hidden removed the earlier river pier teeth, a different thing). Cause: at the extreme corner only a hairline sliver of the negative-space solid is kept, and its void walls (deliberately dark) read as stray blocks. Joe chose "hide it".
+Fix: updateNegativeSliverHide() runs in animate() before render. In Perspective/Plan/octant views only (sectionModeAxis === null, no drawn box) it hides the negativeMesh Group while the KEPT slab is thinner than NEGATIVE_SLIVER_M (5 m) on all three axes (octant carve keeps a point if ANY axis keeps it, so one thick axis always shows the solid). X/Y thickness = the displayed value from v3.4.141 (from the slider low end; from the high end when flipped); Height = cut height. When the rule stops holding it hands visibility back to the Negative-space toggle once (showNegative, not Plan, no locked elevation). Locked N/S/E/W elevations and box sections never hit the rule.
+Not fixed: two tiny dark specks near the far corner come from another source (still visible with negativeMesh and solidGroup hidden); not identified.
+Not yet confirmed on Joe's reload. Needs: X/Y/Height all 0 -> dark blocks gone; drag X to ~10 m -> negative space back; Flip X/Y at the other end; Negative space button off/on; N/S/E/W and box sections unchanged. Run smoke (it works through elevations, which the rule skips).
+
+`audit_deploy.js`: 1 new check (402/402), version 3.4.142.
+
+v3.4.141 - 2026-10-03 - X/Y cutaway values read from the slider's low end (0 at the left).
+
+Joe (UI/UX): "I would expect X Y 0 to be all the way to the left." X/Y cutaway values were metres from the district's projection origin (centre), so 0 sat mid-slider and the ends read e.g. -614/587 and -2111/2061. Chosen: Option A. DISPLAY ONLY: the X/Y number inputs and the slider end labels now show distance from the slider's low end (X from the west edge, 0..~1201 m; Y from the south edge, 0..~4172 m); typed values add the offset back before setXCutaway/setYCutaway. cutawayDisplayOffset() reads the slider's own min (set once per compute in computeNegativeSpace). xThreshold/yThreshold, slider values, the URL ?x=&y= (still the original coordinates, so old links work), box sections and smoke_test (drives the sliders) are unchanged. Height cut unchanged.
+Default start unchanged (centre): it now reads ~614 for X and ~2111 for Y instead of 0. Joe was asked whether the default should start at the left end instead (which cuts everything away); no answer yet.
+Not yet confirmed on Joe's reload. Needs: X/Y inputs and end labels read 0 at the left; typing a value moves the cut to that distance from the west/south edge; Metric/Imperial toggle; Flip X/Y; box-drawn section (X/Y cutaway still moves the cut).
+
+`audit_deploy.js`: 1 new check (401/401), version 3.4.141.
+
+v3.4.140 - 2026-10-03 - Port Authority and the two Park Ave parts restored (transit exemption list).
+
+Joe asked for these to be added to TRANSIT_KEEP_IDS (open item since v3.4.135). Full ids resolved from the district data: Port Authority Bus Terminal f78c98b4-98a0-4150-a581-2d61d19da302 (district-4 buildings, 38.6 m, a whole footprint); Park Ave station-complex parts 66393436-3535-3332-B461-373236373361 (150 m) and 34623232-6235-3230-B835-363535346665 (65 m) (district-5 building_parts, parent building 8f543471-12a0-4d32-a077-f23eb8da3bc3).
+The parts are judged one by one by dropTransitOverStreets(), so the exemption check now also runs per part (adding the parent id would have kept every part of that building). Everything else in the street rule is unchanged; ?transit=keep still disables it.
+Smoke on v3.4.139 (Joe, Midtown, Terrain off): 324 passed, 0 failed (OFF and ON); two NotFoundError setPointerCapture console errors from fake pointer events in the Draw-box step, no check failed. Expected baseline for Midtown was 158 + 169 = 327; the 3-check difference is not yet explained (per-phase counts were not seen).
+Not yet confirmed on Joe's reload. Needs: Midtown (district-5): Port Authority area and the Park Ave station complex show masses again; district-4 Port Authority too; Herald Square and the rest of the street rule unchanged.
+
+`audit_deploy.js`: 1 new check (400/400), version 3.4.140.
+
+v3.4.139 - 2026-10-03 - Skyline and ground line drawn at a fixed screen width (High detail flicker).
+
+Joe, v3.4.138, Midtown W, High detail on: the cut edges flicker while zooming in/out. Live test in his console: hiding every Line/LineSegments stopped the flicker (the fill edge was fine), so the cause is the 1-device-pixel hairlines, which are a third of a CSS pixel at High detail's 3x pixel ratio. (Same test also hid the ground line, which is why it "disappeared" during the test; not a bug.)
+Fix: addThickOverlay() puts a LineSegments2 child (three/addons lines: LineSegments2, LineSegmentsGeometry, LineMaterial) on the skyline line (red) and the flat-site ground line (0xe8e0d0), 1.5 CSS px wide; resolution = renderer.getSize so the width is the same at any pixel ratio. The original hairline LineSegments stay as data carriers with material.visible=false, so smoke_test's skylineMaxZ (reads the ff0000 LineSegments geometry) is unaffected. Overlays are disposed with their parent.
+Not changed: Plan/3D cut-plane lines and the poche outline are still hairlines. If an elevation still flickers, say which edge.
+Not yet confirmed on Joe's reload. Needs: W elevation, High detail ON, zoom in/out: edges steady; High detail OFF: same look as before; N/S/E/W with and without a box; Terrain on (earth strip unchanged).
+
+`audit_deploy.js`: 1 new check (399/399), version 3.4.139.
+
+v3.4.138 - 2026-10-03 - Flat ground plate hidden in locked elevations (tan band inside the buildings).
+
+Joe, Midtown W and Harlem W on v3.4.137: a tan band ~12 m tall inside the buildings' footprint (Harlem: also ~30 px below the ground line). Diagnosed live in Joe's console: `__NS.groundMesh.visible = false` removed the whole band in both areas, leaving only the red poche, outline and the v3.4.137 ground line. Cause: the tan ground plate renders in the elevation even though it should be edge-on.
+Fix: updateContextLayerVisibility() hides groundMesh in a locked elevation when Terrain is off (the ground line is the grade there). Plan/Home/perspective unchanged; Terrain ON keeps its surface (earth strip from 136). Supersedes the v3.4.129 rule that kept the plate as the section base.
+Not yet confirmed on Joe's reload as code (only via the console toggle). Needs: Midtown W and Harlem W with a box, Terrain off, Manhattan context OFF and ON; back to Plan/Home, tan plate returns.
+
+`audit_deploy.js`: the v3.4.129 ground-plate check rewritten to the new rule; version check 3.4.138.
+
+v3.4.137 - 2026-10-03 - Ground line in flat-site elevations; street labels grow with zoom.
+
+Joe (three screenshots, Inwood + Midtown): "no ground plane and text in plan gets very small when zoomed in."
+1) Ground: the tan plate is a flat surface at z=0, so it is invisible edge-on in N/S/E/W. updateEarthSection() now also handles terrain OFF: one continuous unlit light line (0xe8e0d0) at grade across the full plot range, own mesh (not part of the skyline line or poche, cf. v3.4.127/128), visible only in a locked elevation. Terrain ON unchanged (earth strip from 136). applyTerrainGround() rebuilds it when terrain is switched off.
+2) Labels: updateStreetLabelScale() was a constant 4.5% of the view, so labels never grew while streets/buildings did. Now min(max(4.5% of view, 120 m), 13.5% of view): unchanged zoomed out, grows with the map at mid zoom, capped at 3x so the v3.4.79 tight-zoom overlap cannot return. If still small at Joe's Midtown zoom: raise the 120 or the cap, or fill the sprite (text uses ~40% of it).
+Hosted Netlify build was v3.4.135 when checked (Joe's screenshot); GitHub not readable by Claude (404).
+
+Not yet confirmed on Joe's own reload. Needs: Inwood/Midtown, Terrain off, N/S/E/W with and without a box (light ground line, red poche unchanged); Plan zoomed in on Midtown streets (labels larger than before, not overlapping).
+
+`audit_deploy.js`: 398/398 (label check and two earth-strip checks updated to the new behavior, 2 new checks).
+
+v3.4.136 - 2026-10-02 - Earth fill under the ground line in terrain sections; Greenwich Village gap-box test failure fixed (test bug).
+
+Joe: "fix the still open items on your list."
+1) Earth under the ground line (terrain sections). Before, a terrain elevation showed the ground only as the red skyline line. New updateEarthSection(): a thin vertical strip on the cut plane (terrain height AT the cut, from the plot range's low end to its high end, filled down to the datum z=0) in an earth tone (0x6b5b3e), rebuilt whenever the section profile is (refreshActiveSectionProfile -> threshold/slab/box moves), visible only in a locked elevation with terrain on, disposed when terrain is switched off. It is its own mesh with its own material: it does not touch the skyline LineSegments or any poche material (a ground segment added to the skyline made the poche pale in v3.4.127). Opaque, renderOrder -10, polygonOffset pushes it back so every cap/outline sits over it.
+2) Greenwich Village, context ON, smoke Phase 6 "gap box ... section is not empty (skyline maxZ > 0) -- maxZ=0" (5 failures, also on v3.4.132): a TEST bug, not an app bug. The test computed the box's pixel coordinates from the Plan camera, THEN clicked Draw section box; that click re-runs setOrthogonalView('plan'), which re-frames Plan and (with Manhattan context ON) drops the zoom the test had just set, so the drag landed ~7x (= the zoom) too far out -- measured at x 1421..2698 / y 1322..2599 against a gap at 121..301 / 178..358 -- in empty space. Other districts passed by luck (the stray box still hit buildings). Fix in smoke_test.js: enter box-draw mode first, then read the camera (Phases 5 and 7 already did). New check "gap-midpoint box landed on the gap (centre within 40 m)" guards against it. Greenwich ON now 175/175.
+
+Not yet confirmed on Joe's own reload. Needs: Terrain on, Inwood (most relief), N/S/E/W with and without a drawn box -- earth-tone fill under the red ground line, nothing else changed.
+
+`audit_deploy.js`: 3 new checks.
+
 v3.4.135 - 2026-10-02 - Grand Central Terminal restored (transit exemption list).
 
 Joe: "GCT appears to be missing." Expected consequence of the v3.4.134 rule: Grand Central Terminal (Overture 76fa88dd-a26d-4716-9261-ffd8ba2a9a0c, class train_station, 45.8 m) covers ~411 m of Park Ave viaduct centreline. New TRANSIT_KEEP_IDS set; ids in it are never dropped. Contains only Grand Central for now. Verified live on Midtown: the dropped list no longer contains it and the flat-fallback count goes 2560 -> 2561. Still dropped in Midtown: Herald Square station a35c1295 (56 m) and two Park Ave station-complex parts (150 m, 65 m). Not exempted (Joe did not ask): Port Authority f78c98b4 (district-4, 38.6 m).

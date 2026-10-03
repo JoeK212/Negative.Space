@@ -1836,3 +1836,39 @@ Cause (Midtown screenshots): Overture train_station / transportation footprints 
 
 ### v3.4.135 Grand Central exemption (2026-10-02)
 Joe reported GCT missing; it was dropped by the v3.4.134 rule (411 m of Park Ave viaduct centreline). TRANSIT_KEEP_IDS now exempts 76fa88dd-a26d-4716-9261-ffd8ba2a9a0c. Live check on Midtown (in-memory patch of served 134): GCT not in droppedTransit, flat-fallback 2561 (was 2560).
+
+### v3.4.136 (2026-10-02)
+- Greenwich Village context-ON Phase 6 failures: test bug (stale projection after the Draw-box click re-framed Plan). Measured the drawn box at 1421..2698 x 1322..2599 vs the intended gap 121..301 x 178..358 (scale error = the zoom, 7.09). Fixed in smoke_test.js; Greenwich ON 175/175 live.
+- Earth fill under the ground line: updateEarthSection(), own mesh, earth tone, locked elevations with terrain only.
+
+### v3.4.137 (2026-10-03)
+- Ground line in elevations with Terrain off: updateEarthSection() flat branch, own LineSegments mesh, unlit, depthTest off, renderOrder 11. Not part of the skyline or poche.
+- updateStreetLabelScale(): min(max(0.045*view, 120), 0.135*view). Superseded the v3.4.79 audit check.
+- Audit checks for the v3.4.136 earth strip updated (visibility no longer terrain-only; applyTerrainGround rebuilds instead of disposing).
+- Not live-verified; needs Joe's reload.
+
+### v3.4.138 (2026-10-03)
+- Flat site, locked elevation: groundMesh hidden (updateContextLayerVisibility). Live-diagnosed with groundMesh.visible=false in Midtown and Harlem. Supersedes the v3.4.129 check. Not live-verified as code.
+
+### v3.4.139 (2026-10-03)
+- addThickOverlay(): LineSegments2 child (1.5 CSS px) on the skyline line and the flat ground line; hairline parent kept as data carrier (material.visible=false) so smoke_test still reads it. Cause confirmed by Joe's console test (all lines hidden -> no flicker). Not live-verified; module parses (node --check). Loads three/addons/lines/* from the same unpkg host.
+
+### v3.4.140 (2026-10-03)
+- TRANSIT_KEEP_IDS += Port Authority (footprint) and two Park Ave parts (matched per part id in dropTransitOverStreets). Ids taken from data/district-4/buildings.geojson and data/district-5/building_parts.geojson. Not live-verified.
+- Smoke v3.4.139 on Joe's Midtown (Terrain off): 324/324 (OFF+ON), 0 fail; 3 fewer than the 327 baseline, per-phase counts not yet seen.
+
+### v3.4.141 (2026-10-03)
+- X/Y cutaway display offset (Option A): number inputs + end labels read from the slider min; internal coordinates, URL and smoke unchanged. Not live-verified. Default start (centre) unchanged, open question to Joe.
+
+### v3.4.142 (2026-10-03)
+- updateNegativeSliverHide(): negativeMesh Group hidden in non-elevation views while the kept slab is < 5 m on all three axes. Live-diagnosed (negativeMesh.visible=false). Skips locked elevations and box sections. Not live-verified; module parses.
+
+### v3.4.143 (2026-10-03)
+- Terrain ground line on the earth strip top; groundMesh hidden in all locked elevations; the v3.4.138 ground-plate audit check rewritten to the new rule. Cause diagnosed from Joe's readout (strip 0..9.4, skyline 24.3..173). Not live-verified; module parses.
+
+### v3.4.144 (2026-10-03)
+- terrainGroundAcrossSlab(): shared ground height for the skyline floor and the earth strip + ground line (fixes the E/W gap under the red base with deep box slabs). Not live-verified.
+- Export image (PNG): exportImage() re-renders the current view at 1x/2x/4x (GPU-capped), toBlob in the same task, restores state. Not live-verified (could not run WebGL here; module parses).
+
+### v3.4.145 (2026-10-03)
+- Export DXF: dxfNew() R12 writer verified with ezdxf; exportDxfElevation()/exportDxfPlan() not browser-tested. Envelope (bbox) skyline, not exact cross-section.
