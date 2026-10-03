@@ -867,7 +867,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing; the whole solids, the cutaway is not applied; large files). Street widths are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are left open; large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -952,7 +952,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.147'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.148'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2255,8 +2255,11 @@ function createPlaneStencilGroup(geometry, plane, renderOrder, opaqueWritePass){
 // range v3.2.40's screenshot showed the artifact, without needing every
 // orbit to be near-perfect before the cap reappears.
 const GRAZING_THRESHOLD = 0.25;
-function capQuadFaceOnEnough(planeNormal){
-  if (activeCamera !== camera) return false; // orthographic Plan view: a vertical X/Y cut plane is ALWAYS edge-on from directly above, not just sometimes -- no angle check needed, just off
+function capQuadFaceOnEnough(planeNormal, plane){
+  if (activeCamera !== camera) return false;
+  // v3.4.148: the cap is a one-sided face. It belongs to the REMOVED side of its clip plane (kept = distance >= 0), so it may only draw while the camera is on that
+  // removed side, i.e. facing the cut. From the kept side (the backside) the cut is behind the solid and the cap (depthTest off, DoubleSide) used to show through it.
+  if (plane && plane.distanceToPoint(activeCamera.position) >= 0) return false;
   const dir = new THREE.Vector3();
   activeCamera.getWorldDirection(dir);
   return Math.abs(dir.dot(planeNormal)) > GRAZING_THRESHOLD;
@@ -3077,6 +3080,7 @@ function animate(){
   updatePendingPlanBoxOverlay(); // v3.4.18 -- keeps the drawn-box outline anchored to its real world position while the direction picker is up; see the function's own comment
   updateNegativeSliverHide(); // v3.4.142
   enforceSectionRenderState(); // v3.4.45 -- see its own comment; closes the whole class of "a deferred write landed on a uniforms object that got replaced" bugs this file has chased since v3.4.11
+  updateCapFacing(); // v3.4.148 -- poche caps only while the camera faces the cut
   renderer.render(scene, activeCamera);
   updateViewCube(); // v3.4.119
 }
@@ -4591,10 +4595,50 @@ function exportDxfElevation(){
 // 3D masses: every triangle of a mesh as 3DFACE, with coplanar neighbouring triangle pairs that form a convex quad merged into one 4-sided face
 // (extruded walls are two triangles each, so this about halves the wall faces). Positions are the mesh's own world coordinates, so Z carries the real
 // heights (and the terrain base when Terrain is on). Non-indexed geometry, identity transforms (checked against the live scene).
-function dxfMeshFaces(dxf, layer, mesh){
+// v3.4.148: cutaway applied. On screen the Perspective cutaway removes the corner octant where all three planes (height, X, Y) are on their clipped side
+// (clipIntersection). dxfClipOctant() does the same on real geometry: kept = T minus that convex octant = (d0>=0) + (d0<0,d1>=0) + (d0<0,d1<0,d2>=0),
+// each piece a convex polygon (Sutherland-Hodgman against half-spaces), fan-triangulated. Cut faces are left open (no poche caps in the DXF).
+function dxfClipPoly(poly, pl, keepPositive){
+  const out = [], n = poly.length;
+  const dist = v => pl.normal.x * v[0] + pl.normal.y * v[1] + pl.normal.z * v[2] + pl.constant;
+  for (let i = 0; i < n; i++){
+    const a = poly[i], b = poly[(i + 1) % n], da = dist(a), db = dist(b);
+    const ina = keepPositive ? da >= 0 : da < 0, inb = keepPositive ? db >= 0 : db < 0;
+    if (ina) out.push(a);
+    if (ina !== inb){ const t = da / (da - db); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); }
+  }
+  return out;
+}
+function dxfClipOctant(tri, planes, outTris){ // pushes the kept triangles of tri (3 vertices) onto outTris (arrays of 3 vertices)
+  const [p0, p1, p2] = planes;
+  const d = pl => tri.map(v => pl.normal.x * v[0] + pl.normal.y * v[1] + pl.normal.z * v[2] + pl.constant);
+  const dd = planes.map(d);
+  if (dd.some(a => a[0] >= 0 && a[1] >= 0 && a[2] >= 0)){ outTris.push(tri); return 0; } // wholly on a kept side: untouched
+  if (dd.every(a => a[0] < 0 && a[1] < 0 && a[2] < 0)) return 1; // wholly inside the removed octant
+  const pieces = [
+    dxfClipPoly(tri, p0, true),
+    dxfClipPoly(dxfClipPoly(tri, p0, false), p1, true),
+    dxfClipPoly(dxfClipPoly(dxfClipPoly(tri, p0, false), p1, false), p2, true)
+  ];
+  for (const poly of pieces){
+    if (poly.length < 3) continue;
+    for (let i = 1; i + 1 < poly.length; i++){
+      const a = poly[0], b = poly[i], c = poly[i + 1];
+      const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2], vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
+      if (Math.hypot(uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx) < 1e-6) continue; // sliver
+      outTris.push([a, b, c]);
+    }
+  }
+  return 2;
+}
+function dxfMeshFaces(dxf, layer, mesh, clipPlanes){
   const pos = mesh.geometry.attributes.position, idx = mesh.geometry.index;
-  const triCount = idx ? idx.count / 3 : pos.count / 3;
-  const P = k => { const i = idx ? idx.getX(k) : k; return [pos.getX(i), pos.getY(i), pos.getZ(i)]; };
+  const srcCount = idx ? idx.count / 3 : pos.count / 3;
+  const V = k => { const i = idx ? idx.getX(k) : k; return [pos.getX(i), pos.getY(i), pos.getZ(i)]; };
+  let tris = null;
+  if (clipPlanes){ tris = []; for (let t = 0; t < srcCount; t++) dxfClipOctant([V(3*t), V(3*t+1), V(3*t+2)], clipPlanes, tris); }
+  const triCount = tris ? tris.length : srcCount;
+  const P = k => tris ? tris[(k / 3) | 0][k % 3] : V(k);
   const nrm = (a, b, c) => { const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2], vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2]; const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx, l = Math.hypot(nx, ny, nz) || 1; return [nx/l, ny/l, nz/l]; };
   const same = (a, b) => Math.abs(a[0]-b[0]) < 1e-4 && Math.abs(a[1]-b[1]) < 1e-4 && Math.abs(a[2]-b[2]) < 1e-4;
   let faces = 0;
@@ -4678,8 +4722,10 @@ async function exportDxfPlan(mode3d){
   let nf = 0, nn = 0;
   if (mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
-    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh) nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o); }); }
-    if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh) nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o); }); }
+    // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
+    const cut = [sectionPlane, xClipPlane, yClipPlane];
+    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh) nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); }); }
+    if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh) nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); }); }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
   toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` : '') + ' (meters, 1:1)');
@@ -7050,6 +7096,16 @@ function refreshViewToggles(){
   refreshCapFillVisibility();
 }
 const capFillToggleEl = document.getElementById('capFillToggle');
+// v3.4.148: the Height Cut cap faces up, so in free Perspective it only draws while the camera is above the cut height (a view from below the cut is the backside).
+// Orthographic Plan looks straight down from above, so it is unaffected.
+function zCapFacesCamera(){ return activeCamera !== camera || sectionPlane.distanceToPoint(camera.position) < 0; }
+// The cap-visibility formulas above depend on which side of each cut plane the camera is on, which can change without an orbit event (dragging a slider, Flip X/Y,
+// Height Cut): re-evaluate whenever one of the three side tests flips.
+let _capFacingSig = '';
+function updateCapFacing(){
+  const sig = activeCamera === camera ? [xClipPlane, yClipPlane, sectionPlane].map(p => p.distanceToPoint(camera.position) < 0 ? 1 : 0).join('') : 'o';
+  if (sig !== _capFacingSig){ _capFacingSig = sig; refreshCapFillVisibility(); }
+}
 function refreshCapFillVisibility(){
   if (!capFillGroups) return;
   const on = showNegative && capFillToggleEl.checked;
@@ -7098,7 +7154,7 @@ function refreshCapFillVisibility(){
   // cut position that, for every practical purpose, isn't active yet.
   // Added the same check explicitly: only show once Height Cut has
   // actually moved off its own neutral floor.
-  capFillGroups.z.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0;
+  capFillGroups.z.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0 && zCapFacesCamera();
   // v3.2.40: Joe's screenshot -- a large diagonal maroon band dominating a
   // free-perspective octant-cutaway view, annotated "cut / poche??!!??" --
   // confirmed LIVE by isolating each mesh in turn (not guessed): hiding
@@ -7153,8 +7209,8 @@ function refreshCapFillVisibility(){
   // whenever activeCamera isn't the perspective camera) -- a vertical X/Y
   // cut plane is ALWAYS viewed edge-on from directly above, by
   // construction, not just sometimes.
-  const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(xClipPlane.normal);
-  const yFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(yClipPlane.normal);
+  const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(xClipPlane.normal, xClipPlane);
+  const yFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough(yClipPlane.normal, yClipPlane);
   capFillGroups.x.visible = on && (sectionModeAxis === 'x' || xFreePerspective);
   capFillGroups.y.visible = on && (sectionModeAxis === 'y' || yFreePerspective);
   // v3.4.82: buildings' own caps, same 3 visibility formulas as negative
@@ -7166,7 +7222,7 @@ function refreshCapFillVisibility(){
   // color from POCHE_COLOR, not a bug to guard against here.
   if (buildingCapFillGroups){
     const onBuildings = showBuildings && capFillToggleEl.checked;
-    buildingCapFillGroups.z.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0; // v3.4.88: same "Height Cut actually engaged" guard as capFillGroups.z just above -- see that line's own comment
+    buildingCapFillGroups.z.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane.constant > 0 && zCapFacesCamera(); // v3.4.88: same "Height Cut actually engaged" guard as capFillGroups.z just above -- see that line's own comment
     buildingCapFillGroups.x.visible = onBuildings && (sectionModeAxis === 'x' || xFreePerspective);
     buildingCapFillGroups.y.visible = onBuildings && (sectionModeAxis === 'y' || yFreePerspective);
   }
@@ -8447,7 +8503,7 @@ document.getElementById('fullWidthBtn').addEventListener('click', clearActiveSec
     get boroughsGroup(){ return boroughsGroup; },
     get THREE(){ return THREE; },
     get negativeMesh(){ return negativeMesh; }, get solidGroup(){ return solidGroup; },
-    get capFillGroups(){ return capFillGroups; },
+    get capFillGroups(){ return capFillGroups; }, get buildingCapFillGroups(){ return buildingCapFillGroups; }, // v3.4.148: read-only handle for the autotest
     get zCutLineMesh(){ return zCutLineMesh; }, get xCutLineMesh(){ return xCutLineMesh; }, get yCutLineMesh(){ return yCutLineMesh; },
     get sectionPlane(){ return sectionPlane; }, get xClipPlane(){ return xClipPlane; }, get yClipPlane(){ return yClipPlane; },
     get sectionPlaneNeg(){ return sectionPlaneNeg; }, get xClipPlaneNeg(){ return xClipPlaneNeg; }, get yClipPlaneNeg(){ return yClipPlaneNeg; }, // v3.2.32 -- needed to verify applySectionMode()'s quad/cut-line restrictPlanes live

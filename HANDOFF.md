@@ -1,4 +1,13 @@
-# Negative Space -- handoff for a new chat (v3.4.147, 2026-10-03)
+# Negative Space -- handoff for a new chat (v3.4.148, 2026-10-03)
+
+## v3.4.148 -- READ FIRST
+- Joe confirmed 3.4.147 DXFs in his CAD program: Plan street names and Perspective 3D heights look good. He tabled the pier teeth (A/B/C) and the X/Y default start (both unchanged).
+- Perspective DXF now APPLIES the live X / Y / Height cutaway to the 3D masses (dxfClipOctant, same three planes as the screen; cut faces left open, no poche caps). A deep cut can give slightly more faces than uncut (split triangles don't re-merge): district-5 buildings 80,197 uncut vs 83,661 cut. Needs Joe's CAD check of a cut export.
+- Poche caps no longer show from the BACKSIDE of a cut (Joe's screenshots, X/Y/Z, Manhattan on and off): capQuadFaceOnEnough(planeNormal, plane) + zCapFacesCamera() + updateCapFacing() in animate(). See CHANGELOG.md v3.4.148 part 2. Checked by flag-level autotest only, NOT by pixels: Joe must orbit behind a cut (X, Y, and Height Cut with Manhattan context on and off) and confirm the black/red fill is gone from behind and back when facing it. Known, left alone: with all three planes engaged a camera on the cut side of one plane but the kept side of another can still see that cap over kept geometry.
+- Autotest: failed-tile Terrain test fixed (timing race in the test, not an app defect). audit_deploy.js 409/409. Autotest now has --caps-only and --skip-caps so each run fits the 5-minute tool limit: `--no-terrain --skip-caps` 66/66, `--caps-only` 17/17, `--terrain-only` 21/21. smoke_test.js on 3.4.148 run by Claude in the sandbox (Midtown): 324/0 (OFF 154, ON 170); `node run.mjs --no-terrain --skip-caps --smoke` is 67/67 and now prints failed smoke check names. Not run: Joe's local smoke/autotest, deploy (Joe's; Netlify was on 135).
+- Still open: street-name labels that fall out in the water (Joe saw them in both DXF views; could drop labels outside the island, undecided); the two tiny specks at the cutaway's far corner; pier teeth and X/Y default start (tabled).
+
+# (v3.4.147 notes below)
 
 ## v3.4.147 -- READ FIRST
 - DXF export fixes from Joe's testing: Plan/Perspective now include STREET_NAMES TEXT; Perspective also exports 3D masses with real Z (BUILDINGS_3D and/or NEGATIVE_SPACE_3D as 3DFACE, quad-merged; 13 MB buildings / 30 MB both in Midtown; whole solids, cutaway NOT applied). Plan stays 2D. A call-stack overflow in the DXF assembler (found by the headless tests) is fixed. See CHANGELOG.md v3.4.147.

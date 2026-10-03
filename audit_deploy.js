@@ -734,7 +734,7 @@ sectionHeader('v3.4.44 -- capFillGroups.z visibility gated on sectionModeAxis (s
 
 check(
   'capFillGroups.z.visible requires sectionModeAxis === null -- a horizontal Height-Cut cap plane, viewed edge-on from a locked elevation, is a thin unclipped band across the whole site otherwise (v3.4.56 added a further !activeSectionBox clause -- this check only confirms the sectionModeAxis part is still intact)',
-  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0 && zCapFacesCamera\(\);/.test(html)
 );
 
 /* ===================================================================
@@ -989,7 +989,7 @@ sectionHeader("v3.4.56 -- capFillGroups.z.visible adds !activeSectionBox, same g
 
 check(
   'capFillGroups.z.visible now requires !activeSectionBox in addition to on && sectionModeAxis === null',
-  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0 && zCapFacesCamera\(\);/.test(html)
 );
 check(
   'the unconditional compute-time reset (capFillGroups.z.visible = false, v3.4.44) is untouched -- only the live refreshCapFillVisibility() assignment changed',
@@ -1655,12 +1655,12 @@ sectionHeader("v3.4.85 -- capQuadFaceOnEnough(), GRAZING_THRESHOLD, X/Y visibili
 check(
   'capQuadFaceOnEnough() returns false outright when activeCamera isn\'t the perspective camera (orthographic Plan is always edge-on to a vertical plane), otherwise compares the camera\'s real view direction to the plane normal against GRAZING_THRESHOLD',
   /const GRAZING_THRESHOLD = 0\.25;/.test(html)
-  && /function capQuadFaceOnEnough\(planeNormal\)\{\s*if \(activeCamera !== camera\) return false;/.test(html)
+  && /function capQuadFaceOnEnough\(planeNormal, plane\)\{\s*if \(activeCamera !== camera\) return false;/.test(html)
   && /return Math\.abs\(dir\.dot\(planeNormal\)\) > GRAZING_THRESHOLD;/.test(html)
 );
 check(
   'both capFillGroups.x/y AND buildingCapFillGroups.x/y visibility formulas now OR in a free-Perspective case (sectionModeAxis===null && !activeSectionBox && capQuadFaceOnEnough) alongside the original locked-elevation case, not just the locked case alone',
-  /const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough\(xClipPlane\.normal\);/.test(html)
+  /const xFreePerspective = sectionModeAxis === null && !activeSectionBox && capQuadFaceOnEnough\(xClipPlane\.normal, xClipPlane\);/.test(html)
   && /capFillGroups\.x\.visible = on && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html)
   && /buildingCapFillGroups\.x\.visible = onBuildings && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html)
 );
@@ -1716,11 +1716,11 @@ check(
 );
 check(
   'capFillGroups.z.visible requires sectionPlane.constant > 0 in addition to the existing view-mode/box guards -- Height Cut sitting at its own neutral value (0) no longer shows the cap',
-  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+  /capFillGroups\.z\.visible = on && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0 && zCapFacesCamera\(\);/.test(html)
 );
 check(
   'buildingCapFillGroups.z.visible has the identical sectionPlane.constant > 0 guard as capFillGroups.z -- both layers needed the same fix, not just the one Joe happened to screenshot',
-  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0 && zCapFacesCamera\(\);/.test(html)
 );
 
 /* ===================================================================
@@ -1800,7 +1800,7 @@ check(
 );
 check(
   'buildingCapFillGroups.z.visible\'s formula (view-mode/box/height guards) is completely untouched by this rework -- only HOW the cap\'s geometry gets built changed, not when it shows',
-  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0;/.test(html)
+  /buildingCapFillGroups\.z\.visible = onBuildings && sectionModeAxis === null && !activeSectionBox && sectionPlane\.constant > 0 && zCapFacesCamera\(\);/.test(html)
 );
 
 /* ===================================================================
@@ -2050,12 +2050,14 @@ check('terrain branch of updateEarthSection() adds a ground LINE along the earth
 sectionHeader("v3.4.144 -- shared ground function (E/W gap) and Export image (PNG)");
 check('Export has an image option: size select (1x/2x/4x), White background checkbox, Export image (PNG) button; exportImage() re-renders the current view at k x the pixel ratio capped by the GPU max render size, calls canvas.toBlob in the same task as the render, then restores size/ratio/background and repaints', /id="exportImageBtn"/.test(html) && /id="exportImageScale"/.test(html) && /id="exportImageWhite"/.test(html) && /function exportImage\(\)/.test(html) && /MAX_RENDERBUFFER_SIZE/.test(html) && /canvas\.toBlob\(blob =>/.test(html) && /scene\.background = prevBg;\s*\n\s*renderer\.setPixelRatio\(basePR\);/.test(html) && /getElementById\('exportImageBtn'\)\.addEventListener\('click', exportImage\)/.test(html));
 sectionHeader("v3.4.145 -- Export DXF (CAD)");
-check('Export has a DXF button; a locked elevation exports the section (SKYLINE, POCHE, GROUND, EARTH from the same profile + shared ground function, x mirrored to the screen-right direction) and Plan exports BUILDINGS, STREETS, STREET_NAMES (TEXT), SECTION_BOX and Perspective adds 3D masses (3DFACE, real Z); the writer emits R12 (AC1009) POLYLINE/VERTEX/SEQEND with LTYPE and LAYER tables, meters 1:1', /id="exportDxfBtn"/.test(html) && /function dxfNew\(\)/.test(html) && /AC1009/.test(html) && /function exportDxfElevation\(\)/.test(html) && /dxf\.label\('STREET_NAMES'/.test(html) && /function dxfMeshFaces\(dxf, layer, mesh\)/.test(html) && /dxf\.poly\('SKYLINE', sky, false\)/.test(html) && /terrainGroundAcrossSlab\(plotAxis, u, slabLo, slabHi\)/.test(html) && /async function exportDxfPlan\(mode3d\)/.test(html) && /dxf\.layer\('BUILDINGS', 7\); dxf\.layer\('STREETS', 5\); dxf\.layer\('STREET_NAMES', 3\); dxf\.layer\('SECTION_BOX', 1\)/.test(html) && /if \(inLockedElevation\(\)\) exportDxfElevation\(\); else exportDxfPlan\(!isPlanViewActive\)/.test(html));
+check('Export has a DXF button; a locked elevation exports the section (SKYLINE, POCHE, GROUND, EARTH from the same profile + shared ground function, x mirrored to the screen-right direction) and Plan exports BUILDINGS, STREETS, STREET_NAMES (TEXT), SECTION_BOX and Perspective adds 3D masses (3DFACE, real Z); the writer emits R12 (AC1009) POLYLINE/VERTEX/SEQEND with LTYPE and LAYER tables, meters 1:1', /id="exportDxfBtn"/.test(html) && /function dxfNew\(\)/.test(html) && /AC1009/.test(html) && /function exportDxfElevation\(\)/.test(html) && /dxf\.label\('STREET_NAMES'/.test(html) && /function dxfMeshFaces\(dxf, layer, mesh, clipPlanes\)/.test(html) && /dxf\.poly\('SKYLINE', sky, false\)/.test(html) && /terrainGroundAcrossSlab\(plotAxis, u, slabLo, slabHi\)/.test(html) && /async function exportDxfPlan\(mode3d\)/.test(html) && /dxf\.layer\('BUILDINGS', 7\); dxf\.layer\('STREETS', 5\); dxf\.layer\('STREET_NAMES', 3\); dxf\.layer\('SECTION_BOX', 1\)/.test(html) && /if \(inLockedElevation\(\)\) exportDxfElevation\(\); else exportDxfPlan\(!isPlanViewActive\)/.test(html));
 sectionHeader("v3.4.146 -- headless-browser test suite (autotest/); no app change");
 check('autotest/ holds the headless suite (harness.mjs, run.mjs, package.json, README.md); it maps unpkg to local npm copies, fakes the elevation tiles, and covers X/Y values, sliver rule, flat + terrain elevations, PNG and DXF export, terrain-fetch failure', (() => { const d = path.join(__dirname, 'autotest'); const ok = f => fs.existsSync(path.join(d, f)); if (!['harness.mjs', 'run.mjs', 'package.json', 'README.md'].every(ok)) return false; const r = fs.readFileSync(path.join(d, 'run.mjs'), 'utf8'), h = fs.readFileSync(path.join(d, 'harness.mjs'), 'utf8'); return h.includes('unpkg') && h.includes('manifold-3d') && /elevation-tiles-prod/.test(h) && /exportDxfBtn/.test(r) && /exportImageBtn/.test(r) && /failTerrain/.test(r) && /sliver/i.test(r); })());
 sectionHeader("v3.4.147 -- DXF: street-name text in Plan, 3D masses (Z heights) in Perspective");
-check('DXF writer: label() emits TEXT (centre-aligned, 50 rotation), face() emits 3DFACE, the file assembler loops over entities instead of spreading them (push(...ents) overflowed the call stack at ~120k faces); Perspective exports 3D masses for whichever solids show (solidGroup -> BUILDINGS_3D, negativeMesh -> NEGATIVE_SPACE_3D); Plan stays 2D', /const label = \(layer, x, y, z, h, str, rot\)/.test(html) && /0\\n3DFACE\\n8\\n/.test(html) && /for \(const e of ents\) L\.push\(e\);/.test(html) && !/L\.push\(\.\.\.ents\)/.test(html) && /dxfMeshFaces\(dxf, 'BUILDINGS_3D', o\)/.test(html) && /dxfMeshFaces\(dxf, 'NEGATIVE_SPACE_3D', o\)/.test(html) && /exportDxfPlan\(!isPlanViewActive\)/.test(html));
-check('APP_VERSION is 3.4.147', /const APP_VERSION = '3\.4\.147';/.test(html));
+check('DXF writer: label() emits TEXT (centre-aligned, 50 rotation), face() emits 3DFACE, the file assembler loops over entities instead of spreading them (push(...ents) overflowed the call stack at ~120k faces); Perspective exports 3D masses for whichever solids show (solidGroup -> BUILDINGS_3D, negativeMesh -> NEGATIVE_SPACE_3D); Plan stays 2D', /const label = \(layer, x, y, z, h, str, rot\)/.test(html) && /0\\n3DFACE\\n8\\n/.test(html) && /for \(const e of ents\) L\.push\(e\);/.test(html) && !/L\.push\(\.\.\.ents\)/.test(html) && /dxfMeshFaces\(dxf, 'BUILDINGS_3D', o, cut\)/.test(html) && /dxfMeshFaces\(dxf, 'NEGATIVE_SPACE_3D', o, cut\)/.test(html) && /exportDxfPlan\(!isPlanViewActive\)/.test(html));
+check('v3.4.148: the Perspective DXF applies the live cutaway to the 3D masses -- dxfClipOctant() removes the corner octant where the height, X and Y planes are all on their clipped side (same three planes as the on-screen clipIntersection), as Sutherland-Hodgman pieces, cut faces left open; the export passes [sectionPlane, xClipPlane, yClipPlane]', /function dxfClipPoly\(poly, pl, keepPositive\)/.test(html) && /function dxfClipOctant\(tri, planes, outTris\)/.test(html) && /const cut = \[sectionPlane, xClipPlane, yClipPlane\];/.test(html) && /dxfClipOctant\(\[V\(3\*t\), V\(3\*t\+1\), V\(3\*t\+2\)\], clipPlanes, tris\)/.test(html) && /with the current X \/ Y \/ Height cutaway applied to the geometry/.test(html) && !/the cutaway is not applied/.test(html));
+check('v3.4.148: poche caps draw only from the cut side -- capQuadFaceOnEnough(planeNormal, plane) returns false while the camera is on the KEPT side of the plane (distanceToPoint >= 0); zCapFacesCamera() does the same for the Height Cut cap (camera must be above the cut); both layers (negative space + buildings) use them; updateCapFacing() in animate() re-runs refreshCapFillVisibility() whenever one of the three side tests flips (slider, Flip, Height Cut, not only orbit)', /if \(plane && plane\.distanceToPoint\(activeCamera\.position\) >= 0\) return false;/.test(html) && /function zCapFacesCamera\(\)\{ return activeCamera !== camera \|\| sectionPlane\.distanceToPoint\(camera\.position\) < 0; \}/.test(html) && /buildingCapFillGroups\.x\.visible = onBuildings && \(sectionModeAxis === 'x' \|\| xFreePerspective\);/.test(html) && /function updateCapFacing\(\)\{/.test(html) && /\[xClipPlane, yClipPlane, sectionPlane\]\.map\(p => p\.distanceToPoint\(camera\.position\) < 0 \? 1 : 0\)/.test(html) && /updateCapFacing\(\); \/\/ v3\.4\.148/.test(html));
+check('APP_VERSION is 3.4.148', /const APP_VERSION = '3\.4\.148';/.test(html));
 
 /* ===================================================================
    Summary
