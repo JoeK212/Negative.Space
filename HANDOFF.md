@@ -1,4 +1,20 @@
-# Negative Space -- handoff for a new chat (v3.4.150, 2026-10-03)
+# Negative Space -- handoff for a new chat (v3.4.152, 2026-10-04)
+
+## v3.4.152 -- READ FIRST
+- Joe asked for caps on the cut faces "maybe with a unique cut poche". Done in the Perspective DXF: the cut faces are capped on CUT_POCHE_NEGATIVE (color 1, red) and CUT_POCHE_BUILDINGS (color 250, dark). Method and limits: CHANGELOG.md v3.4.152 (plane cross-section loops, even-odd holes, earcut, clipped to the removed corner, written through dxfMeshFaces). Caps are flat 3DFACE surfaces (not solids), not hatched. Open (non-watertight) sections are skipped and reported in the toast.
+- Needs Joe's look in CAD: do the caps sit right at the cut, are the two layer colours what he wants (red / dark), is the fill what "poche" should look like (maybe a hatch or a different colour), does a section in the middle of a tall tower look right.
+- Tests on 3.4.152: audit 414/414; `--no-terrain --skip-caps` 83/83 (includes 4 + 6 no-browser unit checks and the real-Midtown cap checks; the export with both layers and caps took 9 s). NOT re-run on 3.4.152: --caps-only, --terrain-only, --tour-only, smoke (the change is confined to the DXF export; they passed on 3.4.150).
+- Not packaged. The last package is 3.4.150 (3.4.151 line-work and 3.4.152 caps are only in the working copy). The 3.4.151 notes below still apply.
+
+# (v3.4.151 notes below)
+
+## v3.4.151 -- READ FIRST
+- Joe opened the 3.4.150 Perspective DXF in CAD (two screenshots, "section 3d needs to be refined"): every wall showed triangle diagonals and the mold's big faces fanned from points. Fix: 3DFACE edge-visibility flags (group 70) hide the edges inside flat faces (dxfMeshFaces/edgeFlags; creases and boundaries stay). Geometry unchanged. See CHANGELOG.md v3.4.151. Needs Joe's look in CAD.
+- NOT done, ask Joe: (a) caps on the cut faces so the cut mold reads as a closed solid (currently open), (b) re-meshing the thin sliver triangles themselves (selecting one in CAD still picks the thin triangle), (c) file size.
+- Tests on 3.4.151: audit 413/413; `--no-terrain --skip-caps` 71/71 (66 + 4 new no-browser unit checks + 1 end-to-end flag check). NOT re-run on 3.4.151: --caps-only, --terrain-only, --tour-only, smoke (the change is confined to the DXF writer; they passed on 3.4.150).
+- 3.4.150 zip was the last package; 3.4.151 is not packaged. The 3.4.150 notes below still apply.
+
+# (v3.4.150 notes below)
 
 ## v3.4.150 -- READ FIRST
 - Added (after Joe compared with SPIRA's Tour button + Exercises): a header **Tour** pill next to ? (starts/replays the guided tour) and an **Exercises** accordion in the side panel (below Display, above Export; appears once the site is computed). Five tasks graded live from page state, nothing saved: both layers on; Height cut 85-115 m; X 25-40% across; Flip X; drawn box + West elevation. "Check my work" toasts the count. See CHANGELOG.md v3.4.150. The 3.4.149 tour notes below still apply.

@@ -638,7 +638,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied (the cut faces are left open).</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (dark), and flat faces draw without their triangulation lines.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -948,7 +948,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are left open; large files). Street widths are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.150'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.152'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4789,9 +4789,9 @@ function dxfNew(){
     const t = String(str).replace(/[\r\n]+/g, ' ');
     ents.push('0\nTEXT\n8\n' + layer + '\n10\n' + f2(x) + '\n20\n' + f2(y) + '\n30\n' + f2(z) + '\n40\n' + f2(h) + '\n1\n' + t + '\n50\n' + (+rot).toFixed(1) + '\n72\n1\n11\n' + f2(x) + '\n21\n' + f2(y) + '\n31\n' + f2(z));
   };
-  const face = (layer, a, b, c, d) => {
+  const face = (layer, a, b, c, d, flags) => { // v3.4.151: flags = 3DFACE group 70, bit 1/2/4/8 hides edge a-b / b-c / c-d / d-a (a triangle's closing edge c-a is bit 8)
     const q = d || c;
-    ents.push('0\n3DFACE\n8\n' + layer + '\n10\n' + f2(a[0]) + '\n20\n' + f2(a[1]) + '\n30\n' + f2(a[2]) + '\n11\n' + f2(b[0]) + '\n21\n' + f2(b[1]) + '\n31\n' + f2(b[2]) + '\n12\n' + f2(c[0]) + '\n22\n' + f2(c[1]) + '\n32\n' + f2(c[2]) + '\n13\n' + f2(q[0]) + '\n23\n' + f2(q[1]) + '\n33\n' + f2(q[2]));
+    ents.push('0\n3DFACE\n8\n' + layer + '\n10\n' + f2(a[0]) + '\n20\n' + f2(a[1]) + '\n30\n' + f2(a[2]) + '\n11\n' + f2(b[0]) + '\n21\n' + f2(b[1]) + '\n31\n' + f2(b[2]) + '\n12\n' + f2(c[0]) + '\n22\n' + f2(c[1]) + '\n32\n' + f2(c[2]) + '\n13\n' + f2(q[0]) + '\n23\n' + f2(q[1]) + '\n33\n' + f2(q[2]) + (flags ? '\n70\n' + flags : ''));
   };
   return {
     layer(name, color){ layers.set(name, color); },
@@ -4871,7 +4871,7 @@ function exportDxfElevation(){
 // heights (and the terrain base when Terrain is on). Non-indexed geometry, identity transforms (checked against the live scene).
 // v3.4.148: cutaway applied. On screen the Perspective cutaway removes the corner octant where all three planes (height, X, Y) are on their clipped side
 // (clipIntersection). dxfClipOctant() does the same on real geometry: kept = T minus that convex octant = (d0>=0) + (d0<0,d1>=0) + (d0<0,d1<0,d2>=0),
-// each piece a convex polygon (Sutherland-Hodgman against half-spaces), fan-triangulated. Cut faces are left open (no poche caps in the DXF).
+// each piece a convex polygon (Sutherland-Hodgman against half-spaces), fan-triangulated. The cut faces are capped afterwards by dxfCutCapFaces (v3.4.152).
 function dxfClipPoly(poly, pl, keepPositive){
   const out = [], n = poly.length;
   const dist = v => pl.normal.x * v[0] + pl.normal.y * v[1] + pl.normal.z * v[2] + pl.constant;
@@ -4915,6 +4915,17 @@ function dxfMeshFaces(dxf, layer, mesh, clipPlanes){
   const P = k => tris ? tris[(k / 3) | 0][k % 3] : V(k);
   const nrm = (a, b, c) => { const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2], vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2]; const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx, l = Math.hypot(nx, ny, nz) || 1; return [nx/l, ny/l, nz/l]; };
   const same = (a, b) => Math.abs(a[0]-b[0]) < 1e-4 && Math.abs(a[1]-b[1]) < 1e-4 && Math.abs(a[2]-b[2]) < 1e-4;
+  // v3.4.151: the triangulation is an artefact (a tower wall is two long thin triangles, the mold's big faces fan from one point) and CAD draws every 3DFACE edge.
+  // An edge shared by exactly two triangles whose normals agree is the inside of a flat face, so mark it invisible; creases, silhouettes and boundaries stay drawn.
+  const qk = v => Math.round(v[0] * 1000) + ',' + Math.round(v[1] * 1000) + ',' + Math.round(v[2] * 1000); // millimetre welding
+  const ekey = (a, b) => { const x = qk(a), y = qk(b); return x < y ? x + '|' + y : y + '|' + x; };
+  const edgeTris = new Map(), triN = new Array(triCount);
+  for (let t = 0; t < triCount; t++){
+    const a = P(3*t), b = P(3*t+1), c = P(3*t+2); triN[t] = nrm(a, b, c);
+    for (const k of [ekey(a, b), ekey(b, c), ekey(c, a)]){ const e = edgeTris.get(k); if (e) e.push(t); else edgeTris.set(k, [t]); }
+  }
+  const hiddenEdge = (u, v) => { const e = edgeTris.get(ekey(u, v)); if (!e || e.length !== 2) return false; const n1 = triN[e[0]], n2 = triN[e[1]]; return n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2] > 0.99995; };
+  const edgeFlags = pts => { let f = 0; const n = pts.length; for (let i = 0; i < n; i++) if (hiddenEdge(pts[i], pts[(i + 1) % n])) f |= (n === 3 && i === 2) ? 8 : (1 << i); return f; };
   let faces = 0;
   for (let t = 0; t < triCount; t++){
     const p = [P(3*t), P(3*t+1), P(3*t+2)];
@@ -4937,14 +4948,114 @@ function dxfMeshFaces(dxf, layer, mesh, clipPlanes){
             if (Math.abs(cr) < 1e-6) { ok = false; break; }
             const sgn = cr > 0 ? 1 : -1; if (sg === 0) sg = sgn; else if (sg !== sgn) ok = false;
           }
-          if (ok){ dxf.face(layer, quad[0], quad[1], quad[2], quad[3]); faces++; t++; continue; }
+          if (ok){ dxf.face(layer, quad[0], quad[1], quad[2], quad[3], edgeFlags(quad)); faces++; t++; continue; }
         }
       }
     }
-    dxf.face(layer, p[0], p[1], p[2]); faces++;
+    dxf.face(layer, p[0], p[1], p[2], null, edgeFlags(p)); faces++;
   }
   return faces;
 }
+// ---- v3.4.152: caps on the cut faces of the Perspective DXF ----
+// The cutaway removes the corner octant (all three plane distances < 0), which leaves the solids open. A cap is the solid's cross-section with one of the three planes,
+// limited to that plane's face of the octant: (1) walk every triangle the plane crosses and chain the crossing points (keyed by the mesh edge they sit on, so neighbours
+// agree) into closed loops; (2) loops nested inside loops are holes (even-odd, independent of winding); (3) triangulate each outline with its holes (earcut via
+// THREE.ShapeUtils); (4) clip every cap triangle to the other two planes' removed sides; (5) write the pieces through dxfMeshFaces so inner edges are hidden.
+function dxfSectionLoops(mesh, pl){
+  const geo = mesh.geometry, pos = geo.attributes.position, idx = geo.index, nV = pos.count;
+  const d = new Float64Array(nV); let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < nV; i++){ const v = pl.normal.x * pos.getX(i) + pl.normal.y * pos.getY(i) + pl.normal.z * pos.getZ(i) + pl.constant; d[i] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
+  if (mn >= 0 || mx < 0) return { loops: [], open: 0 }; // the plane does not cross this mesh
+  const nT = (idx ? idx.count : nV) / 3, ix = k => idx ? idx.getX(k) : k;
+  const P = i => [pos.getX(i), pos.getY(i), pos.getZ(i)];
+  const qk = v => Math.round(v[0] * 1000) + ',' + Math.round(v[1] * 1000) + ',' + Math.round(v[2] * 1000);
+  const ekey = (a, b) => { const x = qk(a), y = qk(b); return x < y ? x + '|' + y : y + '|' + x; };
+  const startMap = new Map(), pts = new Map();
+  for (let t = 0; t < nT; t++){
+    const ii = [ix(3*t), ix(3*t+1), ix(3*t+2)], s = [d[ii[0]] >= 0, d[ii[1]] >= 0, d[ii[2]] >= 0];
+    if (s[0] === s[1] && s[1] === s[2]) continue;
+    let outK = null, inK = null;
+    for (let k = 0; k < 3; k++){
+      const k2 = (k + 1) % 3; if (s[k] === s[k2]) continue;
+      const a = ii[k], b = ii[k2], A = P(a), B = P(b), key = ekey(A, B);
+      if (!pts.has(key)){ const tt = d[a] / (d[a] - d[b]); pts.set(key, [A[0] + (B[0] - A[0]) * tt, A[1] + (B[1] - A[1]) * tt, A[2] + (B[2] - A[2]) * tt]); }
+      if (s[k]) outK = key; else inK = key; // leaving / entering the positive side along the triangle's winding
+    }
+    if (outK && inK) startMap.set(outK, inK);
+  }
+  const loops = [], used = new Set(); let open = 0;
+  for (const k0 of startMap.keys()){
+    if (used.has(k0)) continue;
+    const loop = []; let k = k0, ok = false;
+    for (;;){
+      if (used.has(k)){ ok = (k === k0); break; }
+      used.add(k); loop.push(pts.get(k));
+      const nx = startMap.get(k); if (nx === undefined) break;
+      k = nx;
+    }
+    if (ok && loop.length >= 3){
+      // the plane also crosses the diagonals that triangulate each wall: drop points that sit on a straight run (and repeats), so a wall is one edge, not three
+      let pts2 = loop, changed = true;
+      while (changed && pts2.length > 3){
+        changed = false;
+        for (let j = 0; j < pts2.length && pts2.length > 3; j++){
+          const a = pts2[(j + pts2.length - 1) % pts2.length], b = pts2[j], c = pts2[(j + 1) % pts2.length];
+          const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2], vx = c[0]-b[0], vy = c[1]-b[1], vz = c[2]-b[2];
+          const lu = Math.hypot(ux, uy, uz), lv = Math.hypot(vx, vy, vz);
+          if (lu < 1e-6 || lv < 1e-6 || Math.hypot(uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx) < 1e-5 * lu * lv){ pts2 = pts2.filter((_, q) => q !== j); changed = true; j--; }
+        }
+      }
+      if (pts2.length >= 3) loops.push(pts2);
+    } else open++; // a loop that does not close means the mesh is not watertight there: no cap for it
+  }
+  return { loops, open };
+}
+function dxfCutCapTris(mesh, planes){
+  const out = []; let open = 0;
+  for (let i = 0; i < 3; i++){
+    const pl = planes[i], o1 = planes[(i + 1) % 3], o2 = planes[(i + 2) % 3];
+    const sec = dxfSectionLoops(mesh, pl); open += sec.open;
+    if (!sec.loops.length) continue;
+    const n = pl.normal, ax = (Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z)) ? 0 : (Math.abs(n.y) > Math.abs(n.z) ? 1 : 2);
+    const uv = p => ax === 0 ? [p[1], p[2]] : ax === 1 ? [p[0], p[2]] : [p[0], p[1]];
+    const L = sec.loops.map(p3 => {
+      const p2 = p3.map(uv); let a = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let j = 0; j < p2.length; j++){ const q = p2[(j + 1) % p2.length]; a += p2[j][0] * q[1] - q[0] * p2[j][1]; x0 = Math.min(x0, p2[j][0]); x1 = Math.max(x1, p2[j][0]); y0 = Math.min(y0, p2[j][1]); y1 = Math.max(y1, p2[j][1]); }
+      return { p3, p2, area: Math.abs(a) / 2, bb: [x0, y0, x1, y1], depth: 0, parent: null };
+    });
+    const inside = (pt, poly) => { let c = false; for (let a = 0, b = poly.length - 1; a < poly.length; b = a++){ const A = poly[a], B = poly[b]; if (((A[1] > pt[1]) !== (B[1] > pt[1])) && (pt[0] < (B[0] - A[0]) * (pt[1] - A[1]) / (B[1] - A[1]) + A[0])) c = !c; } return c; };
+    const containers = L.map((li, a) => L.map((lj, b) => b !== a && lj.area > li.area && li.p2[0][0] >= lj.bb[0] && li.p2[0][0] <= lj.bb[2] && li.p2[0][1] >= lj.bb[1] && li.p2[0][1] <= lj.bb[3] && inside(li.p2[0], lj.p2) ? b : -1).filter(b => b >= 0));
+    L.forEach((li, a) => { li.depth = containers[a].length; });
+    L.forEach((li, a) => { if (li.depth % 2 === 1){ const cand = containers[a].filter(b => L[b].depth === li.depth - 1); li.parent = cand.sort((p, q) => L[p].area - L[q].area)[0]; } });
+    L.forEach((outer, a) => {
+      if (outer.depth % 2 === 1) return;
+      const holes = L.filter(h => h.parent === a);
+      const contour = outer.p2.map(p => new THREE.Vector2(p[0], p[1])), hs = holes.map(h => h.p2.map(p => new THREE.Vector2(p[0], p[1])));
+      let tr; try { tr = THREE.ShapeUtils.triangulateShape(contour, hs); } catch (e){ open++; return; }
+      const all3 = outer.p3.concat(...holes.map(h => h.p3));
+      for (const [ta, tb, tc] of tr){
+        let poly = dxfClipPoly([all3[ta], all3[tb], all3[tc]], o1, false); poly = dxfClipPoly(poly, o2, false); // only inside the removed corner's face on this plane
+        for (let k = 1; k + 1 < poly.length; k++){
+          const A = poly[0], B = poly[k], C = poly[k + 1];
+          const ux = B[0]-A[0], uy = B[1]-A[1], uz = B[2]-A[2], vx = C[0]-A[0], vy = C[1]-A[1], vz = C[2]-A[2];
+          if (Math.hypot(uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx) < 1e-6) continue;
+          out.push([A, B, C]);
+        }
+      }
+    });
+  }
+  return { tris: out, open };
+}
+function dxfCutCapFaces(dxf, layer, color, mesh, planes){ // returns { faces, open }
+  const r = dxfCutCapTris(mesh, planes);
+  if (!r.tris.length) return { faces: 0, open: r.open };
+  dxf.layer(layer, color);
+  const flat = new Float64Array(r.tris.length * 9);
+  r.tris.forEach((t, i) => { for (let v = 0; v < 3; v++){ flat[i*9 + v*3] = t[v][0]; flat[i*9 + v*3 + 1] = t[v][1]; flat[i*9 + v*3 + 2] = t[v][2]; } });
+  const pseudo = { geometry: { index: null, attributes: { position: { count: r.tris.length * 3, getX: i => flat[3*i], getY: i => flat[3*i+1], getZ: i => flat[3*i+2] } } } };
+  return { faces: dxfMeshFaces(dxf, layer, pseudo, null), open: r.open };
+}
+
 // Street-name TEXT: same placement as the on-screen labels (one per name, at the midpoint of that name's longest part), rotated along the street.
 function dxfStreetNames(dxf, raw, textH){
   const byName = new Map();
@@ -4993,16 +5104,17 @@ async function exportDxfPlan(mode3d){
     const b = activeSectionBox;
     dxf.poly('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
   }
-  let nf = 0, nn = 0;
+  let nf = 0, nn = 0, ncap = 0, nopen = 0;
   if (mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
     // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
     const cut = [sectionPlane, xClipPlane, yClipPlane];
-    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh) nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); }); }
-    if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh) nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); }); }
+    // v3.4.152: the cut faces are capped, each solid on its own layer (red negative-space poche as on screen, dark building poche)
+    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh){ nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_BUILDINGS', 250, o, cut); ncap += c.faces; nopen += c.open; } }); }
+    if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh){ nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_NEGATIVE', 1, o, cut); ncap += c.faces; nopen += c.open; } }); }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
-  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` : '') + ' (meters, 1:1)');
+  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') : '') + ' (meters, 1:1)');
 }
 document.getElementById('exportDxfBtn').addEventListener('click', () => {
   try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(!isPlanViewActive); }
