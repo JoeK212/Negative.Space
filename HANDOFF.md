@@ -1,4 +1,21 @@
-# Negative Space -- handoff for a new chat (v3.4.154, 2026-10-04)
+# Negative Space -- handoff for a new chat (v3.4.156, 2026-10-04)
+
+## v3.4.156 -- READ FIRST
+- DRAPING done (Joe: "ok drape, i understand what you are doing now"). In the PERSPECTIVE export with Terrain on, the footprints (BUILDINGS), street centrelines (STREETS) and SECTION_BOX are 3D polylines on the ground (dxfDrape: segments cut to at most one grid step, each point terrainZ + 0.15 m). Without Terrain, and in the Plan export, they stay flat at Z = 0. Street names were already at terrain height. See CHANGELOG.md v3.4.156.
+- Still NOT done, never chosen by Joe: hide the terrain's grid edges (3DFACE flags 15) so TERRAIN reads as a shaded surface; contours in the Plan export; also from earlier: pier teeth, X/Y default start, the far-corner specks, street names out in the water, the dark triangle near the plaza in an old screenshot, and the Netlify deploy (hosted build was on 135).
+- Joe has not yet looked at the index contours or the draped lines in CAD.
+- Tests on 3.4.156: audit 417/417; unit checks 16/16; `--terrain-only` 57/57; `--no-terrain --skip-caps` 102/102 (includes 'plan lines stay flat without Terrain'). NOT re-run on 3.4.156: `--caps-only`, `--tour-only`, smoke (the change is confined to the DXF export).
+- Package: 3.4.156 packaged for Joe (negative-space-v3_4_156-full.zip); the 3.4.155 notes below still apply.
+
+# (v3.4.155 notes below)
+
+## v3.4.155 -- READ FIRST
+- Joe looked at the 3.4.154 terrain export in CAD ("looks very good") and chose INDEX CONTOURS WITH LABELS: with Terrain on, TOPO (regular, ACI 54), TOPO_INDEX (every 5th level, ACI 2) and TOPO_LABELS (elevation text in m above sea level, ~every 300 m, upright, 7 m high). Closed loops under 3 grid steps are dropped (noise blobs in the park). See CHANGELOG.md v3.4.155.
+- Asked but NOT done (Joe did not choose them; he asked what "drape streets" means): (1) DRAPE the STREETS centrelines and BUILDINGS footprints onto the terrain (they are written at Z = 0 so they lie under the ground with Terrain on; street NAMES are already at terrain height); (2) hide the terrain's grid edges (3DFACE flags 15) so TERRAIN reads as a shaded surface; (3) contours in the Plan export. Explain draping simply if he asks again: lift each point of those lines to the ground height so they sit on the surface.
+- Tests on 3.4.155: audit 416/416; unit checks for the terrain/index/label helpers 12/12; `--terrain-only` 51/51 (real-export checks for TERRAIN, TOPO, TOPO_INDEX, TOPO_LABELS). NOT re-run on 3.4.155: `--no-terrain --skip-caps`, `--caps-only`, `--tour-only`, smoke (the change is confined to the terrain part of the DXF export).
+- Package state: the last zip given to Joe is 3.4.154; 3.4.155 is NOT packaged.
+
+# (v3.4.154 notes below)
 
 ## v3.4.154 -- READ FIRST
 - Joe asked why a Terrain-on Perspective DXF showed no terrain: it never exported any. Now, with Terrain on, the Perspective DXF also has TERRAIN (ACI 55, one 3DFACE quad per elevation-grid cell) and TOPO (ACI 2, 3D polylines, contours at round ABSOLUTE elevations z + datum, drawn at model Z; interval auto, about 30 levels max) on their own layers. Joe's choice: "both and separate each by its own unique layer". See CHANGELOG.md v3.4.154.

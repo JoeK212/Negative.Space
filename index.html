@@ -638,7 +638,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the ground surface is also exported as TERRAIN and its contour lines as TOPO.</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the ground surface is also exported as TERRAIN, its contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The footprints, street lines and section box then follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -948,7 +948,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; with Terrain on it also adds TERRAIN (the ground surface, one quad per grid cell) and TOPO (contour lines at round elevations, each at its real Z); large files). Street widths are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; with Terrain on it also adds TERRAIN (the ground surface, one quad per grid cell) TOPO (contour lines at round elevations, each at its real Z), TOPO_INDEX (every 5th contour, heavier) and TOPO_LABELS (its elevation in metres above sea level), and the footprints, street lines and section box are draped onto the ground; large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.154'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.156'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -5103,6 +5103,41 @@ function dxfTopoContours(t, interval){ // -> [{ abs, z, pts:[[x,y,z]...], closed
   return out;
 }
 
+// ---- v3.4.155: index contours and their labels ----
+// Every 5th contour is an "index" contour: its own heavier layer (TOPO_INDEX), with the elevation written along it (TOPO_LABELS). The other levels stay on TOPO.
+// Closed loops shorter than 3 grid steps are one-cell bumps of the elevation data, not terrain: they are dropped.
+function dxfTopoIsIndex(abs, interval){ const r = abs / (5 * interval); return Math.abs(r - Math.round(r)) < 1e-6; }
+function dxfPolyLength(pts, closed){ let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]); if (closed && pts.length > 2) L += Math.hypot(pts[0][0] - pts[pts.length-1][0], pts[0][1] - pts[pts.length-1][1]); return L; }
+function dxfTopoLabels(c, spacing){ // -> [{ x, y, z, rot, str }] one label every ~spacing metres along the line, upright, centred on the line
+  const pts = c.closed ? c.pts.concat([c.pts[0]]) : c.pts, total = dxfPolyLength(pts, false);
+  if (total < 80) return [];
+  const n = Math.max(1, Math.floor(total / spacing)), out = [];
+  const str = (Number.isInteger(c.abs) ? c.abs.toFixed(0) : c.abs.toFixed(1)) + ' m';
+  for (let k = 0; k < n; k++){
+    let want = (k + 0.5) * total / n, i = 1;
+    while (i < pts.length - 1 && want > Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])){ want -= Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]); i++; }
+    const a = pts[i-1], b = pts[i], seg = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, f = Math.min(1, want / seg);
+    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+    if (ang > 90) ang -= 180; else if (ang < -90) ang += 180; // never upside down
+    out.push({ x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, z: c.z, rot: ang, str });
+  }
+  return out;
+}
+
+// ---- v3.4.156: draping ----
+// With Terrain on, the Perspective DXF's flat plan lines (footprints, street centrelines, the section box) are lifted onto the ground: every point gets the terrain height (+lift,
+// so CAD does not z-fight them with the surface). Long segments are cut into pieces no longer than maxSeg first, so the line follows the ground between its points instead of
+// cutting across it as a chord. zAt(x, y) is the terrain sampler (terrainZ in the app).
+function dxfDrape(pts, closed, zAt, maxSeg, lift){
+  const out = [], n = pts.length, segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++){
+    const a = pts[i], b = pts[(i + 1) % n], len = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.max(1, Math.ceil(len / maxSeg));
+    for (let j = 0; j < k; j++){ const t = j / k, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; out.push([x, y, zAt(x, y) + lift]); }
+  }
+  if (!closed && n){ const l = pts[n - 1]; out.push([l[0], l[1], zAt(l[0], l[1]) + lift]); }
+  return out;
+}
+
 // Street-name TEXT: same placement as the on-screen labels (one per name, at the midpoint of that name's longest part), rotated along the street.
 function dxfStreetNames(dxf, raw, textH){
   const byName = new Map();
@@ -5128,6 +5163,8 @@ async function exportDxfPlan(mode3d){
   if (!buildingsGeo){ toast('No buildings loaded yet'); return; }
   const dxf = dxfNew();
   dxf.layer('BUILDINGS', 7); dxf.layer('STREETS', 5); dxf.layer('STREET_NAMES', 3); dxf.layer('SECTION_BOX', 1);
+  const drape = !!(mode3d && terrainData); // v3.4.156: Perspective + Terrain: the plan lines ride on the ground instead of lying at Z = 0 under it
+  const planLine = (layer, pts, closed) => { if (drape) dxf.poly3(layer, dxfDrape(pts, closed, terrainZ, terrainData.step, 0.15), closed); else dxf.poly(layer, pts, closed); };
   let nb = 0;
   for (const f of buildingsGeo.features){
     const g = f.geometry;
@@ -5135,7 +5172,7 @@ async function exportDxfPlan(mode3d){
     for (const rings of polys) for (const ring of rings){
       const pts = ring.map(([lon, lat]) => project(lon, lat));
       if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop(); // closed flag replaces the repeated last vertex
-      dxf.poly('BUILDINGS', pts, true); nb++;
+      planLine('BUILDINGS', pts, true); nb++;
     }
   }
   let ns = 0, nt = 0;
@@ -5143,15 +5180,15 @@ async function exportDxfPlan(mode3d){
     const res = await fetch(`data/${currentNeighborhoodId}/streets.json`);
     if (res.ok){
       const raw = await res.json();
-      for (const row of raw) for (const part of row.p){ if (part.length < 2) continue; dxf.poly('STREETS', part.map(([lon, lat]) => project(lon, lat)), false); ns++; }
+      for (const row of raw) for (const part of row.p){ if (part.length < 2) continue; planLine('STREETS', part.map(([lon, lat]) => project(lon, lat)), false); ns++; }
       nt = dxfStreetNames(dxf, raw, 6); // 6 m letters at 1:1
     }
   } catch (e){ console.warn('DXF: streets not included', e); }
   if (activeSectionBox){
     const b = activeSectionBox;
-    dxf.poly('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
+    planLine('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
   }
-  let nf = 0, nn = 0, ncap = 0, nopen = 0, nterr = 0, ntopo = 0, topoIv = 0;
+  let nf = 0, nn = 0, ncap = 0, nopen = 0, nterr = 0, ntopo = 0, nidx = 0, nlab = 0, topoIv = 0;
   if (mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
     // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
@@ -5162,14 +5199,20 @@ async function exportDxfPlan(mode3d){
     if (terrainData){ // v3.4.154: the ground (TERRAIN, surface) and its contour lines (TOPO), only with Terrain on
       nterr = dxfTerrainFaces(dxf, 'TERRAIN', 55, terrainData);
       topoIv = dxfTopoInterval(terrainData.maxZ - terrainData.minZ);
-      const lines = dxfTopoContours(terrainData, topoIv);
-      if (lines.length) dxf.layer('TOPO', 2);
-      for (const l of lines) dxf.poly3('TOPO', l.pts, l.closed);
-      ntopo = lines.length;
+      const lines = dxfTopoContours(terrainData, topoIv).filter(l => !l.closed || dxfPolyLength(l.pts, true) >= 3 * terrainData.step);
+      const idxLines = lines.filter(l => dxfTopoIsIndex(l.abs, topoIv)), regLines = lines.filter(l => !dxfTopoIsIndex(l.abs, topoIv));
+      if (regLines.length) dxf.layer('TOPO', 54);
+      if (idxLines.length){ dxf.layer('TOPO_INDEX', 2); dxf.layer('TOPO_LABELS', 2); }
+      for (const l of regLines) dxf.poly3('TOPO', l.pts, l.closed);
+      for (const l of idxLines){
+        dxf.poly3('TOPO_INDEX', l.pts, l.closed);
+        for (const t of dxfTopoLabels(l, 300)){ dxf.label('TOPO_LABELS', t.x, t.y, t.z, 7, t.str, t.rot); nlab++; }
+      }
+      ntopo = lines.length; nidx = idxLines.length;
     }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
-  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') + (nterr ? `, terrain ${nterr} faces + ${ntopo} contours every ${topoIv} m` : '') : '') + ' (meters, 1:1)');
+  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') + (nterr ? `, terrain ${nterr} faces + ${ntopo} contours every ${topoIv} m (${nidx} index lines, ${nlab} labels), plan lines draped on the ground` : '') : '') + ' (meters, 1:1)');
 }
 document.getElementById('exportDxfBtn').addEventListener('click', () => {
   try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(!isPlanViewActive); }
