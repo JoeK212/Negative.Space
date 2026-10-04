@@ -638,7 +638,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the ground surface is also exported as TERRAIN, its contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The footprints, street lines and section box then follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text as TOPO_LABELS, and the Perspective export adds the ground surface as TERRAIN and the same contour layers. Perspective: the ground surface is exported as TERRAIN (a few polyface meshes, edges hidden so it reads as a smooth surface; AutoCAD can convert them to a surface), its contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The footprints, street lines and section box then follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -948,7 +948,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; with Terrain on it also adds TERRAIN (the ground surface, one quad per grid cell) TOPO (contour lines at round elevations, each at its real Z), TOPO_INDEX (every 5th contour, heavier) and TOPO_LABELS (its elevation in metres above sea level), and the footprints, street lines and section box are draped onto the ground; large files). Street widths are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn), plus, with Terrain on, the contour layers TOPO, TOPO_INDEX and TOPO_LABELS. In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; with Terrain on it also adds TERRAIN (the ground surface as a few polyface meshes with hidden inner edges, so it reads as one smooth surface) TOPO (contour lines at round elevations, each at its real Z), TOPO_INDEX (every 5th contour, heavier) and TOPO_LABELS (its elevation in metres above sea level), and the footprints, street lines and section box are draped onto the ground; large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.156'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.160'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4789,6 +4789,12 @@ function dxfNew(){
     for (const [x, y, z] of pts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n' + (+z).toFixed(3) + '\n70\n32');
     ents.push('0\nSEQEND\n8\n' + layer);
   };
+  const polyface = (layer, verts, faces) => { // v3.4.160: POLYFACE MESH (POLYLINE flag 64): vertex records flag 192, face records flag 128 with 1-based vertex numbers (negative = edge to the next vertex hidden)
+    ents.push('0\nPOLYLINE\n8\n' + layer + '\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n70\n64\n71\n' + verts.length + '\n72\n' + faces.length);
+    for (const [x, y, z] of verts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n' + (+z).toFixed(3) + '\n70\n192');
+    for (const f of faces) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n0.0\n20\n0.0\n30\n0.0\n70\n128\n71\n' + f[0] + '\n72\n' + f[1] + '\n73\n' + f[2]);
+    ents.push('0\nSEQEND\n8\n' + layer);
+  };
   const f2 = v => (+v).toFixed(2);
   // v3.4.147: TEXT (centre-aligned, rotated along the street) and 3DFACE (triangle or quad) for 3D masses
   const label = (layer, x, y, z, h, str, rot) => {  // (named label, not text: the returned object's text() assembles the whole file)
@@ -4801,7 +4807,7 @@ function dxfNew(){
   };
   return {
     layer(name, color){ layers.set(name, color); },
-    poly, poly3, label, face,
+    poly, poly3, polyface, label, face,
     count(){ return ents.length; },
     text(){
       const L = [];
@@ -5065,12 +5071,26 @@ function dxfCutCapFaces(dxf, layer, color, mesh, planes){ // returns { faces, op
 // ---- v3.4.154: terrain in the Perspective DXF (Terrain on): the ground surface and its contour lines, each on its own layer ----
 // The elevation grid (terrainData) is the very grid the on-screen ground is built from, so the DXF surface is that surface: one 3DFACE quad per grid cell, split along the
 // same a-d diagonal the viewer uses. Contours are cut from the same triangles at round ABSOLUTE elevations (z + datum), drawn at the real Z of the model.
-function dxfTerrainFaces(dxf, layer, color, t){
-  const { x0, y0, step, nx, ny, z } = t; let n = 0;
-  dxf.layer(layer, color);
-  const V = (i, j) => [x0 + i * step, y0 + j * step, z[j * nx + i]];
-  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++){ dxf.face(layer, V(i, j), V(i + 1, j), V(i + 1, j + 1), V(i, j + 1)); n++; }
-  return n;
+function dxfTerrainMeshes(t, maxV = 32000, maxF = 32000){
+  // v3.4.160: the ground as POLYFACE MESHES instead of one 3DFACE per square: shared vertices, triangles (always planar, so CAD can convert them to a surface), and every
+  // inner edge invisible (a negative index = the edge from that vertex to the next one is not drawn), so it reads as a smooth shaded ground. Only the outline of the whole
+  // ground stays visible. A polyface mesh holds at most 32,767 vertices and 32,767 faces, so the grid is cut into strips of whole cell-rows (neighbouring strips share
+  // their boundary row, and the seam edges are hidden like any inner edge).
+  const { x0, y0, step, nx, ny, z } = t, out = [];
+  const rows = Math.max(1, Math.min(Math.floor(maxF / (2 * (nx - 1))), Math.floor(maxV / nx) - 1));
+  for (let j0 = 0; j0 < ny - 1; j0 += rows){
+    const j1 = Math.min(ny - 1, j0 + rows), verts = [], faces = [];
+    for (let j = j0; j <= j1; j++) for (let i = 0; i < nx; i++) verts.push([x0 + i * step, y0 + j * step, z[j * nx + i]]);
+    const vi = (i, j) => (j - j0) * nx + i + 1; // 1-based vertex number inside this strip
+    for (let j = j0; j < j1; j++) for (let i = 0; i < nx - 1; i++){
+      const a = vi(i, j), b = vi(i + 1, j), d = vi(i + 1, j + 1), c = vi(i, j + 1);
+      const bottom = j === 0, right = i === nx - 2, top = j === ny - 2, left = i === 0; // the cell touches the edge of the whole grid
+      faces.push([bottom ? a : -a, right ? b : -b, -d]); // a->b, b->d, d->a (the diagonal, always hidden)
+      faces.push([-a, top ? d : -d, left ? c : -c]);     // a->d (the diagonal), d->c, c->a
+    }
+    out.push({ verts, faces });
+  }
+  return out;
 }
 function dxfTopoInterval(range){ for (const v of [0.5, 1, 2, 5, 10, 20, 50, 100]) if (range / v <= 30) return v; return 200; } // at most about 30 lines
 function dxfTopoContours(t, interval){ // -> [{ abs, z, pts:[[x,y,z]...], closed }]
@@ -5138,6 +5158,9 @@ function dxfDrape(pts, closed, zAt, maxSeg, lift){
   return out;
 }
 
+// v3.4.157: contour label height scales with the site (a fixed 7 m was sub-pixel on a 4 km model): the site diagonal / 220, between 8 m and 30 m
+function dxfTopoLabelHeight(diag){ return Math.min(30, Math.max(8, diag / 220)); }
+
 // Street-name TEXT: same placement as the on-screen labels (one per name, at the midpoint of that name's longest part), rotated along the street.
 function dxfStreetNames(dxf, raw, textH){
   const byName = new Map();
@@ -5188,7 +5211,7 @@ async function exportDxfPlan(mode3d){
     const b = activeSectionBox;
     planLine('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
   }
-  let nf = 0, nn = 0, ncap = 0, nopen = 0, nterr = 0, ntopo = 0, nidx = 0, nlab = 0, topoIv = 0;
+  let nf = 0, nn = 0, ncap = 0, nopen = 0, nterr = 0, nmesh = 0, ntopo = 0, nidx = 0, nlab = 0, topoIv = 0;
   if (mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
     // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
@@ -5196,23 +5219,27 @@ async function exportDxfPlan(mode3d){
     // v3.4.152: the cut faces are capped, each solid on its own layer (red negative-space poche as on screen; v3.4.153: building poche in brown-orange, ACI 34, because the dark grey 250 vanished against a dark CAD background)
     if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh){ nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_BUILDINGS', 34, o, cut); ncap += c.faces; nopen += c.open; } }); }
     if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh){ nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_NEGATIVE', 1, o, cut); ncap += c.faces; nopen += c.open; } }); }
-    if (terrainData){ // v3.4.154: the ground (TERRAIN, surface) and its contour lines (TOPO), only with Terrain on
-      nterr = dxfTerrainFaces(dxf, 'TERRAIN', 55, terrainData);
+    if (terrainData && mode3d){ // v3.4.154: the ground surface, Perspective only; v3.4.160: as a few polyface meshes with hidden inner edges
+      dxf.layer('TERRAIN', 126);
+      for (const m of dxfTerrainMeshes(terrainData)){ dxf.polyface('TERRAIN', m.verts, m.faces); nterr += m.faces.length; nmesh++; }
+    }
+  }
+  if (terrainData){ // v3.4.154/v3.4.157: contour lines, index lines and their labels, in the Plan AND the Perspective export (with Terrain on)
       topoIv = dxfTopoInterval(terrainData.maxZ - terrainData.minZ);
       const lines = dxfTopoContours(terrainData, topoIv).filter(l => !l.closed || dxfPolyLength(l.pts, true) >= 3 * terrainData.step);
       const idxLines = lines.filter(l => dxfTopoIsIndex(l.abs, topoIv)), regLines = lines.filter(l => !dxfTopoIsIndex(l.abs, topoIv));
-      if (regLines.length) dxf.layer('TOPO', 54);
-      if (idxLines.length){ dxf.layer('TOPO_INDEX', 2); dxf.layer('TOPO_LABELS', 2); }
+      if (regLines.length) dxf.layer('TOPO', 213);
+      if (idxLines.length){ dxf.layer('TOPO_INDEX', 6); dxf.layer('TOPO_LABELS', 4); } // v3.4.159: four unmistakably different hues (teal surface, orchid contours, magenta index lines, cyan labels) -- the yellows (ACI 54/55/2) all read as one mustard
+      const labelH = dxfTopoLabelHeight(Math.hypot((terrainData.nx - 1) * terrainData.step, (terrainData.ny - 1) * terrainData.step));
       for (const l of regLines) dxf.poly3('TOPO', l.pts, l.closed);
       for (const l of idxLines){
         dxf.poly3('TOPO_INDEX', l.pts, l.closed);
-        for (const t of dxfTopoLabels(l, 300)){ dxf.label('TOPO_LABELS', t.x, t.y, t.z, 7, t.str, t.rot); nlab++; }
+        for (const t of dxfTopoLabels(l, 300)){ dxf.label('TOPO_LABELS', t.x, t.y, t.z, labelH, t.str, t.rot); nlab++; }
       }
       ntopo = lines.length; nidx = idxLines.length;
-    }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
-  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') + (nterr ? `, terrain ${nterr} faces + ${ntopo} contours every ${topoIv} m (${nidx} index lines, ${nlab} labels), plan lines draped on the ground` : '') : '') + ' (meters, 1:1)');
+  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') + (nterr ? `, terrain ${nterr} triangles in ${nmesh} mesh${nmesh > 1 ? 'es' : ''}, plan lines draped on the ground` : '') : '') + (ntopo ? `, ${ntopo} contours every ${topoIv} m (${nidx} index lines, ${nlab} labels)` : '') + ' (meters, 1:1)');
 }
 document.getElementById('exportDxfBtn').addEventListener('click', () => {
   try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(!isPlanViewActive); }

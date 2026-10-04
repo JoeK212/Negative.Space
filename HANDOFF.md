@@ -1,4 +1,38 @@
-# Negative Space -- handoff for a new chat (v3.4.156, 2026-10-04)
+# Negative Space -- handoff for a new chat (v3.4.160, 2026-10-04)
+
+## v3.4.160 -- READ FIRST
+- Joe asked why the terrain is "so many little squares" and whether it can be a surface. Answer given: the source is a regular elevation grid (step >= 16 m), plain R12 DXF has no true surface/solid, and I had drawn every cell edge. He chose "single mesh object, edges hidden". Now TERRAIN = POLYFACE MESHES (dxfTerrainMeshes + dxf.polyface): shared vertices, planar CCW triangles, every inner edge hidden (negative face index), only the outline of the whole grid visible. AutoCAD's polyface limit is 32,767 vertices AND 32,767 faces, so the grid is cut into strips (about 3 meshes for Midtown, not 1; seams hidden). See CHANGELOG.md v3.4.160. I could not test CONVTOSURFACE/CONVTOMESH in AutoCAD: ask Joe whether the meshes convert and whether the strips are a nuisance.
+- Accumulated since the last zip given to Joe (3.4.156), NOT packaged: 3.4.157 (site-scaled labels), 3.4.158 (contours + labels in Plan), 3.4.159 (four distinct terrain colours: TERRAIN 126 teal, TOPO 213 orchid, TOPO_INDEX 6 magenta, TOPO_LABELS 4 cyan), 3.4.160 (polyface terrain). Joe has not seen any of them in CAD.
+- Not done, never chosen by Joe: merge flat areas for fewer faces; bigger street-name text (6 m, ACI 3).
+- Tests on 3.4.160: audit 420/420; `--terrain-only` 71/71; unit checks 21/21; `--no-terrain --skip-caps` 107/107. NOT re-run: `--caps-only`, `--tour-only`, smoke.
+- Package state: last zip given to Joe is 3.4.156.
+
+# (v3.4.159 notes below)
+
+## v3.4.159 -- READ FIRST
+- Joe sent his CAD layer manager (3.4.156 export): TERRAIN 55 / TOPO 54 were the same mustard and TOPO_INDEX / TOPO_LABELS plain yellow; he had asked for each topo layer to be unique. Now four different hues: TERRAIN ACI 126 (deep teal), TOPO 213 (light orchid), TOPO_INDEX 6 (magenta), TOPO_LABELS 4 (cyan, text); none shared with any other layer. One constant each in exportDxfPlan. See CHANGELOG.md v3.4.159.
+- Accumulated since the last zip (3.4.156), NOT yet packaged: 3.4.157 (site-scaled contour labels, ACI 7 then), 3.4.158 (contours + labels in the Plan export), 3.4.159 (these colours). Joe has not seen any of them in CAD yet; he has only seen 3.4.156.
+- Still not done, never chosen by Joe: hide the terrain grid edges (3DFACE flags 15); bigger street-name text (6 m, ACI 3); street-name text and SECTION_BOX/CUT_POCHE_NEGATIVE both red (existing).
+- Tests on 3.4.159: audit 419/419; `--terrain-only` 66/66 (includes the layer-colour checks); `--no-terrain --skip-caps` last run 103/103 on 3.4.158 (not re-run for the colour change). NOT re-run: `--caps-only`, `--tour-only`, smoke.
+- Package state: last zip given to Joe is 3.4.156.
+
+# (v3.4.158 notes below)
+
+## v3.4.158 -- READ FIRST
+- Joe answered "which 2d?" by sending a screenshot of the PLAN export: it had no terrain at all, hence no contours or labels. Now, with Terrain on, the Plan export also carries TOPO, TOPO_INDEX and TOPO_LABELS (same as Perspective; contours keep their real Z). The TERRAIN surface and the draping stay Perspective-only (a plan stays flat). Labels were already made site-scaled (about 19 m) and ACI 7 in 3.4.157. See CHANGELOG.md v3.4.158 and v3.4.157.
+- NOT done, never chosen by Joe: hide the terrain grid edges (3DFACE flags 15); bigger street-name text (6 m, ACI 3: tiny on a whole-site Plan screenshot). Joe has not yet looked at 3.4.157/158 in CAD.
+- Tests on 3.4.158: audit 418/418; `--terrain-only` 64/64 (includes a Plan-with-Terrain export); `--no-terrain --skip-caps` 103/103; unit checks 17/17 (run inside the main suite). NOT re-run: `--caps-only`, `--tour-only`, smoke.
+- Package state: the last zip given to Joe is 3.4.156; 3.4.157 and 3.4.158 are NOT packaged.
+
+# (v3.4.157 notes below)
+
+## v3.4.157 -- READ FIRST
+- Joe saw the 3.4.156 export in CAD: the draping works (footprints and streets now sit on the ground), but "3d and 2d exports very hard to see contour labels / text". Fix: TOPO_LABELS height now scales with the site (diagonal / 220, 8-30 m, about 19 m for Midtown, was a fixed 7 m) and the layer is ACI 7 (was yellow like the contours). See CHANGELOG.md v3.4.157.
+- NOT done, offered to Joe: hide the terrain grid edges (3DFACE flags 15) so contours and labels stand out; contours + labels in the Plan (2D) export (today the Plan export has no terrain at all); bigger street-name text (6 m, ACI 3). Joe has not chosen. Ask whether his "2d" meant the Plan export or just a top view of the 3D export.
+- Tests on 3.4.157: audit 417/417; unit 17/17; `--terrain-only` 59/59 (includes the new label-size check). NOT re-run: `--no-terrain --skip-caps`, `--caps-only`, `--tour-only`, smoke.
+- Package state: last zip given to Joe is 3.4.156; 3.4.157 is NOT packaged.
+
+# (v3.4.156 notes below)
 
 ## v3.4.156 -- READ FIRST
 - DRAPING done (Joe: "ok drape, i understand what you are doing now"). In the PERSPECTIVE export with Terrain on, the footprints (BUILDINGS), street centrelines (STREETS) and SECTION_BOX are 3D polylines on the ground (dxfDrape: segments cut to at most one grid step, each point terrainZ + 0.15 m). Without Terrain, and in the Plan export, they stay flat at Z = 0. Street names were already at terrain height. See CHANGELOG.md v3.4.156.
