@@ -1,4 +1,12 @@
-# Negative Space -- handoff for a new chat (v3.4.153, 2026-10-04)
+# Negative Space -- handoff for a new chat (v3.4.154, 2026-10-04)
+
+## v3.4.154 -- READ FIRST
+- Joe asked why a Terrain-on Perspective DXF showed no terrain: it never exported any. Now, with Terrain on, the Perspective DXF also has TERRAIN (ACI 55, one 3DFACE quad per elevation-grid cell) and TOPO (ACI 2, 3D polylines, contours at round ABSOLUTE elevations z + datum, drawn at model Z; interval auto, about 30 levels max) on their own layers. Joe's choice: "both and separate each by its own unique layer". See CHANGELOG.md v3.4.154.
+- Not done: TOPO in Plan, contour elevation labels (TEXT), a coarser/finer surface option. Joe has NOT yet looked at the terrain export in CAD.
+- Tests on 3.4.154: audit 415/415; `--terrain-only` 43/43 (includes the real-export TERRAIN/TOPO checks); `--no-terrain --skip-caps` 91/91 (includes the new no-browser terrain unit checks and 'no terrain layers when Terrain is off'). NOT re-run on 3.4.154: --caps-only, --tour-only, smoke (the change is confined to the DXF export). One run was lost to a sandbox restart mid-run and repeated.
+- Package state: the last zip given to Joe is 3.4.153; 3.4.154 is NOT packaged.
+
+# (v3.4.153 notes below)
 
 ## v3.4.153 -- READ FIRST
 - Joe saw the 3.4.152 DXF in CAD: line work and caps look right; the dark building poche vanished against the dark background, so CUT_POCHE_BUILDINGS is now brown-orange (ACI 34). Only that colour changed. He still has not given feedback on the red negative-space poche (ACI 1), a hatch, or the dark triangle near the bottom centre of his screenshot (around the plaza; unchecked, he was to zoom in).

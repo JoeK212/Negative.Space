@@ -638,7 +638,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines.</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the ground surface is also exported as TERRAIN and its contour lines as TOPO.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -948,7 +948,7 @@
         <!-- v3.4.145: Joe -- "export this as vector information for a CAD program?" -> DXF. -->
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportDxfBtn" style="margin-top:0;">Export DXF (CAD)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; large files). Street widths are not included.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Vector linework for AutoCAD, Rhino, Revit link, LibreCAD and other CAD tools, in real-world meters at 1:1 (local coordinates from this district's own origin; north is +Y in Plan). In a North/South/East/West elevation it exports the section: SKYLINE (the red building envelope, built from building bounding boxes, so rotated blocks read as their bounding width), POCHE (the negative-space fill, when computed), GROUND and, with Terrain on, EARTH. In Plan it exports the plan: BUILDINGS (footprints), STREETS (centrelines), STREET_NAMES (text) and SECTION_BOX (if drawn). In Perspective it exports the same plan plus the 3D masses with real Z heights: BUILDINGS_3D and/or NEGATIVE_SPACE_3D (whichever is showing, with the current X / Y / Height cutaway applied to the geometry; the cut faces are capped on their own CUT_POCHE layers; flat faces draw without their triangulation lines; with Terrain on it also adds TERRAIN (the ground surface, one quad per grid cell) and TOPO (contour lines at round elevations, each at its real Z); large files). Street widths are not included.</span></span>
         </div>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.153'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.154'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -4783,6 +4783,12 @@ function dxfNew(){
     for (const [x, y] of pts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n0.0');
     ents.push('0\nSEQEND\n8\n' + layer);
   };
+  const poly3 = (layer, pts, closed) => { // v3.4.154: 3D polyline (each vertex carries its own Z): contour lines at their real elevation
+    if (!pts || pts.length < 2) return;
+    ents.push('0\nPOLYLINE\n8\n' + layer + '\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n70\n' + (8 + (closed ? 1 : 0)));
+    for (const [x, y, z] of pts) ents.push('0\nVERTEX\n8\n' + layer + '\n10\n' + (+x).toFixed(3) + '\n20\n' + (+y).toFixed(3) + '\n30\n' + (+z).toFixed(3) + '\n70\n32');
+    ents.push('0\nSEQEND\n8\n' + layer);
+  };
   const f2 = v => (+v).toFixed(2);
   // v3.4.147: TEXT (centre-aligned, rotated along the street) and 3DFACE (triangle or quad) for 3D masses
   const label = (layer, x, y, z, h, str, rot) => {  // (named label, not text: the returned object's text() assembles the whole file)
@@ -4795,7 +4801,7 @@ function dxfNew(){
   };
   return {
     layer(name, color){ layers.set(name, color); },
-    poly, label, face,
+    poly, poly3, label, face,
     count(){ return ents.length; },
     text(){
       const L = [];
@@ -5056,6 +5062,47 @@ function dxfCutCapFaces(dxf, layer, color, mesh, planes){ // returns { faces, op
   return { faces: dxfMeshFaces(dxf, layer, pseudo, null), open: r.open };
 }
 
+// ---- v3.4.154: terrain in the Perspective DXF (Terrain on): the ground surface and its contour lines, each on its own layer ----
+// The elevation grid (terrainData) is the very grid the on-screen ground is built from, so the DXF surface is that surface: one 3DFACE quad per grid cell, split along the
+// same a-d diagonal the viewer uses. Contours are cut from the same triangles at round ABSOLUTE elevations (z + datum), drawn at the real Z of the model.
+function dxfTerrainFaces(dxf, layer, color, t){
+  const { x0, y0, step, nx, ny, z } = t; let n = 0;
+  dxf.layer(layer, color);
+  const V = (i, j) => [x0 + i * step, y0 + j * step, z[j * nx + i]];
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++){ dxf.face(layer, V(i, j), V(i + 1, j), V(i + 1, j + 1), V(i, j + 1)); n++; }
+  return n;
+}
+function dxfTopoInterval(range){ for (const v of [0.5, 1, 2, 5, 10, 20, 50, 100]) if (range / v <= 30) return v; return 200; } // at most about 30 lines
+function dxfTopoContours(t, interval){ // -> [{ abs, z, pts:[[x,y,z]...], closed }]
+  const { x0, y0, step, nx, ny, z, datum, minZ, maxZ } = t, out = [];
+  const vx = v => x0 + (v % nx) * step, vy = v => y0 + ((v / nx) | 0) * step;
+  const first = Math.ceil((minZ + datum) / interval - 1e-9) * interval, last = Math.floor((maxZ + datum) / interval + 1e-9) * interval;
+  for (let L = first; L <= last + 1e-9; L += interval){
+    const zl = L - datum, startMap = new Map(), endSet = new Set(), pts = new Map();
+    const tri = (v0, e01, v1, e12, v2, e20) => { // vertices in winding order; e = id of the grid edge between consecutive vertices
+      const s0 = z[v0] >= zl, s1 = z[v1] >= zl, s2 = z[v2] >= zl; if (s0 === s1 && s1 === s2) return;
+      let outK = -1, inK = -1;
+      const edge = (va, vb, e, sa, sb) => {
+        if (sa === sb) return;
+        if (!pts.has(e)){ const tt = (zl - z[va]) / (z[vb] - z[va]); pts.set(e, [vx(va) + (vx(vb) - vx(va)) * tt, vy(va) + (vy(vb) - vy(va)) * tt, zl]); }
+        if (sa) outK = e; else inK = e;
+      };
+      edge(v0, v1, e01, s0, s1); edge(v1, v2, e12, s1, s2); edge(v2, v0, e20, s2, s0);
+      if (outK >= 0 && inK >= 0){ startMap.set(outK, inK); endSet.add(inK); }
+    };
+    for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++){
+      const v = j * nx + i; // edge ids: 3v = right of v, 3v+1 = up from v, 3v+2 = diagonal v -> v+nx+1
+      tri(v, 3 * v, v + 1, 3 * (v + 1) + 1, v + nx + 1, 3 * v + 2);
+      tri(v, 3 * v + 2, v + nx + 1, 3 * (v + nx), v + nx, 3 * v + 1);
+    }
+    const used = new Set();
+    const chain = k0 => { const line = []; let k = k0; while (k !== undefined && !used.has(k)){ used.add(k); line.push(pts.get(k)); k = startMap.get(k); } return line; };
+    for (const k0 of startMap.keys()) if (!endSet.has(k0) && !used.has(k0)){ const l = chain(k0); if (l.length >= 2) out.push({ abs: L, z: zl, pts: l, closed: false }); } // runs that leave the grid
+    for (const k0 of startMap.keys()) if (!used.has(k0)){ const l = chain(k0); if (l.length >= 3) out.push({ abs: L, z: zl, pts: l, closed: true }); } // loops
+  }
+  return out;
+}
+
 // Street-name TEXT: same placement as the on-screen labels (one per name, at the midpoint of that name's longest part), rotated along the street.
 function dxfStreetNames(dxf, raw, textH){
   const byName = new Map();
@@ -5104,7 +5151,7 @@ async function exportDxfPlan(mode3d){
     const b = activeSectionBox;
     dxf.poly('SECTION_BOX', [[b.xMin, b.yMin], [b.xMax, b.yMin], [b.xMax, b.yMax], [b.xMin, b.yMax]], true);
   }
-  let nf = 0, nn = 0, ncap = 0, nopen = 0;
+  let nf = 0, nn = 0, ncap = 0, nopen = 0, nterr = 0, ntopo = 0, topoIv = 0;
   if (mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
     // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
@@ -5112,9 +5159,17 @@ async function exportDxfPlan(mode3d){
     // v3.4.152: the cut faces are capped, each solid on its own layer (red negative-space poche as on screen; v3.4.153: building poche in brown-orange, ACI 34, because the dark grey 250 vanished against a dark CAD background)
     if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh){ nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_BUILDINGS', 34, o, cut); ncap += c.faces; nopen += c.open; } }); }
     if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh){ nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_NEGATIVE', 1, o, cut); ncap += c.faces; nopen += c.open; } }); }
+    if (terrainData){ // v3.4.154: the ground (TERRAIN, surface) and its contour lines (TOPO), only with Terrain on
+      nterr = dxfTerrainFaces(dxf, 'TERRAIN', 55, terrainData);
+      topoIv = dxfTopoInterval(terrainData.maxZ - terrainData.minZ);
+      const lines = dxfTopoContours(terrainData, topoIv);
+      if (lines.length) dxf.layer('TOPO', 2);
+      for (const l of lines) dxf.poly3('TOPO', l.pts, l.closed);
+      ntopo = lines.length;
+    }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');
-  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') : '') + ' (meters, 1:1)');
+  toast(`Saved DXF ${mode3d ? '3D + plan' : 'plan'}: ${nb} footprints, ${ns} street lines, ${nt} street names` + (mode3d ? `, ${nf + nn} 3D faces` + (ncap ? ` + ${ncap} cut-poche faces` : '') + (nopen ? ` (${nopen} open section${nopen > 1 ? 's' : ''} not capped)` : '') + (nterr ? `, terrain ${nterr} faces + ${ntopo} contours every ${topoIv} m` : '') : '') + ' (meters, 1:1)');
 }
 document.getElementById('exportDxfBtn').addEventListener('click', () => {
   try { if (inLockedElevation()) exportDxfElevation(); else exportDxfPlan(!isPlanViewActive); }
