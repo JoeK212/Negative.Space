@@ -1,4 +1,10 @@
-# Negative Space -- handoff for a new chat (v3.4.152, 2026-10-04)
+# Negative Space -- handoff for a new chat (v3.4.153, 2026-10-04)
+
+## v3.4.153 -- READ FIRST
+- Joe saw the 3.4.152 DXF in CAD: line work and caps look right; the dark building poche vanished against the dark background, so CUT_POCHE_BUILDINGS is now brown-orange (ACI 34). Only that colour changed. He still has not given feedback on the red negative-space poche (ACI 1), a hatch, or the dark triangle near the bottom centre of his screenshot (around the plaza; unchecked, he was to zoom in).
+- Tests on 3.4.153: audit 414/414; `--no-terrain --skip-caps` 84/84 (includes the new layer-table colour check). NOT re-run on 3.4.153: --caps-only, --terrain-only, --tour-only, smoke (the change is one colour constant in the DXF export; they passed on 3.4.150).
+
+# (v3.4.152 notes below)
 
 ## v3.4.152 -- READ FIRST
 - Joe asked for caps on the cut faces "maybe with a unique cut poche". Done in the Perspective DXF: the cut faces are capped on CUT_POCHE_NEGATIVE (color 1, red) and CUT_POCHE_BUILDINGS (color 250, dark). Method and limits: CHANGELOG.md v3.4.152 (plane cross-section loops, even-odd holes, earcut, clipped to the removed corner, written through dxfMeshFaces). Caps are flat 3DFACE surfaces (not solids), not hatched. Open (non-watertight) sections are skipped and reported in the toast.

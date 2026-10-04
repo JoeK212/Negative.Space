@@ -638,7 +638,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (dark), and flat faces draw without their triangulation lines.</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.152'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.153'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -5109,8 +5109,8 @@ async function exportDxfPlan(mode3d){
     // 3D masses of whatever the Perspective view is showing: the buildings and/or the negative-space solid, with real Z heights
     // v3.4.148: the same three planes the screen uses for the Perspective cutaway (height, X, Y; corner octant removed), applied to the geometry
     const cut = [sectionPlane, xClipPlane, yClipPlane];
-    // v3.4.152: the cut faces are capped, each solid on its own layer (red negative-space poche as on screen, dark building poche)
-    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh){ nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_BUILDINGS', 250, o, cut); ncap += c.faces; nopen += c.open; } }); }
+    // v3.4.152: the cut faces are capped, each solid on its own layer (red negative-space poche as on screen; v3.4.153: building poche in brown-orange, ACI 34, because the dark grey 250 vanished against a dark CAD background)
+    if (solidGroup && solidGroup.visible){ dxf.layer('BUILDINGS_3D', 8); solidGroup.traverse(o => { if (o.isMesh){ nf += dxfMeshFaces(dxf, 'BUILDINGS_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_BUILDINGS', 34, o, cut); ncap += c.faces; nopen += c.open; } }); }
     if (negativeMesh && negativeMesh.visible){ dxf.layer('NEGATIVE_SPACE_3D', 30); negativeMesh.traverse(o => { if (o.isMesh){ nn += dxfMeshFaces(dxf, 'NEGATIVE_SPACE_3D', o, cut); const c = dxfCutCapFaces(dxf, 'CUT_POCHE_NEGATIVE', 1, o, cut); ncap += c.faces; nopen += c.open; } }); }
   }
   dxfDownload(dxf, dxfBaseName() + (mode3d ? '-3d' : '-plan') + '.dxf');

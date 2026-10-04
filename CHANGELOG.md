@@ -1,3 +1,7 @@
+v3.4.153 - 2026-10-04 - Building cut poche is brown-orange.
+
+Joe opened the 3.4.152 DXF in CAD (screenshot): walls are clean planes and the caps are there, but the building poche (ACI 250, dark grey) reads as near-black on the dark CAD background and merges with unlit areas. Asked which colour: "Warm brown-orange". CUT_POCHE_BUILDINGS is now ACI 34 (RGB 153/76/0): distinct from the mold's bright orange (ACI 30, NEGATIVE_SPACE_3D) and from the red negative-space poche (ACI 1, CUT_POCHE_NEGATIVE), and visible on both dark and white backgrounds. One-line change in exportDxfPlan if another index is wanted (ACI 32 = 204/102/0 is a brighter burnt orange but closer to the mold orange). Help window updated. Autotest: new check that the exported layer table carries both poche colours. Everything else is as in 3.4.152. Results: audit 414/414; --no-terrain --skip-caps 84/84; the other autotest pieces and smoke were not re-run (they passed on 3.4.150 and the change is one colour constant).
+
 v3.4.152 - 2026-10-04 - Perspective 3D DXF: the cut faces are capped, on their own poche layers.
 
 Joe (after the 3.4.151 line-work fix): "yes caps the cut faces maybe with a unique cut poche."
