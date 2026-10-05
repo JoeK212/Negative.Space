@@ -1,4 +1,10 @@
-# Negative Space -- handoff for a new chat (v3.4.160, 2026-10-04)
+# Negative Space -- handoff for a new chat (v3.4.161, 2026-10-05)
+
+## v3.4.161 -- READ FIRST
+- Joe (CAD + app screenshots, Midtown, Y=0, H=0): two floating slivers at the far corner (one a thin full-height line). Cause: buildings overhang the X/Y slider ends by about 2 m, so at the end that removes everything they stayed. Fix: edgePushedThreshold() puts the real clip plane 3 m past the slider end there (screen, stencil poche, cut lines, DXF and building caps all follow). Likely the old "two tiny specks" issue. See CHANGELOG.md v3.4.161. Needs Joe's look: Y=0 and X=0 (and flipped ends) in the app and in the DXF.
+- Also open from 3.4.160: Joe confirmed the terrain polyface mesh shows as ONE shaded surface in AutoCAD (3 strips, seams not a complaint so far); it reads flat in place because of the other layers and the low relief. Offered, not chosen: terrain exaggeration toggle (1x-5x) and a lighter TERRAIN colour.
+- Package state: 3.4.161 packaged for Joe (negative-space-v3_4_161-full.zip); tests: audit 421/421, main 107/107, caps 48/48, smoke 324/0.
+
 
 ## v3.4.160 -- READ FIRST
 - Joe asked why the terrain is "so many little squares" and whether it can be a surface. Answer given: the source is a regular elevation grid (step >= 16 m), plain R12 DXF has no true surface/solid, and I had drawn every cell edge. He chose "single mesh object, edges hidden". Now TERRAIN = POLYFACE MESHES (dxfTerrainMeshes + dxf.polyface): shared vertices, planar CCW triangles, every inner edge hidden (negative face index), only the outline of the whole grid visible. AutoCAD's polyface limit is 32,767 vertices AND 32,767 faces, so the grid is cut into strips (about 3 meshes for Midtown, not 1; seams hidden). See CHANGELOG.md v3.4.160. I could not test CONVTOSURFACE/CONVTOMESH in AutoCAD: ask Joe whether the meshes convert and whether the strips are a nuisance.

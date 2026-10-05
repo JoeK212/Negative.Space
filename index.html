@@ -1033,7 +1033,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.160'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.161'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*
@@ -2975,7 +2975,7 @@ function rebuildBuildingXYCap(axis){
   if (!buildingCapFillGroups) return;
   const group = buildingCapFillGroups[axis];
   const oldMesh = group.userData.quad;
-  const value = axis === 'x' ? xThreshold : yThreshold;
+  const value = axis === 'x' ? edgePushedThreshold('x', xThreshold, flipXCutaway) : edgePushedThreshold('y', yThreshold, flipYCutaway); // v3.4.161: same pushed plane as the clip
   const geo = buildBuildingXYCapGeometry(axis, value);
   if (oldMesh){ group.remove(oldMesh); oldMesh.geometry.dispose(); }
   if (!geo){ group.userData.quad = null; return; } // no building crosses this exact plane -- genuinely nothing to show
@@ -3076,8 +3076,17 @@ function buildBuildingCapFillGroups(){
 // this one function, rather than being the thing directly written to.
 // Toggling flip now keeps the cut position exactly where it was and swaps
 // which side of it is solid vs excavated -- the actually-intended behavior.
-function xPlaneConstant(threshold){ return flipXCutaway ? -threshold : threshold; }
-function yPlaneConstant(threshold){ return flipYCutaway ? -threshold : threshold; }
+// v3.4.161: Joe, Midtown, Y at 0 (the end where every building should be cut away): two slivers of buildings that overhang the site box by about 2 m stayed in the kept strip. At the end of the slider where the cut removes EVERYTHING, the real plane now sits 3 m beyond the site edge, so the overhang goes too. Screen, caps and DXF all read these planes. Any other position is unchanged.
+const CUT_EDGE_PUSH = 3, CUT_EDGE_TOL = 0.05; // meters
+function edgePushedThreshold(axis, t, flip){
+  const sl = document.getElementById(axis === 'x' ? 'xClipSlider' : 'yClipSlider'), lo = Number(sl.min), hi = Number(sl.max); // the slider ends are the data min/max; the site box (siteMin/Max) is 2 m wider
+  if (!isFinite(lo) || !isFinite(hi) || siteMinX === undefined) return t;
+  if (!flip && t <= lo + CUT_EDGE_TOL) return t - CUT_EDGE_PUSH;
+  if (flip && t >= hi - CUT_EDGE_TOL) return t + CUT_EDGE_PUSH;
+  return t;
+}
+function xPlaneConstant(threshold){ const t = edgePushedThreshold('x', threshold, flipXCutaway); return flipXCutaway ? -t : t; }
+function yPlaneConstant(threshold){ const t = edgePushedThreshold('y', threshold, flipYCutaway); return flipYCutaway ? -t : t; }
 // Called alongside updateCutLinePlanes() everywhere a cutaway slider or
 // resetCutaway() changes one of the 3 live plane constants -- keeps the
 // negated planes and the 3 quads' positions in lockstep with the sliders.
