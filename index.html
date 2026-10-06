@@ -796,7 +796,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.166";
+const APP_VERSION = "3.4.167";
 
 let manifoldWasm = null;
 
@@ -4534,6 +4534,10 @@ function solidMergeFaces(vp, np, tv, tol) {
   for (const sd of order) {
     if (seen[sd]) continue;
     seen[sd] = 1;
+    if (area[sd] < 2e-4) {
+      faces.push([ tv[3 * sd], tv[3 * sd + 1], tv[3 * sd + 2] ]);
+      continue;
+    }
     const a = tv[3 * sd], b = tv[3 * sd + 1], c = tv[3 * sd + 2], A = P(a), B = P(b), C = P(c);
     const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -4551,7 +4555,7 @@ function solidMergeFaces(vp, np, tv, tol) {
       const [u, v] = stack.pop();
       if (next.get(u) !== v) continue;
       const t = owner.get(v * nV + u);
-      if (t === undefined || seen[t]) continue;
+      if (t === undefined || seen[t] || area[t] < 2e-4) continue;
       const i0 = tv[3 * t], i1 = tv[3 * t + 1], i2 = tv[3 * t + 2], x = i0 !== u && i0 !== v ? i0 : i1 !== u && i1 !== v ? i1 : i2;
       if (inP.has(x)) continue;
       const X = P(x);
@@ -4578,9 +4582,53 @@ function solidMergeFaces(vp, np, tv, tol) {
       }
       ok = dev <= tol;
     }
+    if (ok && poly.length > 3) {
+      const P0 = P(poly[0]);
+      let sx = 0, sy = 0, sz = 0;
+      for (let i = 1; i + 1 < poly.length; i++) {
+        const Q = P(poly[i]), R = P(poly[i + 1]), qx = Q[0] - P0[0], qy = Q[1] - P0[1], qz = Q[2] - P0[2], rx = R[0] - P0[0], ry = R[1] - P0[1], rz = R[2] - P0[2];
+        sx += qy * rz - qz * ry;
+        sy += qz * rx - qx * rz;
+        sz += qx * ry - qy * rx;
+      }
+      let sum = 0;
+      for (const t of grp) sum += area[t];
+      ok = Math.abs(sx * nx + sy * ny + sz * nz - sum) <= 1e-6 * Math.max(sum, 1) && Math.hypot(sx, sy, sz) - Math.abs(sx * nx + sy * ny + sz * nz) <= 1e-6 * Math.max(sum, 1);
+    }
     if (ok) faces.push(poly); else for (const t of grp) faces.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
   }
   return faces;
+}
+
+function solidDropSlivers(faces, vp, np) {
+  const nV = vp.length / np, P = i => [ vp[i * np], vp[i * np + 1], vp[i * np + 2] ], key = (u, v) => u * nV + v, ef = new Map, alive = new Uint8Array(faces.length).fill(1);
+  faces.forEach((f, i) => {
+    for (let k = 0; k < f.length; k++) ef.set(key(f[k], f[(k + 1) % f.length]), i);
+  });
+  const len = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  let dropped = 0;
+  for (let i = 0; i < faces.length; i++) {
+    const f = faces[i];
+    if (!alive[i] || f.length !== 3) continue;
+    const A = P(f[0]), B = P(f[1]), C = P(f[2]), ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2 > 1e-6) continue;
+    const L = [ len(A, B), len(B, C), len(C, A) ], m = L.indexOf(Math.max(...L)), u = f[m], v = f[(m + 1) % 3], w = f[(m + 2) % 3];
+    const g = ef.get(key(v, u));
+    if (g === undefined || g === i || !alive[g]) continue;
+    const gf = faces[g], at = gf.findIndex((x, k) => x === v && gf[(k + 1) % gf.length] === u);
+    if (at < 0) continue;
+    gf.splice(at + 1, 0, w);
+    ef.delete(key(v, u));
+    ef.set(key(v, w), g);
+    ef.set(key(w, u), g);
+    ef.delete(key(u, v));
+    alive[i] = 0;
+    dropped++;
+  }
+  return {
+    faces: faces.filter((_, i) => alive[i]),
+    dropped: dropped
+  };
 }
 
 function solidCutBox(solid) {
@@ -4618,13 +4666,20 @@ function exportSolidDxf() {
     }
     solid = made;
   }
+  let simp = null;
+  try {
+    simp = solid.simplify(.02);
+    solid = simp;
+  } catch (e) {
+    console.warn("solid simplify unavailable", e);
+  }
   const mesh = solid.getMesh(), np = mesh.numProp, vp = mesh.vertProperties, tv = mesh.triVerts, nV = vp.length / np, nT = tv.length / 3;
   if (!nT) {
     if (made) made.delete();
     toast("Nothing left to export: the cutaway removes the whole negative space");
     return;
   }
-  const mn = [ Infinity, Infinity, Infinity ], mx = [ -Infinity, -Infinity, -Infinity ], f3 = v => (Math.round(v * 1e4) / 1e4).toFixed(4);
+  const mn = [ Infinity, Infinity, Infinity ], mx = [ -Infinity, -Infinity, -Infinity ], f3 = v => v.toFixed(6);
   const parts = [];
   let buf = [];
   const flush = () => {
@@ -4649,6 +4704,8 @@ function exportSolidDxf() {
     faces = [];
     for (let t = 0; t < nT; t++) faces.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
   }
+  const sl = solidDropSlivers(faces, vp, np);
+  faces = sl.faces;
   let nInts = 0;
   for (const f of faces) nInts += f.length + 1;
   buf.push(" 93\n" + nInts);
@@ -4660,6 +4717,7 @@ function exportSolidDxf() {
   flush();
   const vol = solid.volume();
   if (made) made.delete();
+  if (simp) simp.delete();
   const head = DXF_SOLID_HEAD.replace(/\$EXTMIN\n 10\n1e\+20\n 20\n1e\+20\n 30\n1e\+20/, "$EXTMIN\n 10\n" + f3(mn[0]) + "\n 20\n" + f3(mn[1]) + "\n 30\n" + f3(mn[2])).replace(/\$EXTMAX\n 10\n-1e\+20\n 20\n-1e\+20\n 30\n-1e\+20/, "$EXTMAX\n 10\n" + f3(mx[0]) + "\n 20\n" + f3(mx[1]) + "\n 30\n" + f3(mx[2]));
   const blob = new Blob([ head, ...parts, DXF_SOLID_TAIL ], {
     type: "application/dxf"

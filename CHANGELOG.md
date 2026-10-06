@@ -2,6 +2,8 @@
 
 Short public history. Dates are 2026.
 
+**3.4.167** (Oct 6) - Export solid: cleaner mesh (no zero-area faces, 2 cm simplify, full-precision coordinates) for AutoCAD's CONVTOSOLID.
+
 **3.4.166** (Oct 6) - Export solid: flat triangles are merged into larger faces, so walls and tops no longer show triangle lines in CAD (a checkbox turns it off).
 
 **3.4.165** (Oct 6) - New **Export solid (DXF mesh)**: the negative space as one closed 3D mesh (AutoCAD DXF 2010) with the X / Y / Height cutaway already subtracted. In AutoCAD, run `CONVTOSOLID` on it to get a 3D solid.
