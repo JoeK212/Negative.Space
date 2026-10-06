@@ -20,10 +20,18 @@ python3 -m http.server 8888
 
 then open `http://localhost:8888`.
 
+Before considering any change done, run:
+
+```
+node audit_deploy.js
+```
+
 ## More
 
 - In-app help: the **?** button, top right.
-- Version history: [CHANGELOG.md](CHANGELOG.md)
+- Feature walkthrough and data-pipeline notes: [EXTENDED.md](EXTENDED.md)
+- Full version history: [CHANGELOG.md](CHANGELOG.md)
+- Architecture, known gotchas, working methodology for future changes: [AUDIT.md](AUDIT.md)
 
 ## Data and licence
 

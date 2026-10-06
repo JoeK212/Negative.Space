@@ -486,7 +486,7 @@
         <dt>Export DXF (CAD)</dt>
         <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The Perspective export adds the ground surface as TERRAIN (a few polyface meshes with hidden edges, so it reads as a smooth surface; AutoCAD can convert them to a surface) plus the same contour layers, and the footprints, street lines and section box follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Export solid (DXF mesh)</dt>
-        <dd>The negative space as one closed 3D mesh (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. In AutoCAD run CONVTOSOLID and pick it to get a 3D solid. It is the computed negative space only (no buildings, no terrain surface, no linework). Midtown is about 100,000 triangles.</dd>
+        <dd>The negative space as one closed 3D mesh (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. It is the computed negative space only (no buildings, no terrain surface, no linework). To make it a 3D solid in AutoCAD, type <b>SMOOTHMESHCONVERT</b> and set it to <b>2</b> (faceted, merges flat faces), then run <b>CONVTOSOLID</b> and pick the mesh; the default smooth setting refuses this mesh. Flat triangles are merged into bigger faces so walls and tops show no diagonals (untick "Merge flat triangles" for plain triangles). A mesh face cannot have a hole, so the floor around buildings keeps a few long lines until the solid is cleaned in CAD (SOLIDEDIT, Body, Clean). The solid is simplified by 2 cm before export, which changes its volume by about 0.0001%. Midtown is about 40,000 faces. If CONVTOSOLID says the mesh is not closed or self-intersects, try again with the merge unticked.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -714,7 +714,7 @@
         </div>
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportSolidDxfBtn" style="margin-top:0;">Export solid (DXF mesh)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">The negative space as ONE closed 3D mesh (DXF 2010), with your X / Y / Height cutaway already subtracted, so it is a real volume and not loose surfaces. In AutoCAD run CONVTOSOLID and pick it to get a 3D solid. Flat triangles are merged into bigger faces so walls and tops show no diagonals; untick the box for plain triangles. A face cannot have a hole, so a floor around buildings keeps some lines.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">The negative space as ONE closed 3D mesh (DXF 2010), with your X / Y / Height cutaway already subtracted, so it is a real volume and not loose surfaces. In AutoCAD set SMOOTHMESHCONVERT to 2, then run CONVTOSOLID and pick it to get a 3D solid. Flat triangles are merged into bigger faces so walls and tops show no diagonals; untick the box for plain triangles. A face cannot have a hole, so a floor around buildings keeps some lines.</span></span>
         </div>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces" checked> Merge flat triangles into bigger faces (fewer lines)</label>
         
@@ -796,7 +796,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.167";
+const APP_VERSION = "3.4.168";
 
 let manifoldWasm = null;
 
@@ -4666,6 +4666,19 @@ function exportSolidDxf() {
     }
     solid = made;
   }
+  try {
+    const er = window.__ERODE != null ? window.__ERODE : .05;
+    if (er > 0) {
+      const k = Manifold.cube([ er * 2, er * 2, er * 2 ], true);
+      const e2 = solid.minkowskiDifference(k);
+      k.delete();
+      if (e2.status() === "NoError" && e2.volume() > 0) {
+        solid = e2;
+      } else e2.delete();
+    }
+  } catch (e) {
+    console.warn("solid erode unavailable", e);
+  }
   let simp = null;
   try {
     simp = solid.simplify(.02);
@@ -4729,7 +4742,7 @@ function exportSolidDxf() {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 8e3);
-  toast(`Saved solid DXF: one closed mesh, ${nV.toLocaleString()} vertices, ${faces.length.toLocaleString()} faces` + (merge ? ` (merged from ${nT.toLocaleString()} triangles)` : "") + `, ${Math.round(vol).toLocaleString()} m3` + (box && !box.unsupported ? ", cutaway applied" : ", no cutaway") + note + ". In AutoCAD: CONVTOSOLID");
+  toast(`Saved solid DXF: one closed mesh, ${nV.toLocaleString()} vertices, ${faces.length.toLocaleString()} faces` + (merge ? ` (merged from ${nT.toLocaleString()} triangles)` : "") + `, ${Math.round(vol).toLocaleString()} m3` + (box && !box.unsupported ? ", cutaway applied" : ", no cutaway") + note + ". In AutoCAD: SMOOTHMESHCONVERT = 2, then CONVTOSOLID");
 }
 
 document.getElementById("exportSolidDxfBtn").addEventListener("click", () => {
