@@ -32,3 +32,13 @@ node audit_deploy.js
 - Feature walkthrough and data-pipeline notes: [EXTENDED.md](EXTENDED.md)
 - Full version history: [CHANGELOG.md](CHANGELOG.md)
 - Architecture, known gotchas, working methodology for future changes: [AUDIT.md](AUDIT.md)
+
+## Data and licence
+
+The code in this repository is released under the MIT licence (see `LICENSE`). That licence does not cover the data in `data/`, which is derived from third-party sources that have their own terms:
+
+- **Buildings:** Overture Maps Foundation (building and building-part footprints and heights).
+- **Streets and the Manhattan outline:** NYC Open Data.
+- **Terrain (loaded live, not stored here):** Terrain Tiles (Terrarium) hosted on AWS, built from public elevation sources including NASA SRTM and USGS 3DEP.
+
+Check each source's own terms before reusing the data.
