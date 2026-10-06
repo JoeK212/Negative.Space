@@ -714,8 +714,9 @@
         </div>
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportSolidDxfBtn" style="margin-top:0;">Export solid (DXF mesh)</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">The negative space as ONE closed 3D mesh (DXF 2010), with your X / Y / Height cutaway already subtracted, so it is a real volume and not loose surfaces. In AutoCAD run CONVTOSOLID and pick it to get a 3D solid. Large: Midtown is a few hundred thousand triangles and may take AutoCAD a moment.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">The negative space as ONE closed 3D mesh (DXF 2010), with your X / Y / Height cutaway already subtracted, so it is a real volume and not loose surfaces. In AutoCAD run CONVTOSOLID and pick it to get a 3D solid. Flat triangles are merged into bigger faces so walls and tops show no diagonals; untick the box for plain triangles. A face cannot have a hole, so a floor around buildings keeps some lines.</span></span>
         </div>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces" checked> Merge flat triangles into bigger faces (fewer lines)</label>
         
         <button class="btn secondary" id="copyLinkBtn" style="margin-top:2px;" title="Copies a link to this exact district, cutaway position, and layer(s) shown. Camera view/orientation and any drawn box aren't included yet.">Copy link</button>
       </div>
@@ -795,7 +796,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.165";
+const APP_VERSION = "3.4.166";
 
 let manifoldWasm = null;
 
@@ -4516,6 +4517,72 @@ const DXF_SOLID_HEAD = "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1024\n 
 
 const DXF_SOLID_TAIL = "  0\nENDSEC\n  0\nSECTION\n  2\nOBJECTS\n  0\nDICTIONARY\n  5\nA\n330\n0\n100\nAcDbDictionary\n281\n1\n  3\nACAD_COLOR\n350\nB\n  3\nACAD_GROUP\n350\nC\n  3\nACAD_LAYOUT\n350\nD\n  3\nACAD_MATERIAL\n350\nE\n  3\nACAD_MLEADERSTYLE\n350\nF\n  3\nACAD_MLINESTYLE\n350\n10\n  3\nACAD_PLOTSETTINGS\n350\n11\n  3\nACAD_PLOTSTYLENAME\n350\n12\n  3\nACAD_SCALELIST\n350\n14\n  3\nACAD_TABLESTYLE\n350\n15\n  3\nACAD_VISUALSTYLE\n350\n16\n  3\nEZDXF_META\n350\n2D\n  0\nDICTIONARY\n  5\nB\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nDICTIONARY\n  5\nC\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nDICTIONARY\n  5\nD\n330\nA\n100\nAcDbDictionary\n281\n1\n  3\nModel\n350\n1A\n  3\nLayout1\n350\n1E\n  0\nDICTIONARY\n  5\nE\n330\nA\n100\nAcDbDictionary\n281\n1\n  3\nByBlock\n350\n1F\n  3\nByLayer\n350\n20\n  3\nGlobal\n350\n21\n  0\nDICTIONARY\n  5\nF\n330\nA\n100\nAcDbDictionary\n281\n1\n  3\nStandard\n350\n2C\n  0\nDICTIONARY\n  5\n10\n330\nA\n100\nAcDbDictionary\n281\n1\n  3\nStandard\n350\n22\n  0\nDICTIONARY\n  5\n11\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nACDBDICTIONARYWDFLT\n  5\n12\n330\nA\n100\nAcDbDictionary\n281\n1\n  3\nNormal\n350\n13\n100\nAcDbDictionaryWithDefault\n340\n13\n  0\nACDBPLACEHOLDER\n  5\n13\n330\n12\n  0\nDICTIONARY\n  5\n14\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nDICTIONARY\n  5\n15\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nDICTIONARY\n  5\n16\n330\nA\n100\nAcDbDictionary\n281\n1\n  0\nLAYOUT\n  5\n1A\n330\nD\n100\nAcDbPlotSettings\n  1\n\n  4\nA3\n  6\n\n 40\n7.5\n 41\n20.0\n 42\n7.5\n 43\n20.0\n 44\n420.0\n 45\n297.0\n 46\n0.0\n 47\n0.0\n 48\n0.0\n 49\n0.0\n140\n0.0\n141\n0.0\n142\n1.0\n143\n1.0\n 70\n1024\n 72\n1\n 73\n0\n 74\n5\n  7\n\n 75\n16\n 76\n0\n 77\n2\n 78\n300\n147\n1.0\n148\n0.0\n149\n0.0\n100\nAcDbLayout\n  1\nModel\n 70\n1\n 71\n0\n 10\n0.0\n 20\n0.0\n 11\n420.0\n 21\n297.0\n 12\n0.0\n 22\n0.0\n 32\n0.0\n 14\n1e+20\n 24\n1e+20\n 34\n1e+20\n 15\n-1e+20\n 25\n-1e+20\n 35\n-1e+20\n146\n0.0\n 13\n0.0\n 23\n0.0\n 33\n0.0\n 16\n1.0\n 26\n0.0\n 36\n0.0\n 17\n0.0\n 27\n1.0\n 37\n0.0\n 76\n1\n330\n17\n  0\nLAYOUT\n  5\n1E\n330\nD\n100\nAcDbPlotSettings\n  1\n\n  4\nA3\n  6\n\n 40\n7.5\n 41\n20.0\n 42\n7.5\n 43\n20.0\n 44\n420.0\n 45\n297.0\n 46\n0.0\n 47\n0.0\n 48\n0.0\n 49\n0.0\n140\n0.0\n141\n0.0\n142\n1.0\n143\n1.0\n 70\n0\n 72\n1\n 73\n0\n 74\n5\n  7\n\n 75\n16\n 76\n0\n 77\n2\n 78\n300\n147\n1.0\n148\n0.0\n149\n0.0\n100\nAcDbLayout\n  1\nLayout1\n 70\n1\n 71\n1\n 10\n0.0\n 20\n0.0\n 11\n420.0\n 21\n297.0\n 12\n0.0\n 22\n0.0\n 32\n0.0\n 14\n1e+20\n 24\n1e+20\n 34\n1e+20\n 15\n-1e+20\n 25\n-1e+20\n 35\n-1e+20\n146\n0.0\n 13\n0.0\n 23\n0.0\n 33\n0.0\n 16\n1.0\n 26\n0.0\n 36\n0.0\n 17\n0.0\n 27\n1.0\n 37\n0.0\n 76\n1\n330\n1B\n  0\nMATERIAL\n  5\n1F\n102\n{ACAD_REACTORS\n330\nE\n102\n}\n330\nE\n100\nAcDbMaterial\n  1\nByBlock\n  2\n\n 70\n0\n 40\n1.0\n 71\n1\n 41\n1.0\n 91\n-1023410177\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 44\n0.5\n 73\n0\n 45\n1.0\n 46\n1.0\n 77\n1\n  4\n\n 78\n1\n 79\n1\n170\n1\n 48\n1.0\n171\n1\n  6\n\n172\n1\n173\n1\n174\n1\n140\n1.0\n141\n1.0\n175\n1\n  7\n\n176\n1\n177\n1\n178\n1\n143\n1.0\n179\n1\n  8\n\n270\n1\n271\n1\n272\n1\n145\n1.0\n146\n1.0\n273\n1\n  9\n\n274\n1\n275\n1\n276\n1\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 94\n63\n  0\nMATERIAL\n  5\n20\n102\n{ACAD_REACTORS\n330\nE\n102\n}\n330\nE\n100\nAcDbMaterial\n  1\nByLayer\n  2\n\n 70\n0\n 40\n1.0\n 71\n1\n 41\n1.0\n 91\n-1023410177\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 44\n0.5\n 73\n0\n 45\n1.0\n 46\n1.0\n 77\n1\n  4\n\n 78\n1\n 79\n1\n170\n1\n 48\n1.0\n171\n1\n  6\n\n172\n1\n173\n1\n174\n1\n140\n1.0\n141\n1.0\n175\n1\n  7\n\n176\n1\n177\n1\n178\n1\n143\n1.0\n179\n1\n  8\n\n270\n1\n271\n1\n272\n1\n145\n1.0\n146\n1.0\n273\n1\n  9\n\n274\n1\n275\n1\n276\n1\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 94\n63\n  0\nMATERIAL\n  5\n21\n102\n{ACAD_REACTORS\n330\nE\n102\n}\n330\nE\n100\nAcDbMaterial\n  1\nGlobal\n  2\n\n 70\n0\n 40\n1.0\n 71\n1\n 41\n1.0\n 91\n-1023410177\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 44\n0.5\n 73\n0\n 45\n1.0\n 46\n1.0\n 77\n1\n  4\n\n 78\n1\n 79\n1\n170\n1\n 48\n1.0\n171\n1\n  6\n\n172\n1\n173\n1\n174\n1\n140\n1.0\n141\n1.0\n175\n1\n  7\n\n176\n1\n177\n1\n178\n1\n143\n1.0\n179\n1\n  8\n\n270\n1\n271\n1\n272\n1\n145\n1.0\n146\n1.0\n273\n1\n  9\n\n274\n1\n275\n1\n276\n1\n 42\n1.0\n 72\n1\n  3\n\n 73\n1\n 74\n1\n 75\n1\n 94\n63\n  0\nMLINESTYLE\n  5\n22\n102\n{ACAD_REACTORS\n330\n10\n102\n}\n330\n10\n100\nAcDbMlineStyle\n  2\nStandard\n 70\n0\n  3\n\n 62\n256\n 51\n90.0\n 52\n90.0\n 71\n2\n 49\n0.5\n 62\n256\n  6\nBYLAYER\n 49\n-0.5\n 62\n256\n  6\nBYLAYER\n  0\nMLEADERSTYLE\n  5\n2C\n102\n{ACAD_REACTORS\n330\nF\n102\n}\n330\nF\n100\nAcDbMLeaderStyle\n179\n2\n170\n2\n171\n1\n172\n0\n 90\n2\n 40\n0.0\n 41\n0.0\n173\n1\n 91\n-1056964608\n 92\n-2\n290\n1\n 42\n2.0\n291\n1\n 43\n8.0\n  3\nStandard\n 44\n4.0\n300\n\n342\n29\n174\n1\n175\n1\n176\n0\n178\n1\n 93\n-1056964608\n 45\n4.0\n292\n0\n297\n0\n 46\n4.0\n 94\n-1056964608\n 47\n1.0\n 49\n1.0\n140\n1.0\n294\n1\n141\n0.0\n177\n0\n142\n1.0\n295\n0\n296\n0\n143\n3.75\n271\n0\n272\n9\n273\n9\n  0\nDICTIONARY\n  5\n2D\n330\nA\n100\nAcDbDictionary\n280\n1\n281\n1\n  3\nCREATED_BY_EZDXF\n350\n2E\n  3\nWRITTEN_BY_EZDXF\n350\n33\n  0\nDICTIONARYVAR\n  5\n2E\n330\n2D\n100\nDictionaryVariables\n280\n0\n  1\n1.4.4 @ 2026-10-06T19:18:22.128736+00:00\n  0\nDICTIONARYVAR\n  5\n33\n330\n2D\n100\nDictionaryVariables\n280\n0\n  1\n1.4.4 @ 2026-10-06T19:18:22.129612+00:00\n  0\nENDSEC\n  0\nEOF\n";
 
+function solidMergeFaces(vp, np, tv, tol) {
+  const nT = tv.length / 3, nV = vp.length / np, P = i => [ vp[i * np], vp[i * np + 1], vp[i * np + 2] ];
+  const owner = new Map;
+  for (let t = 0; t < nT; t++) for (let k = 0; k < 3; k++) owner.set(tv[3 * t + k] * nV + tv[3 * t + (k + 1) % 3], t);
+  const area = new Float64Array(nT);
+  for (let t = 0; t < nT; t++) {
+    const A = P(tv[3 * t]), B = P(tv[3 * t + 1]), C = P(tv[3 * t + 2]);
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    area[t] = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  }
+  const order = Array.from({
+    length: nT
+  }, (_, i) => i).sort((p, q) => area[q] - area[p]);
+  const seen = new Uint8Array(nT), faces = [];
+  for (const sd of order) {
+    if (seen[sd]) continue;
+    seen[sd] = 1;
+    const a = tv[3 * sd], b = tv[3 * sd + 1], c = tv[3 * sd + 2], A = P(a), B = P(b), C = P(c);
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-9) {
+      faces.push([ a, b, c ]);
+      continue;
+    }
+    nx /= nl;
+    ny /= nl;
+    nz /= nl;
+    const d0 = nx * A[0] + ny * A[1] + nz * A[2];
+    const next = new Map([ [ a, b ], [ b, c ], [ c, a ] ]), inP = new Set([ a, b, c ]), stack = [ [ a, b ], [ b, c ], [ c, a ] ], grp = [ sd ];
+    while (stack.length) {
+      const [u, v] = stack.pop();
+      if (next.get(u) !== v) continue;
+      const t = owner.get(v * nV + u);
+      if (t === undefined || seen[t]) continue;
+      const i0 = tv[3 * t], i1 = tv[3 * t + 1], i2 = tv[3 * t + 2], x = i0 !== u && i0 !== v ? i0 : i1 !== u && i1 !== v ? i1 : i2;
+      if (inP.has(x)) continue;
+      const X = P(x);
+      if (Math.abs(nx * X[0] + ny * X[1] + nz * X[2] - d0) > tol) continue;
+      seen[t] = 1;
+      grp.push(t);
+      inP.add(x);
+      next.set(u, x);
+      next.set(x, v);
+      stack.push([ u, x ], [ x, v ]);
+    }
+    const poly = [ a ];
+    let cur = next.get(a);
+    while (cur !== a && poly.length <= inP.size) {
+      poly.push(cur);
+      cur = next.get(cur);
+    }
+    let ok = cur === a && poly.length === inP.size;
+    if (ok && poly.length > 3) {
+      let dev = 0;
+      for (const q of poly) {
+        const X = P(q);
+        dev = Math.max(dev, Math.abs(nx * X[0] + ny * X[1] + nz * X[2] - d0));
+      }
+      ok = dev <= tol;
+    }
+    if (ok) faces.push(poly); else for (const t of grp) faces.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
+  }
+  return faces;
+}
+
 function solidCutBox(solid) {
   const bb = solid.boundingBox(), lo = bb.min.map(v => v - 10), hi = bb.max.map(v => v + 10);
   for (const pl of [ sectionPlane, xClipPlane, yClipPlane ]) {
@@ -4557,7 +4624,7 @@ function exportSolidDxf() {
     toast("Nothing left to export: the cutaway removes the whole negative space");
     return;
   }
-  const mn = [ Infinity, Infinity, Infinity ], mx = [ -Infinity, -Infinity, -Infinity ], f3 = v => (Math.round(v * 1e3) / 1e3).toFixed(3);
+  const mn = [ Infinity, Infinity, Infinity ], mx = [ -Infinity, -Infinity, -Infinity ], f3 = v => (Math.round(v * 1e4) / 1e4).toFixed(4);
   const parts = [];
   let buf = [];
   const flush = () => {
@@ -4576,9 +4643,17 @@ function exportSolidDxf() {
     buf.push(" 10\n" + f3(x) + "\n 20\n" + f3(y) + "\n 30\n" + f3(z));
     if (buf.length > 2e4) flush();
   }
-  buf.push(" 93\n" + nT * 4);
-  for (let t = 0; t < nT; t++) {
-    buf.push(" 90\n3\n 90\n" + tv[3 * t] + "\n 90\n" + tv[3 * t + 1] + "\n 90\n" + tv[3 * t + 2]);
+  const merge = document.getElementById("solidMergeFaces").checked;
+  let faces;
+  if (merge) faces = solidMergeFaces(vp, np, tv, 3e-4); else {
+    faces = [];
+    for (let t = 0; t < nT; t++) faces.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
+  }
+  let nInts = 0;
+  for (const f of faces) nInts += f.length + 1;
+  buf.push(" 93\n" + nInts);
+  for (const f of faces) {
+    buf.push(" 90\n" + f.length + "\n 90\n" + f.join("\n 90\n"));
     if (buf.length > 2e4) flush();
   }
   buf.push(" 94\n0\n 95\n0\n 90\n0");
@@ -4596,7 +4671,7 @@ function exportSolidDxf() {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 8e3);
-  toast(`Saved solid DXF: one closed mesh, ${nV.toLocaleString()} vertices, ${nT.toLocaleString()} triangles, ${Math.round(vol).toLocaleString()} m3` + (box && !box.unsupported ? ", cutaway applied" : ", no cutaway") + note + ". In AutoCAD: CONVTOSOLID");
+  toast(`Saved solid DXF: one closed mesh, ${nV.toLocaleString()} vertices, ${faces.length.toLocaleString()} faces` + (merge ? ` (merged from ${nT.toLocaleString()} triangles)` : "") + `, ${Math.round(vol).toLocaleString()} m3` + (box && !box.unsupported ? ", cutaway applied" : ", no cutaway") + note + ". In AutoCAD: CONVTOSOLID");
 }
 
 document.getElementById("exportSolidDxfBtn").addEventListener("click", () => {
