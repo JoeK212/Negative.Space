@@ -2,8 +2,6 @@
 
 Carves the negative space between real building volumes out of a bounding block, from Overture Maps geometry.
 
-Live at `axisbim.io`. Joe.K · axisbim.io
-
 ## What it does
 
 Takes a bounding "mold" volume the size of a chosen NYC neighborhood — its footprint × its tallest building's height — and subtracts every real building solid from it via CSG. What's left is the void: the shape of the air around and above the buildings, capped by the mold's own outer boundary.
@@ -36,3 +34,7 @@ The code in this repository is released under the MIT licence (see `LICENSE`). T
 - **Terrain (loaded live, not stored here):** Terrain Tiles (Terrarium) hosted on AWS, built from public elevation sources including NASA SRTM and USGS 3DEP.
 
 Check each source's own terms before reusing the data.
+
+---
+Joe.K · [axisbim.io](https://axisbim.io)
+
