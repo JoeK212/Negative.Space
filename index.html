@@ -796,7 +796,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.168";
+const APP_VERSION = "3.4.169";
 
 let manifoldWasm = null;
 
@@ -4646,6 +4646,45 @@ function solidCutBox(solid) {
   } : null;
 }
 
+function solidSeparatePinches(vp, np, tv, dist) {
+  const nV = vp.length / np, key = i => Math.round(vp[i * np] * 1e3) + "," + Math.round(vp[i * np + 1] * 1e3) + "," + Math.round(vp[i * np + 2] * 1e3);
+  const g = new Map;
+  for (let i = 0; i < nV; i++) {
+    const k = key(i);
+    const a = g.get(k);
+    if (a) a.push(i); else g.set(k, [ i ]);
+  }
+  const dup = new Uint8Array(nV);
+  let n = 0;
+  for (const a of g.values()) if (a.length > 1) {
+    for (const i of a) {
+      dup[i] = 1;
+      n++;
+    }
+  }
+  if (!n) return 0;
+  const sx = new Float64Array(nV), sy = new Float64Array(nV), sz = new Float64Array(nV), c = new Uint32Array(nV);
+  for (let t = 0; t < tv.length; t += 3) for (let k = 0; k < 3; k++) {
+    const v = tv[t + k];
+    if (!dup[v]) continue;
+    for (const o of [ tv[t + (k + 1) % 3], tv[t + (k + 2) % 3] ]) {
+      sx[v] += vp[o * np];
+      sy[v] += vp[o * np + 1];
+      sz[v] += vp[o * np + 2];
+      c[v]++;
+    }
+  }
+  for (let i = 0; i < nV; i++) {
+    if (!dup[i] || !c[i]) continue;
+    const dx = sx[i] / c[i] - vp[i * np], dy = sy[i] / c[i] - vp[i * np + 1], dz = sz[i] / c[i] - vp[i * np + 2], L = Math.hypot(dx, dy, dz);
+    if (L < 1e-9) continue;
+    vp[i * np] += dx / L * dist;
+    vp[i * np + 1] += dy / L * dist;
+    vp[i * np + 2] += dz / L * dist;
+  }
+  return n;
+}
+
 function exportSolidDxf() {
   if (!negSolidManifold) {
     toast("Compute negative space first");
@@ -4667,7 +4706,7 @@ function exportSolidDxf() {
     solid = made;
   }
   try {
-    const er = window.__ERODE != null ? window.__ERODE : .05;
+    const er = window.__ERODE != null ? window.__ERODE : 0;
     if (er > 0) {
       const k = Manifold.cube([ er * 2, er * 2, er * 2 ], true);
       const e2 = solid.minkowskiDifference(k);
@@ -4687,6 +4726,7 @@ function exportSolidDxf() {
     console.warn("solid simplify unavailable", e);
   }
   const mesh = solid.getMesh(), np = mesh.numProp, vp = mesh.vertProperties, tv = mesh.triVerts, nV = vp.length / np, nT = tv.length / 3;
+  const pinched = solidSeparatePinches(vp, np, tv, .01);
   if (!nT) {
     if (made) made.delete();
     toast("Nothing left to export: the cutaway removes the whole negative space");
