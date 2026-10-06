@@ -20,12 +20,10 @@ python3 -m http.server 8888
 
 then open `http://localhost:8888`.
 
-
 ## More
 
 - In-app help: the **?** button, top right.
-- Feature walkthrough and data-pipeline notes: [EXTENDED.md](EXTENDED.md)
-- Full version history: [CHANGELOG.md](CHANGELOG.md)
+- Version history: [CHANGELOG.md](CHANGELOG.md)
 
 ## Data and licence
 
