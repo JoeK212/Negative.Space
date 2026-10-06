@@ -645,6 +645,8 @@
         <dd>Five short tasks in the side panel (below Display). Each one ticks by itself when you have done it, and Check my work tells you what is still missing.</dd>
       </dl>
 
+      <h3>Data and credits</h3>
+      <p style="color:var(--ink-soft); font-size:13px;">Buildings: Overture Maps Foundation (building and building-part footprints and heights). Streets and the Manhattan outline: NYC Open Data. Terrain: Terrain Tiles (Terrarium) hosted on AWS, built from public elevation sources including NASA SRTM and USGS 3DEP. Check each source's own terms before reusing the data.</p>
       <p style="margin-top:16px; color:var(--ink-soft); font-size:13px;">Full write-up: <a href="README.md">README.md</a> · deeper technical notes: <a href="EXTENDED.md">EXTENDED.md</a></p>
     </div>
   </div>
@@ -1033,7 +1035,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.161'; // keep in sync with CHANGELOG.md and the footer tag below
+const APP_VERSION = '3.4.162'; // keep in sync with CHANGELOG.md and the footer tag below
 
 // v3.0.0: swapped the CSG engine from three-bvh-csg to Manifold
 // (manifold-3d, a WASM library whose entire design goal is *guaranteed*

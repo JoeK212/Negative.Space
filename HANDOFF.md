@@ -1,4 +1,9 @@
-# Negative Space -- handoff for a new chat (v3.4.161, 2026-10-05)
+# Negative Space -- handoff for a new chat (v3.4.162, 2026-10-06)
+
+## v3.4.162 -- READ FIRST
+- Help window now has a "Data and credits" section (Overture Maps, NYC Open Data, Terrain Tiles on AWS). Wording not checked against each licence: Joe to confirm before public launch. Test-only: Exercises waits in autotest/run.mjs raised 900 -> 2500 ms (random timing failures).
+- Tests on 3.4.162: audit 422/422, main 107/107, soak 2 x 100 cycles 0 violations (Midtown; the Manhattan-context toggle in run 2 used a guessed selector, so context ON is not confirmed). Earlier on 3.4.161: caps 48/48, smoke 324/0, terrain 71/71, tour 67/67. Not tested: Safari/Firefox (sandbox cannot download them).
+- Next for Joe: push to GitHub, deploy to Netlify, open it in Safari and Firefox.
 
 ## v3.4.161 -- READ FIRST
 - Joe (CAD + app screenshots, Midtown, Y=0, H=0): two floating slivers at the far corner (one a thin full-height line). Cause: buildings overhang the X/Y slider ends by about 2 m, so at the end that removes everything they stayed. Fix: edgePushedThreshold() puts the real clip plane 3 m past the slider end there (screen, stencil poche, cut lines, DXF and building caps all follow). Likely the old "two tiny specks" issue. See CHANGELOG.md v3.4.161. Needs Joe's look: Y=0 and X=0 (and flipped ends) in the app and in the DXF.

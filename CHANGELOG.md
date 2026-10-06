@@ -1,3 +1,8 @@
+v3.4.162 - 2026-10-06 - Data credits in the Help window; test timing fix.
+
+Before the public deploy: a "Data and credits" section at the bottom of the Help window names Overture Maps (buildings), NYC Open Data (streets, Manhattan outline) and the Terrain Tiles on AWS (terrain; NASA SRTM, USGS 3DEP among the sources). Wording is mine, not checked against each source's licence text: confirm before launch.
+Tests: the Exercises checks in autotest/run.mjs waited a fixed 900 ms after each action and failed at random (a different exercise each run) when the sandbox was slow; the waits are now 2500 ms. App behaviour is unchanged from 3.4.161.
+
 v3.4.161 - 2026-10-05 - No more slivers of buildings at the far end of the X / Y cut.
 
 Joe (CAD and app screenshots, Midtown, Y = 0, Height = 0, X about 1293 m): two small dark / brown-orange pieces floating at the far corner, one a thin full-height line. Cause, found by probing the live page: the X and Y sliders run from the data minimum to maximum, but a few buildings along the Y edge overhang it by about 2 m (a 472 m tower among them). At Y = 0 the cut should remove everything, but the plane sat exactly at the slider end, so those overhanging slices stayed in the kept strip, with their poche caps. This is most likely the long-open "two tiny specks near the far corner".
