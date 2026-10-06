@@ -3,6 +3,7 @@
 Version history in brief. Dates are 2026.
 
 ## 3.4.x (Aug 25 - Oct 6)
+- **3.4.163** Help wording polish.
 - **3.4.162** Data credits in the Help window.
 - **3.4.161** Fixed slivers of buildings left at the far end of the X / Y cutaway.
 - **3.4.159 - 3.4.160** Terrain: four distinct layer colours; the ground is exported as a few polyface meshes that CAD reads as one shaded surface.

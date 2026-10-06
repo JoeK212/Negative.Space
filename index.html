@@ -474,7 +474,7 @@
         <dt>Export image (PNG)</dt>
         <dd>Saves the current view at 1x, 2x or 4x, optionally on a white background.</dd>
         <dt>Export DXF (CAD)</dt>
-        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text as TOPO_LABELS, and the Perspective export adds the ground surface as TERRAIN and the same contour layers. Perspective: the ground surface is exported as TERRAIN (a few polyface meshes, edges hidden so it reads as a smooth surface; AutoCAD can convert them to a surface), its contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The footprints, street lines and section box then follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
+        <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The Perspective export adds the ground surface as TERRAIN (a few polyface meshes with hidden edges, so it reads as a smooth surface; AutoCAD can convert them to a surface) plus the same contour layers, and the footprints, street lines and section box follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -578,7 +578,7 @@
         </div>
         <div class="row" style="align-items:center; margin-top:6px;">
           <button class="btn secondary" id="viewTerrain">Terrain</button>
-          <span class="info-badge" tabindex="0">?<span class="tip">Terrain follows the real ground: buildings stand on it, the negative space is carved above it, and streets drape over it. Elevation data is fetched live (public ~7 m tiles) the first time you switch it on. Turning it on or off rebuilds the site (and recomputes if you had computed). Elevations/sections with terrain on are still being finished.</span></span>
+          <span class="info-badge" tabindex="0">?<span class="tip">Terrain follows the real ground: buildings stand on it, the negative space is carved above it, and streets drape over it. Elevation data is fetched live (public ~7 m tiles) the first time you switch it on. Turning it on or off rebuilds the site (and recomputes if you had computed).</span></span>
         </div>
         
         <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:8px;" title="Sharper image, lower frame rate. Bumps rendering resolution to reduce fine-geometry mottling on distant cavity walls -- best for screenshots; off by default">
@@ -780,7 +780,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 import ManifoldModule from 'manifold-3d';
 
-const APP_VERSION = '3.4.162';
+const APP_VERSION = '3.4.163';
 
 let manifoldWasm = null;
 
