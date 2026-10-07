@@ -486,7 +486,7 @@
         <dt>Export DXF (CAD)</dt>
         <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The Perspective export adds the ground surface as TERRAIN (a few polyface meshes with hidden edges, so it reads as a smooth surface; AutoCAD can convert them to a surface) plus the same contour layers, and the footprints, street lines and section box follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Export solid (DXF mesh)</dt>
-        <dd>The negative space as closed 3D meshes (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. It is the computed negative space only (no buildings, no terrain surface, no linework). AutoCAD only turns small closed meshes into solids reliably, so the volume is cut into square tiles (200 m by default, set in <b>Tile size</b>; 0 = one piece), each its own closed mesh on its own layer (<b>NEG_SOLID_Tnn_nn</b>), and neighbouring tiles touch exactly along their cut faces. To make them one 3D solid in AutoCAD: type <b>SMOOTHMESHCONVERT</b> and set it to <b>3</b> (faceted, not optimized), select everything and run <b>CONVTOSOLID</b>, then select everything again and run <b>UNION</b>. The cut seams stay visible as lines on the faces; <b>SOLIDEDIT</b> &gt; Body &gt; Clean can remove them. Tested in AutoCAD Architecture 2027: Midtown (Community District 5, 167 tiles) and Chelsea / Clinton / Hudson Yards (District 4, 196 tiles) converted completely. If a tile will not convert, run <b>CONVTOSURFACE</b> and then <b>SURFSCULPT</b> on that tile alone (SURFSCULPT on the whole batch fails). To keep the meshes watertight, the export grows every building by 60 cm (gaps narrower than 1.2 m between buildings close up, and buildings that touch at a corner overlap), so the volume is about 0.2% smaller than on screen. Each tile is built on its own in local coordinates (more precise than cutting tiles from one huge model), the buildings reach 2 m below the floor, tiny edges and slivers are tidied, and every mesh is checked for triangles that cut through each other (a tile that fails gets gentler tidying) so AutoCAD accepts it. Flat triangles are merged into bigger faces (the checkbox, on by default): District 2 converted all 134 tiles and joined with UNION, with far fewer lines (52,000 faces instead of 190,000). A tile whose merged outline would touch itself is written as plain triangles. Untick it for plain triangles. A mesh face cannot have a hole, so the floor around buildings shows long thin triangles.</dd>
+        <dd>The negative space as closed 3D meshes (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. It is the computed negative space only (no buildings, no terrain surface, no linework). AutoCAD only turns small closed meshes into solids reliably, so the volume is cut into square tiles (200 m by default, set in <b>Tile size</b>; 0 = one piece), each its own closed mesh on its own layer (<b>NEG_SOLID_Tnn_nn</b>), and neighbouring tiles touch exactly along their cut faces. To make them one 3D solid in AutoCAD: type <b>SMOOTHMESHCONVERT</b> and set it to <b>3</b> (faceted, not optimized), select everything and run <b>CONVTOSOLID</b>, then select everything again and run <b>UNION</b>. The cut seams stay visible as lines on the faces; <b>SOLIDEDIT</b> &gt; Body &gt; Clean can remove them. Tested in AutoCAD Architecture 2027: Midtown (Community District 5, 167 tiles) and Chelsea / Clinton / Hudson Yards (District 4, 196 tiles) converted completely. If a tile will not convert, run <b>CONVTOSURFACE</b> and then <b>SURFSCULPT</b> on that tile alone (SURFSCULPT on the whole batch fails). To keep the meshes watertight, the export grows every building by 60 cm (gaps narrower than 1.2 m between buildings close up, and buildings that touch at a corner overlap), so the volume is about 0.2% smaller than on screen. Each tile is built on its own in local coordinates (more precise than cutting tiles from one huge model), the buildings reach 2 m below the floor, tiny edges and slivers are tidied, and every mesh is checked for triangles that cut through each other (a tile that fails gets gentler tidying) so AutoCAD accepts it. Flat triangles are merged into bigger faces (the checkbox, off by default). Tick it for far fewer lines (District 2: 52,000 faces instead of 190,000, converted and joined), but in Midtown 4 merged tiles did not convert, so plain triangles are the safe default. Each tile is checked for zero-thickness sheets (two faces back to back) and rebuilt with a 1 cm change to the building offset when it has one. A mesh face cannot have a hole, so the floor around buildings shows long thin triangles.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -716,7 +716,7 @@
           <button class="btn secondary" id="exportSolidDxfBtn" style="margin-top:0;">Export solid (DXF mesh)</button>
           <span class="info-badge" tabindex="0">?<span class="tip">The negative space as closed 3D meshes (DXF 2010), cut into tiles (200 m by default), with your X / Y / Height cutaway already subtracted. In AutoCAD set SMOOTHMESHCONVERT to 3, select everything and run CONVTOSOLID, then UNION, to get one 3D solid. Buildings are grown 60 cm for the export so the meshes stay watertight (volume about 0.2% smaller).</span></span>
         </div>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces" checked> Merge flat triangles into bigger faces (fewer lines)</label>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces"> Merge flat triangles into bigger faces (fewer lines)</label>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;">Tile size (m, 0 = one piece) <input type="number" id="solidTileSize" value="200" min="0" step="50" style="width:70px;"></label>
         
         <button class="btn secondary" id="copyLinkBtn" style="margin-top:2px;" title="Copies a link to this exact district, cutaway position, and layer(s) shown. Camera view/orientation and any drawn box aren't included yet.">Copy link</button>
@@ -797,7 +797,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.173";
+const APP_VERSION = "3.4.174";
 
 let manifoldWasm = null;
 
@@ -4660,6 +4660,40 @@ function solidInflatedNegative(grow, asList) {
   if (!negMoldManifold || !buildingFootprints.length) return null;
   const ms = [];
   const q = window.__SNAP != null ? window.__SNAP : 0, sn = q > 0 ? x => Math.round(x / q) * q : x => x;
+  const stackDn = window.__STACK != null ? window.__STACK : .01, sinkSet = new Set, CELL = 64, grid = new Map, bbs = new Map;
+  if (stackDn > 0) {
+    for (const fp of buildingFootprints) {
+      if (!fp.poly || !fp.poly.length) continue;
+      let x0 = 1e18, y0 = 1e18, x1 = -1e18, y1 = -1e18;
+      for (const p of fp.poly) {
+        if (p[0] < x0) x0 = p[0];
+        if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1];
+        if (p[1] > y1) y1 = p[1];
+      }
+      bbs.set(fp, [ x0, y0, x1, y1 ]);
+      for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++) for (let cy = Math.floor(y0 / CELL); cy <= Math.floor(y1 / CELL); cy++) {
+        const k = cx + "," + cy;
+        const a = grid.get(k);
+        if (a) a.push(fp); else grid.set(k, [ fp ]);
+      }
+    }
+    for (const [fp, b] of bbs) {
+      if (!(fp.minH > .001)) continue;
+      let hit = false;
+      for (let cx = Math.floor(b[0] / CELL); cx <= Math.floor(b[2] / CELL) && !hit; cx++) for (let cy = Math.floor(b[1] / CELL); cy <= Math.floor(b[3] / CELL) && !hit; cy++) {
+        for (const o of grid.get(cx + "," + cy) || []) {
+          if (o === fp) continue;
+          const c = bbs.get(o);
+          if (Math.abs(o.maxH - fp.minH) <= .02 && c[0] < b[2] && c[2] > b[0] && c[1] < b[3] && c[3] > b[1]) {
+            hit = true;
+            break;
+          }
+        }
+      }
+      if (hit) sinkSet.add(fp);
+    }
+  }
   for (const fp of buildingFootprints) {
     if (!fp.poly) continue;
     try {
@@ -4673,7 +4707,7 @@ function solidInflatedNegative(grow, asList) {
       let h0 = sn(fp.minH);
       const h1 = sn(fp.maxH);
       const dn = window.__DOWN != null ? window.__DOWN : 2;
-      if (h0 <= .001 && dn > 0) h0 = -dn;
+      if (h0 <= .001 && dn > 0) h0 = -dn; else if (sinkSet.has(fp)) h0 -= stackDn;
       const cs = new CrossSection([ pl ]), cg = cs.offset(grow, "Miter", 2);
       let m = Manifold.extrude(cg, Math.max(h1 - h0, q > 0 ? q : .1));
       if (h0 !== 0) m = m.translate(0, 0, h0);
@@ -4704,6 +4738,108 @@ function solidInflatedNegative(grow, asList) {
     return null;
   }
   return r;
+}
+
+function solidFinCount(m) {
+  const mesh = m.getMesh();
+  return solidFinCountRaw(mesh.vertProperties, mesh.numProp, mesh.triVerts);
+}
+
+function solidFinCountRaw(vp, np, tv) {
+  const nT = tv.length / 3, groups = new Map;
+  for (let t = 0; t < nT; t++) {
+    const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+    const ux = vp[b * np] - vp[a * np], uy = vp[b * np + 1] - vp[a * np + 1], uz = vp[b * np + 2] - vp[a * np + 2], vx = vp[c * np] - vp[a * np], vy = vp[c * np + 1] - vp[a * np + 1], vz = vp[c * np + 2] - vp[a * np + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const L = Math.hypot(nx, ny, nz);
+    if (L < 1e-9) continue;
+    nx /= L;
+    ny /= L;
+    nz /= L;
+    let sg = 1;
+    if (nx < -1e-6 || Math.abs(nx) <= 1e-6 && (ny < -1e-6 || Math.abs(ny) <= 1e-6 && nz < 0)) {
+      sg = -1;
+      nx = -nx;
+      ny = -ny;
+      nz = -nz;
+    }
+    const d = nx * vp[a * np] + ny * vp[a * np + 1] + nz * vp[a * np + 2], key = Math.round(nx * 1e4) + "," + Math.round(ny * 1e4) + "," + Math.round(nz * 1e4) + "," + Math.round(d * 1e3);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        n: [ nx, ny, nz ],
+        pos: [],
+        neg: []
+      };
+      groups.set(key, g);
+    }
+    (sg > 0 ? g.pos : g.neg).push(t);
+  }
+  let count = 0;
+  const poly = (t, e1, e2, o) => [ 0, 1, 2 ].map(k => {
+    const v = tv[3 * t + k];
+    const x = vp[v * np] - o[0], y = vp[v * np + 1] - o[1], z = vp[v * np + 2] - o[2];
+    return [ x * e1[0] + y * e1[1] + z * e1[2], x * e2[0] + y * e2[1] + z * e2[2] ];
+  });
+  const area = P => {
+    let s = 0;
+    for (let i = 0; i < P.length; i++) {
+      const q = P[(i + 1) % P.length];
+      s += P[i][0] * q[1] - q[0] * P[i][1];
+    }
+    return s / 2;
+  };
+  const clip = (subj, cl) => {
+    if (area(cl) < 0) cl = cl.slice().reverse();
+    let out = subj;
+    for (let i = 0; i < cl.length && out.length; i++) {
+      const A = cl[i], B = cl[(i + 1) % cl.length], inp = out;
+      out = [];
+      const side = P => (B[0] - A[0]) * (P[1] - A[1]) - (B[1] - A[1]) * (P[0] - A[0]);
+      const ix = (S, E) => {
+        const sS = side(S), sE = side(E), t = sS / (sS - sE);
+        return [ S[0] + t * (E[0] - S[0]), S[1] + t * (E[1] - S[1]) ];
+      };
+      let S = inp[inp.length - 1];
+      for (const E of inp) {
+        if (side(E) >= 0) {
+          if (side(S) < 0) out.push(ix(S, E));
+          out.push(E);
+        } else if (side(S) >= 0) out.push(ix(S, E));
+        S = E;
+      }
+    }
+    return out;
+  };
+  for (const g of groups.values()) {
+    if (!g.pos.length || !g.neg.length) continue;
+    const n = g.n, h = Math.abs(n[0]) < .9 ? [ 1, 0, 0 ] : [ 0, 1, 0 ];
+    let e1 = [ n[1] * h[2] - n[2] * h[1], n[2] * h[0] - n[0] * h[2], n[0] * h[1] - n[1] * h[0] ];
+    const l1 = Math.hypot(...e1);
+    e1 = e1.map(x => x / l1);
+    const e2 = [ n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0] ];
+    const o = [ vp[tv[3 * g.pos[0]] * np], vp[tv[3 * g.pos[0]] * np + 1], vp[tv[3 * g.pos[0]] * np + 2] ];
+    const bb = P => [ Math.min(P[0][0], P[1][0], P[2][0]), Math.min(P[0][1], P[1][1], P[2][1]), Math.max(P[0][0], P[1][0], P[2][0]), Math.max(P[0][1], P[1][1], P[2][1]) ];
+    const A = g.pos.map(t => {
+      const P = poly(t, e1, e2, o);
+      return {
+        P: P,
+        b: bb(P)
+      };
+    }), B = g.neg.map(t => {
+      const P = poly(t, e1, e2, o);
+      return {
+        P: P,
+        b: bb(P)
+      };
+    });
+    for (const a of A) for (const b of B) {
+      if (a.b[0] >= b.b[2] || a.b[2] <= b.b[0] || a.b[1] >= b.b[3] || a.b[3] <= b.b[1]) continue;
+      const r = clip(b.P, a.P);
+      if (r.length >= 3 && Math.abs(area(r)) > 1e-7) count++;
+    }
+  }
+  return count;
 }
 
 function solidSeparatePinches(vp, np, tv, dist) {
@@ -4996,11 +5132,20 @@ function solidMeshEntity(solid, layer, handle, doMerge, off) {
     };
   };
   let r = prep(true, true);
-  if (solidHasCrossings(r.vp, r.tv)) {
-    const r2 = prep(false, true);
-    if (!solidHasCrossings(r2.vp, r2.tv)) r = r2; else {
-      const r3 = prep(false, false);
-      if (!solidHasCrossings(r3.vp, r3.tv)) r = r3;
+  const score = q => (solidHasCrossings(q.vp, q.tv) ? 1e3 : 0) + solidFinCountRaw(q.vp, 3, q.tv);
+  let rs = score(r);
+  if (rs > 0) {
+    const r2 = prep(false, true), s2 = score(r2);
+    if (s2 < rs) {
+      r = r2;
+      rs = s2;
+    }
+    if (rs > 0) {
+      const r3 = prep(false, false), s3 = score(r3);
+      if (s3 < rs) {
+        r = r3;
+        rs = s3;
+      }
     }
   }
   let {vp: vp, np: np, tv: tv} = r;
@@ -5124,6 +5269,7 @@ function exportSolidDxf() {
     const mold = negMoldManifold, mb = mold.boundingBox(), tile = tile0, ents = [];
     let handle = 4096, vol = 0;
     const nx = Math.ceil((mb.max[0] - mb.min[0]) / tile), ny = Math.ceil((mb.max[1] - mb.min[1]) / tile), doMerge = document.getElementById("solidMergeFaces").checked;
+    const alt = new Map, GROW_TRY = [ .01, -.01, .02, -.02, .03 ];
     const H = mb.max[2] - mb.min[2] + 20, down = window.__DOWN != null ? window.__DOWN : 2;
     for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) {
       const x0 = mb.min[0] + ix * tile, y0 = mb.min[1] + iy * tile, tb = Manifold.cube([ tile, tile, H ]).translate(0, 0, mb.min[2] - 10);
@@ -5133,27 +5279,44 @@ function exportSolidDxf() {
         moldT.delete();
         continue;
       }
-      const near = prisms.filter(p => p.hi[0] > x0 - 1 && p.lo[0] < x0 + tile + 1 && p.hi[1] > y0 - 1 && p.lo[1] < y0 + tile + 1).map(p => p.m.translate(-x0, -y0, 0));
-      let piece = moldT;
-      if (near.length) {
-        const u = Manifold.union(near);
-        piece = Manifold.difference(moldT, u);
-        u.delete();
-        moldT.delete();
+      const buildTile = pl => {
+        const near = pl.filter(p => p.hi[0] > x0 - 1 && p.lo[0] < x0 + tile + 1 && p.hi[1] > y0 - 1 && p.lo[1] < y0 + tile + 1).map(p => p.m.translate(-x0, -y0, 0));
+        let piece = moldT.translate(0, 0, 0);
+        if (near.length) {
+          const u = Manifold.union(near);
+          const d = Manifold.difference(moldT, u);
+          u.delete();
+          piece.delete();
+          piece = d;
+        }
+        near.forEach(m => m.delete());
+        if (box && !box.unsupported) {
+          const cb = Manifold.cube([ box.hi[0] - box.lo[0], box.hi[1] - box.lo[1], box.hi[2] - box.lo[2] ]).translate(box.lo[0] - x0, box.lo[1] - y0, box.lo[2]);
+          const r = Manifold.difference(piece, cb);
+          cb.delete();
+          piece.delete();
+          piece = r;
+        }
+        let q = piece;
+        try {
+          q = piece.simplify(window.__SIMP != null ? window.__SIMP : .001);
+          piece.delete();
+        } catch (e) {}
+        return q;
+      };
+      let sp = buildTile(prisms), fins = sp.status() === "NoError" && sp.volume() > 1 ? solidFinCount(sp) : 0;
+      for (let vi = 0; fins > 0 && vi < GROW_TRY.length; vi++) {
+        const g = +(growV + GROW_TRY[vi]).toFixed(3);
+        if (!alt.has(g)) alt.set(g, solidInflatedNegative(g, true) || []);
+        const cand = buildTile(alt.get(g));
+        const cf = cand.status() === "NoError" && cand.volume() > 1 ? solidFinCount(cand) : 1e9;
+        if (cf < fins) {
+          sp.delete();
+          sp = cand;
+          fins = cf;
+        } else cand.delete();
       }
-      near.forEach(m => m.delete());
-      if (box && !box.unsupported) {
-        const cb = Manifold.cube([ box.hi[0] - box.lo[0], box.hi[1] - box.lo[1], box.hi[2] - box.lo[2] ]).translate(box.lo[0] - x0, box.lo[1] - y0, box.lo[2]);
-        const r = Manifold.difference(piece, cb);
-        cb.delete();
-        piece.delete();
-        piece = r;
-      }
-      let sp = piece;
-      try {
-        sp = piece.simplify(window.__SIMP != null ? window.__SIMP : .001);
-        piece.delete();
-      } catch (e) {}
+      moldT.delete();
       if (sp.status() === "NoError" && sp.volume() > 1) {
         vol += sp.volume();
         const ly = "NEG_SOLID_T" + String(ix + 1).padStart(2, "0") + "_" + String(iy + 1).padStart(2, "0");
@@ -5179,6 +5342,7 @@ function exportSolidDxf() {
       sp.delete();
     }
     prisms.forEach(p => p.m.delete());
+    alt.forEach(l => l.forEach(p => p.m.delete()));
     if (!ents.length) {
       toast("Nothing left to export: the cutaway removes the whole negative space");
       return;
