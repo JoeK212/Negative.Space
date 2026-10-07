@@ -486,7 +486,7 @@
         <dt>Export DXF (CAD)</dt>
         <dd>Vector linework in meters at 1:1. An elevation exports the section, Plan exports footprints, streets and street names, and Perspective adds the 3D masses with real heights, with your current X / Y / Height cutaway applied; the cut faces are capped on their own layers, CUT_POCHE_NEGATIVE (red) and CUT_POCHE_BUILDINGS (brown-orange), and flat faces draw without their triangulation lines. With Terrain on, the Plan export also carries the contour lines as TOPO, every 5th contour as TOPO_INDEX and the elevation text (metres above sea level) as TOPO_LABELS. The Perspective export adds the ground surface as TERRAIN (a few polyface meshes with hidden edges, so it reads as a smooth surface; AutoCAD can convert them to a surface) plus the same contour layers, and the footprints, street lines and section box follow the ground instead of lying flat under it (without Terrain they stay flat at 0).</dd>
         <dt>Export solid (DXF mesh)</dt>
-        <dd>The negative space as closed 3D meshes (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. It is the computed negative space only (no buildings, no terrain surface, no linework). AutoCAD only turns small closed meshes into solids reliably, so the volume is cut into square tiles (200 m by default, set in <b>Tile size</b>; 0 = one piece), each its own closed mesh on its own layer (<b>NEG_SOLID_Tnn_nn</b>), and neighbouring tiles touch exactly along their cut faces. To make them one 3D solid in AutoCAD: type <b>SMOOTHMESHCONVERT</b> and set it to <b>3</b> (faceted, not optimized), select everything and run <b>CONVTOSOLID</b>, then select everything again and run <b>UNION</b>. The cut seams stay visible as lines on the faces; <b>SOLIDEDIT</b> &gt; Body &gt; Clean can remove them. Tested in AutoCAD Architecture 2027: Midtown (Community District 5, 167 tiles) and Chelsea / Clinton / Hudson Yards (District 4, 196 tiles) converted completely. If a tile will not convert, run <b>CONVTOSURFACE</b> and then <b>SURFSCULPT</b> on that tile alone (SURFSCULPT on the whole batch fails). To keep the meshes watertight, the export grows every building by 60 cm (gaps narrower than 1.2 m between buildings close up, and buildings that touch at a corner overlap), so the volume is about 0.2% smaller than on screen. Each tile is built on its own in local coordinates (more precise than cutting tiles from one huge model), the buildings reach 2 m below the floor, tiny edges and slivers are tidied, and every mesh is checked for triangles that cut through each other (a tile that fails gets gentler tidying) so AutoCAD accepts it. Merging flat triangles into bigger faces (the checkbox) gives fewer lines but has not been tested to convert in AutoCAD; leave it unticked. A mesh face cannot have a hole, so the floor around buildings shows long thin triangles.</dd>
+        <dd>The negative space as closed 3D meshes (DXF 2010) with your X / Y / Height cutaway already subtracted, so it is a volume, not loose surfaces. It is the computed negative space only (no buildings, no terrain surface, no linework). AutoCAD only turns small closed meshes into solids reliably, so the volume is cut into square tiles (200 m by default, set in <b>Tile size</b>; 0 = one piece), each its own closed mesh on its own layer (<b>NEG_SOLID_Tnn_nn</b>), and neighbouring tiles touch exactly along their cut faces. To make them one 3D solid in AutoCAD: type <b>SMOOTHMESHCONVERT</b> and set it to <b>3</b> (faceted, not optimized), select everything and run <b>CONVTOSOLID</b>, then select everything again and run <b>UNION</b>. The cut seams stay visible as lines on the faces; <b>SOLIDEDIT</b> &gt; Body &gt; Clean can remove them. Tested in AutoCAD Architecture 2027: Midtown (Community District 5, 167 tiles) and Chelsea / Clinton / Hudson Yards (District 4, 196 tiles) converted completely. If a tile will not convert, run <b>CONVTOSURFACE</b> and then <b>SURFSCULPT</b> on that tile alone (SURFSCULPT on the whole batch fails). To keep the meshes watertight, the export grows every building by 60 cm (gaps narrower than 1.2 m between buildings close up, and buildings that touch at a corner overlap), so the volume is about 0.2% smaller than on screen. Each tile is built on its own in local coordinates (more precise than cutting tiles from one huge model), the buildings reach 2 m below the floor, tiny edges and slivers are tidied, and every mesh is checked for triangles that cut through each other (a tile that fails gets gentler tidying) so AutoCAD accepts it. Flat triangles are merged into bigger faces (the checkbox, on by default): District 2 converted all 134 tiles and joined with UNION, with far fewer lines (52,000 faces instead of 190,000). A tile whose merged outline would touch itself is written as plain triangles. Untick it for plain triangles. A mesh face cannot have a hole, so the floor around buildings shows long thin triangles.</dd>
         <dt>Guided tour</dt>
         <dd>Runs automatically on your first visit. Replay it any time with the Tour button at the top right, or the button at the top of this window.</dd>
         <dt>Exercises</dt>
@@ -716,7 +716,7 @@
           <button class="btn secondary" id="exportSolidDxfBtn" style="margin-top:0;">Export solid (DXF mesh)</button>
           <span class="info-badge" tabindex="0">?<span class="tip">The negative space as closed 3D meshes (DXF 2010), cut into tiles (200 m by default), with your X / Y / Height cutaway already subtracted. In AutoCAD set SMOOTHMESHCONVERT to 3, select everything and run CONVTOSOLID, then UNION, to get one 3D solid. Buildings are grown 60 cm for the export so the meshes stay watertight (volume about 0.2% smaller).</span></span>
         </div>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces"> Merge flat triangles into bigger faces (fewer lines)</label>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces" checked> Merge flat triangles into bigger faces (fewer lines)</label>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;">Tile size (m, 0 = one piece) <input type="number" id="solidTileSize" value="200" min="0" step="50" style="width:70px;"></label>
         
         <button class="btn secondary" id="copyLinkBtn" style="margin-top:2px;" title="Copies a link to this exact district, cutaway position, and layer(s) shown. Camera view/orientation and any drawn box aren't included yet.">Copy link</button>
@@ -797,7 +797,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 import ManifoldModule from "manifold-3d";
 
-const APP_VERSION = "3.4.172";
+const APP_VERSION = "3.4.173";
 
 let manifoldWasm = null;
 
@@ -5031,8 +5031,32 @@ function solidMeshEntity(solid, layer, handle, doMerge, off) {
     faces = [];
     for (let t = 0; t < nT; t++) faces.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
   }
-  const sl = solidDropSlivers(faces, vp, np);
+  let sl = solidDropSlivers(faces, vp, np);
   faces = sl.faces;
+  if (doMerge && faces.some(f => new Set(f).size !== f.length)) {
+    const tris = [];
+    for (let t = 0; t < nT; t++) tris.push([ tv[3 * t], tv[3 * t + 1], tv[3 * t + 2] ]);
+    sl = solidDropSlivers(tris, vp, np);
+    faces = sl.faces;
+  }
+  const unspike = f => {
+    let g = f, ch = true;
+    while (ch && g.length > 3) {
+      ch = false;
+      for (let k = 0; k < g.length; k++) {
+        if (g[k] === g[(k + 2) % g.length]) {
+          const n = g.length, a = g[k], keep = [];
+          for (let q = 0; q < n; q++) if (q !== (k + 1) % n && q !== (k + 2) % n) keep.push(g[q]);
+          void a;
+          g = keep;
+          ch = true;
+          break;
+        }
+      }
+    }
+    return g;
+  };
+  faces = faces.map(f => f.length > 3 && new Set(f).size !== f.length ? unspike(f) : f);
   let nInts = 0;
   for (const f of faces) nInts += f.length + 1;
   buf.push(" 93\n" + nInts);
