@@ -25,14 +25,6 @@ Before considering any change done, run:
 ```
 node audit_deploy.js
 ```
-
-## More
-
-- In-app help: the **?** button, top right.
-- Feature walkthrough and data-pipeline notes: [EXTENDED.md](EXTENDED.md)
-- Full version history: [CHANGELOG.md](CHANGELOG.md)
-- Architecture, known gotchas, working methodology for future changes: [AUDIT.md](AUDIT.md)
-
 ## Data and licence
 
 The code in this repository is released under the MIT licence (see `LICENSE`). That licence does not cover the data in `data/`, which is derived from third-party sources that have their own terms:
