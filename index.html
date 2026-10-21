@@ -956,13 +956,18 @@
         </div>
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <button class="btn secondary" id="exportSolidDxfBtn" style="margin-top:0;">Export solid (DXF mesh)</button>
-          <button class="btn secondary" id="exportJoinLspBtn" style="margin-top:4px;" disabled title="Export the solid first. Saves the AutoCAD script that joins the tiles (APPLOAD it after CONVTOSOLID, then type NSUJOIN).">AutoCAD join script (.lsp)</button>
-          <button class="btn secondary" id="exportSeamsLspBtn" style="margin-top:4px;" disabled title="Export the solid first. Saves an AutoCAD script that tests every pair of neighbouring tiles on copies and lists the pairs that will not join. Paste its REFINE line into the Refine box and export again.">AutoCAD seam test (.lsp)</button>
           <span class="info-badge" tabindex="0">?<span class="tip">The negative space as closed 3D meshes (DXF 2010), cut into tiles (200 m by default), with your X / Y / Height cutaway already subtracted. In AutoCAD set SMOOTHMESHCONVERT to 3, select everything and run CONVTOSOLID, then UNION, to get one 3D solid. Buildings are grown 60 cm for the export so the meshes stay watertight (volume about 0.2% smaller).</span></span>
         </div>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces"> Merge flat triangles into bigger faces (fewer lines)</label>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;">Tile size (m, 0 = one piece) <input type="number" id="solidTileSize" value="200" min="0" step="50" style="width:70px;"></label>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;" title="Tiles that AutoCAD will not join. Each is exported as four half-size tiles. Paste the REFINE line from the seam test, e.g. T08_16 T09_16 T08_17 T09_17">Refine tiles (half size) <input type="text" id="solidRefineTiles" value="" placeholder="T08_16 T09_16" style="width:150px;"></label>
+        <details style="margin-top:8px; font-size:12px;"><summary style="cursor:pointer;">AutoCAD: join the tiles into one solid</summary>
+          <div style="margin-top:4px; opacity:.85;">After the solid export and CONVTOSOLID: load this script (APPLOAD) and type NSUJOIN.</div>
+          <button class="btn secondary" id="exportJoinLspBtn" style="margin-top:6px; width:100%;" disabled title="Export the solid first. Saves the AutoCAD script that joins the tiles (APPLOAD it after CONVTOSOLID, then type NSUJOIN).">AutoCAD join script (.lsp)</button>
+          <div style="margin-top:8px; opacity:.85;">Only if NSUJOIN leaves more than one piece:</div>
+          <button class="btn secondary" id="exportSeamsLspBtn" style="margin-top:6px; width:100%;" disabled title="Export the solid first. Saves an AutoCAD script that tests every pair of neighbouring tiles on copies and lists the pairs that will not join. Paste its REFINE line into the Refine box and export again.">AutoCAD seam test (.lsp)</button>
+          <div style="margin-top:4px; opacity:.85;">Run it (NSUSEAMS), paste its REFINE line here, then export the solid again.</div>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;" title="Tiles that AutoCAD will not join. Each is exported as four half-size tiles. Paste the REFINE line from the seam test, e.g. T08_16 T09_16 T08_17 T09_17">Refine tiles (half size) <input type="text" id="solidRefineTiles" value="" placeholder="e.g. T08_16 T09_16" style="width:150px;"></label>
+        </details>
         <!-- v3.4.104: Joe's UI/UX audit -- "no way to share or return to a
         specific configuration." The URL itself already updates live as
         district/cutaway/layer state changes (syncUrlFromState()); this is
