@@ -721,7 +721,7 @@
         </div>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;"><input type="checkbox" id="solidMergeFaces"> Merge flat triangles into bigger faces (fewer lines)</label>
         <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px;">Tile size (m, 0 = one piece) <input type="number" id="solidTileSize" value="200" min="0" step="50" style="width:70px;"></label>
-        <div style="margin-top:8px; font-size:12px; opacity:.85;">To make one solid in AutoCAD: open the DXF, load this script (APPLOAD) and type NSUJOIN.</div>
+        <div style="margin-top:8px; font-size:12px; opacity:.85;">After Export solid: open the DXF in AutoCAD, load the downloaded script (APPLOAD) and type NSUJOIN.</div>
         <button class="btn secondary" id="exportJoinLspBtn" style="margin-top:6px; width:100%;" disabled title="Export the solid first. Saves the AutoCAD script that turns the tiles into one solid (APPLOAD it, then type NSUJOIN).">Download AutoCAD join script (.lsp)</button>
         <input type="hidden" id="solidRefineTiles" value="">
         
